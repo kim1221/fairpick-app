@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(npm run build:*)",
+      "Bash(pkill:*)",
+      "Bash(curl:*)",
+      "Bash(npm run validate:api:*)",
+      "Bash(PGPASSWORD=7475 psql:*)",
+      "Bash(ts-node:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run job:recommend:*)",
+      "Bash(npm run job:collect:*)",
+      "Bash(psql:*)",
+      "Bash(npm run metadata:update:*)",
+      "Bash(node -e:*)",
+      "Bash(lsof:*)",
+      "Bash(npm start)",
+      "Bash(ls:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

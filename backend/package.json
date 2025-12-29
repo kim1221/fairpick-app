@@ -1,0 +1,43 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/index.ts",
+    "collect:tourapi": "ts-node src/collectors/tourApiCollector.ts",
+    "collect:culture": "ts-node src/collectors/cultureCollector.ts",
+    "collect:kopis": "ts-node src/collectors/kopisCollector.ts",
+    "dedupe:canonical": "ts-node src/jobs/dedupeCanonicalEvents.ts",
+    "enrich:images": "ts-node src/jobs/enrichImages.ts",
+    "normalize:categories": "ts-node src/jobs/normalizeCategories.ts",
+    "metadata:update": "ts-node src/jobs/updateMetadata.ts",
+    "diagnostics": "ts-node src/jobs/diagnostics.ts",
+    "pipeline:refresh": "npm run collect:kopis && npm run collect:culture && npm run collect:tourapi && npm run dedupe:canonical && npm run normalize:categories"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@types/uuid": "^10.0.0",
+    "@types/xml2js": "^0.4.14",
+    "axios": "^1.13.2",
+    "cheerio": "^1.1.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "pg": "^8.16.3",
+    "uuid": "^13.0.0",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.10.1",
+    "@types/pg": "^8.15.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

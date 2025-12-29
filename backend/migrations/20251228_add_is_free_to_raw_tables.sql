@@ -1,0 +1,2 @@
+ALTER TABLE raw_kopis_events ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT false;
+ALTER TABLE raw_culture_events ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT false;

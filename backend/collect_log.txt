@@ -1,0 +1,47 @@
+
+> backend@1.0.0 collect:tourapi
+> ts-node src/collectors/tourApiCollector.ts
+
+[dotenv@17.2.3] injecting env (7) from .env -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
+[TourAPI] 강남 미디어 윈터페스타 - cat3: A02070200
+[TourAPI] 게임 체험 팝업 전시 ‘Game-Playground’ - cat3: A02081300
+[TourAPI] 겨울, 청계천의 빛 - cat3: A02070200
+[TourAPI] 광무대 목요풍류 - cat3: A02080100
+[TourAPI] 광복로 겨울빛 트리축제 - cat3: A02070200
+[TourAPI] 광안리 M(Marvelous) 드론 라이트쇼 - cat3: A02081300
+[TourAPI] 광화문 마켓 - cat3: A02081300
+[TourAPI] 구리 빛 축제 - cat3: A02070200
+[TourAPI] 남산봉수의식 등 전통문화행사 - cat3: A02080100
+[TourAPI] 논산양촌곶감축제 - cat3: A02070200
+[TourAPI] 문화가 있는 날 실버마이크 <전라·제주 권역> - cat3: A02081000
+[TourAPI] 부산국제아동도서전 - cat3: A02070200
+[TourAPI] 사천에어쇼 - cat3: A02070200
+[TourAPI] 서울 왕궁수문장 교대의식 - cat3: A02080100
+[TourAPI] 서울빛초롱축제 - cat3: A02070200
+[TourAPI] 서울일러스트레이션페어V.20 - cat3: A02080500
+[TourAPI] 서울조각페스티벌 - cat3: A02081300
+[TourAPI] 수성빛예술제 - cat3: A02070200
+[TourAPI] 쏙쏙들이페스티벌 - cat3: A02080200
+[TourAPI] 앞산크리스마스축제 - cat3: A02070200
+[TourAPI] 양평빙송어축제 - cat3: A02070200
+[TourAPI] 오슬로우 빈티지 마켓 - cat3: A02081300
+[TourAPI] 온천천 빛 축제 - cat3: A02070200
+[TourAPI] 울산의 밤, 크리스마스 마켓 - cat3: A02081300
+[TourAPI] 종로 어디나 스테이지 - cat3: A02081000
+[TourAPI] 카운트다운 부산 - cat3: A02070200
+[TourAPI] 코믹월드 WINTER 2025 - cat3: A02081300
+[TourAPI] 크리스마스 빌리지 부산 2025 - cat3: A02081300
+[TourAPI] 페인터즈 - cat3: A02080300
+[TourAPI] 포천백운계곡 동장군축제 - cat3: A02070200
+[TourAPI] 퓨처그라운드 (FUTUREGROUND) - cat3: A02081300
+[TourAPI] 한강페스티벌 - cat3: A02070200
+[TourAPI] 함평 겨울빛축제 - cat3: A02070200
+[TourAPI] 해운대 빛축제 - cat3: A02070200
+[TourAPI] 2025 과학영재교육 페스티벌 - cat3: A02081300
+[TourAPI] 2025 로맨틱 한강 크리스마스 마켓 - cat3: A02081300
+[TourAPI] 2026 부산국제보트쇼 - cat3: A02081300
+[TourAPI] 2026 선양 맨몸마라톤 - cat3: A02081200
+[TourAPI] 2026 인터내셔널 키스포츠페스티벌 대구 - cat3: A02081200
+[TourAPI] DDP 건축투어 - cat3: A02081300
+[TourAPI] K-핸드메이드페어 2025 - cat3: A02081300
+[TourAPI] Upserted 41 events.

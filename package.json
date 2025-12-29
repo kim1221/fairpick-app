@@ -1,0 +1,40 @@
+{
+  "name": "fairpick-app",
+  "private": true,
+  "scripts": {
+    "dev": "granite dev",
+    "build": "granite build",
+    "test": "jest --passWithNoTests",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@apps-in-toss/framework": "^1.5.1",
+    "@granite-js/native": "0.1.33",
+    "@granite-js/react-native": "0.1.33",
+    "@toss/tds-react-native": "^1.3.6",
+    "axios": "^1.13.2",
+    "react": "18.2.0",
+    "react-native": "0.72.6"
+  },
+  "devDependencies": {
+    "@babel/core": "7.28.5",
+    "@babel/runtime": "7.28.4",
+    "@eslint/js": "^9.17.0",
+    "@granite-js/plugin-hermes": "0.1.33",
+    "@granite-js/plugin-router": "0.1.33",
+    "@testing-library/react-native": "^12.9.0",
+    "@types/babel__core": "^7.20.5",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.10.2",
+    "@types/react": "18.3.3",
+    "babel-preset-granite": "0.1.33",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react": "^7.37.2",
+    "jest": "^29.7.0",
+    "prettier": "3.4.2",
+    "react-test-renderer": "18.2.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.31.0"
+  }
+}
