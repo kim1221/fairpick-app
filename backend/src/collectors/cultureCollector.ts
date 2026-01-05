@@ -1,8 +1,8 @@
-import axios from 'axios';
 import { v5 as uuidv5 } from 'uuid';
 import { parseStringPromise } from 'xml2js';
 import { config } from '../config';
 import { pool, upsertEvent, upsertRawCultureEvent } from '../db';
+import http from '../lib/http';
 
 // 문화포털 API 설정
 const CULTURE_API_BASE = 'https://apis.data.go.kr/B553457/cultureinfo';
@@ -77,11 +77,10 @@ async function isImageUrlValid(url: string): Promise<boolean> {
   }
   
   try {
-    const response = await axios.head(url, { 
+    const response = await http.head(url, {
       timeout: 5000,
-      validateStatus: (status) => status === 200,
     });
-    return response.status === 200;
+    return response.ok;
   } catch {
     return false;
   }
@@ -163,7 +162,7 @@ async function fetchByPeriod(serviceTp: string, pageNo: number = 1): Promise<Cul
   ).padStart(2, '0')}`;
 
   try {
-    const response = await axios.get(`${CULTURE_API_BASE}/period2`, {
+    const response = await http.get<string>(`${CULTURE_API_BASE}/period2`, {
       params: {
         serviceKey: config.tourApiKey,
         from: fromDate,
@@ -178,7 +177,7 @@ async function fetchByPeriod(serviceTp: string, pageNo: number = 1): Promise<Cul
       },
     });
 
-    const parsed = await parseStringPromise(response.data);
+    const parsed = await parseStringPromise(response);
     const body = parsed?.response?.body?.[0];
     const totalCount = body?.totalCount?.[0];
     const itemsNode = body?.items?.[0];
@@ -222,14 +221,14 @@ async function fetchDetail(seq: string): Promise<CultureDetailItem | null> {
   }
 
   try {
-    const response = await axios.get(`${CULTURE_API_BASE}/detail2`, {
+    const response = await http.get<string>(`${CULTURE_API_BASE}/detail2`, {
       params: {
         serviceKey: config.tourApiKey,
         seq,
       },
     });
 
-    const parsed = await parseStringPromise(response.data);
+    const parsed = await parseStringPromise(response);
     const item = parsed?.response?.body?.[0]?.items?.[0]?.item?.[0];
 
     if (!item) {

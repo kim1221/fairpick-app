@@ -344,7 +344,7 @@ function mergeLocation(events: RawEventFromDB[]): {
 /**
  * Dedupe 메인 로직
  */
-async function dedupeCanonicalEvents() {
+export async function dedupeCanonicalEvents() {
   console.log('[Dedupe] Starting canonical event deduplication...');
 
   // 1. Raw 테이블에서 모든 이벤트 가져오기
@@ -905,13 +905,15 @@ async function runPhase3CanonicalRemerge(): Promise<{ candidatesCount: number; g
   return { candidatesCount, groupsMerged, deletedCount };
 }
 
-// 실행
-dedupeCanonicalEvents()
-  .then(() => {
-    console.log('[Dedupe] Job finished successfully');
-    process.exit(0);
-  })
-  .catch((err) => {
-    console.error('[Dedupe] Fatal error:', err);
-    process.exit(1);
-  });
+// CLI 실행 guard - 직접 실행될 때만 auto-run
+if (require.main === module) {
+  dedupeCanonicalEvents()
+    .then(() => {
+      console.log('[Dedupe] Job finished successfully');
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error('[Dedupe] Fatal error:', err);
+      process.exit(1);
+    });
+}

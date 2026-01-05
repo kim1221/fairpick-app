@@ -1,7 +1,7 @@
-import axios from 'axios';
 import { config } from '../config';
 import { mapTourApiItem, TourApiItem } from '../mappers/tourApiMapper';
 import { upsertEvent, pool, upsertRawTourEvent } from '../db';
+import http from '../lib/http';
 
 const TOUR_API_URL = 'https://apis.data.go.kr/B551011/KorService2/searchFestival2';
 
@@ -34,8 +34,8 @@ async function fetchDetailImage(contentId: string): Promise<string | null> {
       imageYN: 'Y',
     };
 
-    const response = await axios.get(DETAIL_IMAGE_URL, { params });
-    const items = response.data?.response?.body?.items?.item ?? [];
+    const response = await http.get<any>(DETAIL_IMAGE_URL, { params });
+    const items = response?.response?.body?.items?.item ?? [];
     
     if (!items || items.length === 0) {
       return null;
@@ -91,13 +91,13 @@ async function fetchDetailText(
       _type: 'json',
     };
 
-    const commonRes = await axios.get(DETAIL_COMMON_URL, { params: commonParams });
-    const commonItem = commonRes.data?.response?.body?.items?.item;
+    const commonRes = await http.get<any>(DETAIL_COMMON_URL, { params: commonParams });
+    const commonItem = commonRes?.response?.body?.items?.item;
     const common = Array.isArray(commonItem) ? commonItem[0] : commonItem;
-    
+
     // 디버그: detailCommon2 응답 전체 확인 (처음 1개만)
     if (!detailCommonLoggedOnce) {
-      console.log(`[TourAPI DEBUG] detailCommon2 full response:`, JSON.stringify(commonRes.data, null, 2)?.slice(0, 2000));
+      console.log(`[TourAPI DEBUG] detailCommon2 full response:`, JSON.stringify(commonRes, null, 2)?.slice(0, 2000));
       detailCommonLoggedOnce = true;
     }
     
@@ -114,8 +114,8 @@ async function fetchDetailText(
         MobileApp: 'FairpickCollector',
         _type: 'json',
       };
-      const introRes = await axios.get(DETAIL_INTRO_URL, { params: introParams });
-      const introItem = introRes.data?.response?.body?.items?.item;
+      const introRes = await http.get<any>(DETAIL_INTRO_URL, { params: introParams });
+      const introItem = introRes?.response?.body?.items?.item;
       const intro = Array.isArray(introItem) ? introItem[0] : introItem;
       if (intro) {
         // eventplace 추출
@@ -227,11 +227,11 @@ async function fetchTourApiEvents() {
 
     while (true) {
       console.log(`[TourAPI] Fetching page ${currentPage}...`);
-      const response = await axios.get(TOUR_API_URL, {
+      const response = await http.get<any>(TOUR_API_URL, {
         params: { ...baseParams, pageNo: currentPage },
       });
 
-      const body = response.data?.response?.body;
+      const body = response?.response?.body;
       totalCount = body?.totalCount ?? 0;
       const items: TourApiItem[] = Array.isArray(body?.items?.item)
         ? body.items.item

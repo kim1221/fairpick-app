@@ -1,7 +1,7 @@
-import axios from 'axios';
 import { v5 as uuidv5 } from 'uuid';
 import { parseStringPromise } from 'xml2js';
 import { pool, upsertEvent, upsertRawKopisEvent } from '../db';
+import http from '../lib/http';
 
 // KOPIS API 설정
 const KOPIS_API_BASE = 'http://www.kopis.or.kr/openApi/restful';
@@ -169,7 +169,7 @@ function parseLocation(item: KopisDetailItem): {
 /**
  * 태그 추출
  */
-function extractTags(item: KopisItem | KopisDetailItem, category: string): string[] {
+function extractTags(item: KopisItem | KopisDetailItem, _category: string): string[] {
   const tags: string[] = [];
 
   // 장르 태그
@@ -221,7 +221,7 @@ async function existsInDB(externalId: string): Promise<boolean> {
  */
 async function fetchPerformanceList(stdate: string, eddate: string, cpage: number = 1, rows: number = 100): Promise<KopisItem[]> {
   try {
-    const response = await axios.get(`${KOPIS_API_BASE}/pblprfr`, {
+    const response = await http.get<string>(`${KOPIS_API_BASE}/pblprfr`, {
       params: {
         service: KOPIS_SERVICE_KEY,
         stdate,
@@ -232,7 +232,8 @@ async function fetchPerformanceList(stdate: string, eddate: string, cpage: numbe
       },
     });
 
-    const parsed = await parseStringPromise(response.data);
+    const parsed = await parseStringPromise(response);
+    console.log(`[KOPIS] XML parsed successfully (fetchPerformanceList)`);
     const dbs = parsed?.dbs?.db;
 
     if (!dbs) {
@@ -240,6 +241,7 @@ async function fetchPerformanceList(stdate: string, eddate: string, cpage: numbe
     }
 
     const items = Array.isArray(dbs) ? dbs : [dbs];
+    console.log(`[KOPIS] Parsed ${items.length} items from XML`);
     
     return items.map((item: Record<string, string[]>) => ({
       mt20id: item.mt20id?.[0] || '',
@@ -260,17 +262,52 @@ async function fetchPerformanceList(stdate: string, eddate: string, cpage: numbe
 }
 
 /**
- * 공연 상세 조회
+ * 공연시설 정보 조회 (좌표 획득용)
  */
-async function fetchPerformanceDetail(mt20id: string): Promise<KopisDetailItem | null> {
+async function fetchFacilityDetail(mt10id: string): Promise<{
+  la?: string;
+  lo?: string;
+  adres?: string;
+} | null> {
+  if (!mt10id) return null;
+  
   try {
-    const response = await axios.get(`${KOPIS_API_BASE}/pblprfr/${mt20id}`, {
+    const response = await http.get<string>(`${KOPIS_API_BASE}/prfplc/${mt10id}`, {
       params: {
         service: KOPIS_SERVICE_KEY,
       },
     });
 
-    const parsed = await parseStringPromise(response.data);
+    const parsed = await parseStringPromise(response);
+    const db = parsed?.dbs?.db?.[0];
+
+    if (!db) {
+      return null;
+    }
+
+    return {
+      la: db.la?.[0] || '',
+      lo: db.lo?.[0] || '',
+      adres: db.adres?.[0] || '',
+    };
+  } catch (error) {
+    // 시설 정보 조회 실패는 치명적이지 않으므로 null 반환
+    return null;
+  }
+}
+
+/**
+ * 공연 상세 조회
+ */
+async function fetchPerformanceDetail(mt20id: string): Promise<KopisDetailItem | null> {
+  try {
+    const response = await http.get<string>(`${KOPIS_API_BASE}/pblprfr/${mt20id}`, {
+      params: {
+        service: KOPIS_SERVICE_KEY,
+      },
+    });
+
+    const parsed = await parseStringPromise(response);
     const db = parsed?.dbs?.db?.[0];
 
     if (!db) {
@@ -313,17 +350,49 @@ async function fetchPerformanceDetail(mt20id: string): Promise<KopisDetailItem |
 async function collectKopisEvents() {
   console.log('[KOPIS] Starting incremental collection...');
 
-  // 오늘부터 1년 후까지
+  // DEV_KOPIS_FORCE_FAIL 환경변수로 강제 실패 테스트 가능 (DEV/TEST 환경에서만)
+  const forceFailEnabled = process.env.DEV_KOPIS_FORCE_FAIL === 'true' && process.env.NODE_ENV !== 'production';
+  if (forceFailEnabled) {
+    console.warn('[KOPIS] ⚠️ DEV_KOPIS_FORCE_FAIL=true detected (NODE_ENV=' + (process.env.NODE_ENV || 'development') + ')');
+    console.warn('[KOPIS] Simulating KOPIS API failure for testing error handling...');
+
+    // HttpError 형태로 에러 생성 (http.ts의 에러 로깅 루틴을 발동시키기 위함)
+    const error: any = new Error('HTTP 500: Internal Server Error');
+    error.status = 500;
+    error.statusText = 'Internal Server Error';
+    error.type = 'HTTP_ERROR';
+    error.response = '<?xml version="1.0" encoding="UTF-8"?><error><code>500</code><message>Simulated KOPIS API failure for testing</message></error>';
+
+    console.error('[KOPIS] Simulated Error Details:');
+    console.error(`  Status: ${error.status} ${error.statusText}`);
+    console.error(`  Content-Type: application/xml`);
+    console.error(`  Error Type: ${error.type}`);
+    console.error(`  Body (first 300 chars): ${error.response.substring(0, 300)}`);
+
+    throw error;
+  }
+
+  // 기간 정책 통일: 오늘-PAST_BUFFER ~ 오늘+FUTURE_WINDOW
+  const PAST_BUFFER_DAYS = 90;
+  const FUTURE_WINDOW_DAYS = 730;
+  const FULL_COLLECTION = false;
+
   const today = new Date();
-  const oneYearLater = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
-  
-  const stdate = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-  const eddate = `${oneYearLater.getFullYear()}${String(oneYearLater.getMonth() + 1).padStart(2, '0')}${String(oneYearLater.getDate()).padStart(2, '0')}`;
+  today.setHours(0, 0, 0, 0);
 
-  console.log(`[KOPIS] Date range: ${stdate} ~ ${eddate}`);
+  const pastBuffer = new Date(today);
+  pastBuffer.setDate(pastBuffer.getDate() - PAST_BUFFER_DAYS);
 
-  // 증분 수집: 연속 N개가 이미 있으면 중단
-  const CONSECUTIVE_EXISTS_THRESHOLD = 10;
+  const futureWindow = new Date(today);
+  futureWindow.setDate(futureWindow.getDate() + FUTURE_WINDOW_DAYS);
+
+  const stdate = `${pastBuffer.getFullYear()}${String(pastBuffer.getMonth() + 1).padStart(2, '0')}${String(pastBuffer.getDate()).padStart(2, '0')}`;
+  const eddate = `${futureWindow.getFullYear()}${String(futureWindow.getMonth() + 1).padStart(2, '0')}${String(futureWindow.getDate()).padStart(2, '0')}`;
+
+  console.log(`[KOPIS] Date range: ${stdate} ~ ${eddate} (past_buffer=${PAST_BUFFER_DAYS}d, future_window=${FUTURE_WINDOW_DAYS}d)`);
+
+  // 증분 수집: 연속 N개가 이미 있으면 중단 (fullCollection=true면 비활성화)
+  const CONSECUTIVE_EXISTS_THRESHOLD = FULL_COLLECTION ? Infinity : 10;
   let consecutiveExistsCount = 0;
   let cpage = 1;
   let totalCollected = 0;
@@ -352,6 +421,19 @@ async function collectKopisEvents() {
       await new Promise((resolve) => setTimeout(resolve, 50));
       const detail = await fetchPerformanceDetail(item.mt20id);
       const finalItem = detail || item;
+
+      // 시설 정보 조회 (좌표 획득)
+      let facilityInfo: { la?: string; lo?: string; adres?: string; } | null = null;
+      if (detail?.mt10id) {
+        await new Promise((resolve) => setTimeout(resolve, 50)); // API 호출 간격
+        facilityInfo = await fetchFacilityDetail(detail.mt10id);
+        if (facilityInfo) {
+          // 시설 정보로 좌표 보완
+          (finalItem as KopisDetailItem).la = facilityInfo.la || (finalItem as KopisDetailItem).la || '';
+          (finalItem as KopisDetailItem).lo = facilityInfo.lo || (finalItem as KopisDetailItem).lo || '';
+          (finalItem as KopisDetailItem).adres = facilityInfo.adres || (finalItem as KopisDetailItem).adres || '';
+        }
+      }
 
       const region = normalizeRegion(finalItem.area);
       const category = mapGenreToCategory(finalItem.genrenm);
@@ -389,7 +471,8 @@ async function collectKopisEvents() {
           lat: location.lat,
           lng: location.lng,
         });
-        console.log(`[KOPIS] Raw upserted: mt20id=${item.mt20id}${isFree ? ' (무료)' : ''}${location.address ? ' (위치 포함)' : ''}`);
+        const geoStatus = location.lat && location.lng ? `✅ 좌표` : '⚠️ 좌표 없음';
+        console.log(`[KOPIS] Raw upserted: mt20id=${item.mt20id}${isFree ? ' (무료)' : ''} ${geoStatus}${location.address ? ` | ${location.address.substring(0, 30)}` : ''}`);
       } catch (error) {
         console.error(`[KOPIS] Failed to upsert raw: ${item.mt20id}`, error);
       }
@@ -460,9 +543,10 @@ async function collectKopisEvents() {
 
     cpage++;
 
-    // 안전장치: 최대 50페이지
-    if (cpage > 50) {
-      console.log('[KOPIS] Reached max pages (50). Stopping.');
+    // 안전장치: 최대 50페이지 (fullCollection=true면 무제한)
+    const MAX_PAGES = FULL_COLLECTION ? Infinity : 50;
+    if (cpage > MAX_PAGES) {
+      console.log(`[KOPIS] Reached max pages (${MAX_PAGES}). Stopping.`);
       break;
     }
 
@@ -475,11 +559,15 @@ async function collectKopisEvents() {
   console.log(`  - Skipped: ${totalSkipped}`);
 }
 
-// 실행
-collectKopisEvents()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error('[KOPIS] Fatal error:', err);
-    process.exit(1);
-  });
+// Export for scheduler
+export { collectKopisEvents as collectKopis };
 
+// CLI 실행 모드
+if (require.main === module) {
+  collectKopisEvents()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error('[KOPIS] Fatal error:', err);
+      process.exit(1);
+    });
+}

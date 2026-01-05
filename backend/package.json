@@ -5,7 +5,10 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "ts-node src/index.ts",
+    "dev": "PORT=5001 ts-node -r dotenv/config src/index.ts",
+    "start": "ts-node -r dotenv/config src/index.ts",
+    "start:api": "PORT=5001 ts-node -r dotenv/config src/index.ts",
+    "start:admin": "npx http-server public -p 4000 --cors",
     "collect:tourapi": "ts-node src/collectors/tourApiCollector.ts",
     "collect:culture": "ts-node src/collectors/cultureCollector.ts",
     "collect:kopis": "ts-node src/collectors/kopisCollector.ts",
@@ -14,13 +17,24 @@
     "normalize:categories": "ts-node src/jobs/normalizeCategories.ts",
     "metadata:update": "ts-node src/jobs/updateMetadata.ts",
     "diagnostics": "ts-node src/jobs/diagnostics.ts",
-    "pipeline:refresh": "npm run collect:kopis && npm run collect:culture && npm run collect:tourapi && npm run dedupe:canonical && npm run normalize:categories"
+    "pipeline:refresh": "npm run collect:kopis && npm run collect:culture && npm run collect:tourapi && npm run dedupe:canonical && npm run normalize:categories",
+    "job:collect": "ts-node -r dotenv/config src/jobs/collect/index.ts",
+    "job:cleanup": "ts-node -r dotenv/config src/jobs/cleanup/index.ts",
+    "job:geoBackfill": "ts-node -r dotenv/config src/jobs/geoBackfill.ts",
+    "job:geoBackfillV2": "ts-node -r dotenv/config src/jobs/geoBackfill.v2.ts",
+    "job:geoVenueBackfill": "ts-node -r dotenv/config src/jobs/geoVenueBackfill.ts",
+    "pipeline:geoRefresh": "ts-node -r dotenv/config src/jobs/geoRefreshPipeline.ts",
+    "healthcheck": "ts-node -r dotenv/config scripts/healthcheck.ts",
+    "report:geo": "ts-node -r dotenv/config scripts/run-geo-coverage-report.ts",
+    "report:geoV2": "psql -d fairpick -f scripts/geo-coverage-report.v2.sql",
+    "verify:nearby": "ts-node -r dotenv/config scripts/verify-nearby.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@types/node-cron": "^3.0.11",
     "@types/uuid": "^10.0.0",
     "@types/xml2js": "^0.4.14",
     "axios": "^1.13.2",
@@ -28,6 +42,7 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "node-cron": "^4.2.1",
     "pg": "^8.16.3",
     "uuid": "^13.0.0",
     "xml2js": "^0.6.2"
@@ -37,6 +52,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^24.10.1",
     "@types/pg": "^8.15.6",
+    "http-server": "^14.1.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }

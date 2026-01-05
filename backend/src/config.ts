@@ -4,6 +4,7 @@ dotenv.config();
 
 export const config = {
   tourApiKey: process.env.TOUR_API_KEY ?? '',
+  kakaoRestApiKey: process.env.KAKAO_REST_API_KEY ?? '',
   db: {
     host: process.env.DB_HOST ?? 'localhost',
     port: Number(process.env.DB_PORT ?? '5432'),

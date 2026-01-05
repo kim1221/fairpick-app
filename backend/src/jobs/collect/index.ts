@@ -54,10 +54,11 @@ export async function runCollectionJob(): Promise<void> {
 
   // 각 단계 실행
   for (const step of COLLECTION_STEPS) {
+    const stepStartTime = Date.now();
     console.log(`[CollectJob] Running step: ${step.name}...`);
 
     try {
-      // Dynamic import로 모듈 로드
+      // Dynamic import로 모듈 로드 (ts-node는 .ts 확장자 자동 해석)
       const module = await import(step.modulePath);
       const func = module[step.functionName];
 
@@ -68,9 +69,12 @@ export async function runCollectionJob(): Promise<void> {
 
       // 함수 실행
       await func();
+      const elapsed = ((Date.now() - stepStartTime) / 1000).toFixed(1);
       successCount++;
-      console.log(`[CollectJob] ✓ ${step.name} - Success`);
+      console.log(`[CollectJob] ✓ ${step.name} - Success (${elapsed}s)`);
     } catch (error: any) {
+      const elapsed = ((Date.now() - stepStartTime) / 1000).toFixed(1);
+
       if (error?.code === 'MODULE_NOT_FOUND') {
         console.log(`[CollectJob] ⊘ ${step.name} - Module not found, skipping`);
         continue;
@@ -79,8 +83,28 @@ export async function runCollectionJob(): Promise<void> {
       failedCount++;
       const errorMsg = `${step.name}: ${error?.message || String(error)}`;
       errorMessages.push(errorMsg);
-      console.error(`[CollectJob] ✗ ${step.name} - Failed:`, error);
+
+      // 상세 에러 로깅
+      console.error(`[CollectJob] ✗ ${step.name} - Failed (${elapsed}s)`);
+      console.error(`[CollectJob]   Error: ${error?.message || String(error)}`);
+      if (error?.status) {
+        console.error(`[CollectJob]   HTTP Status: ${error.status}`);
+      }
+      if (error?.type) {
+        console.error(`[CollectJob]   Error Type: ${error.type}`);
+      }
+      if (error?.response) {
+        const bodyPrefix = typeof error.response === 'string'
+          ? error.response.substring(0, 300)
+          : JSON.stringify(error.response).substring(0, 300);
+        console.error(`[CollectJob]   Response Body (first 300 chars): ${bodyPrefix}`);
+      }
+      if (error?.stack) {
+        console.error(`[CollectJob]   Stack: ${error.stack.split('\n').slice(0, 3).join('\n')}`);
+      }
+
       // 실패해도 다음 단계 계속
+      console.warn(`[CollectJob] ⚠️ ${step.name} failed, but continuing with next steps...`);
     }
   }
 
@@ -99,9 +123,23 @@ export async function runCollectionJob(): Promise<void> {
   }
 
   const completedAt = new Date();
+  const totalElapsed = ((completedAt.getTime() - startTime.getTime()) / 1000).toFixed(1);
   const errorMessage = errorMessages.length > 0 ? errorMessages.join('; ') : null;
 
-  console.log(`[CollectJob] Completed - Status: ${finalStatus}, Success: ${successCount}, Failed: ${failedCount}`);
+  console.log('='.repeat(80));
+  console.log('[CollectJob] ✓ Collection Job Completed');
+  console.log('='.repeat(80));
+  console.log(`  Status: ${finalStatus.toUpperCase()}`);
+  console.log(`  Success: ${successCount}/${totalExecuted} steps`);
+  console.log(`  Failed: ${failedCount}/${totalExecuted} steps`);
+  console.log(`  Total elapsed: ${totalElapsed}s`);
+  if (errorMessages.length > 0) {
+    console.log(`  Errors:`);
+    errorMessages.forEach((msg, idx) => {
+      console.log(`    ${idx + 1}. ${msg}`);
+    });
+  }
+  console.log('='.repeat(80));
 
   // collection_logs 종료 기록
   try {
