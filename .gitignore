@@ -15,3 +15,32 @@ yarn-error.log
 .granite
 .swc
 .DS_Store
+
+# ===== secrets (강화) =====
+.env
+.env.*
+!.env.example
+backend/.env*
+!backend/.env.example
+
+# ===== logs =====
+*.log
+**/*.log
+backend/server.log
+backend/*_log.txt
+backend/*log*.txt
+
+# ===== dumps / exports =====
+schema_dump*.txt
+**/*dump*.txt
+
+# ===== accidental curl artifacts (커맨드 복붙 찌꺼기) =====
+backend/--data-urlencode
+backend/-H
+
+# ===== build artifacts (monorepo 전체) =====
+dist/
+**/dist/
+node_modules/
+**/node_modules/
+.DS_Store
