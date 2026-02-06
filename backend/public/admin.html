@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fairpick Admin Console</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .sidebar-active { background-color: rgb(59 130 246 / 0.1); border-left: 3px solid rgb(59 130 246); }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <!-- Error Banner -->
+  <div id="errorBanner" class="hidden fixed top-0 left-0 right-0 bg-red-500 text-white px-4 py-3 z-50">
+    <div class="container mx-auto flex justify-between items-center">
+      <span id="errorMessage"></span>
+      <button onclick="hideErrorBanner()" class="text-white hover:text-gray-200">✕</button>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="hidden fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50"></div>
+
+  <!-- Login Screen -->
+  <div id="loginScreen" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600">
+    <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
+      <h1 class="text-3xl font-bold text-gray-800 mb-6 text-center">Fairpick Admin</h1>
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="mb-4">
+          <label class="block text-gray-700 font-medium mb-2">Admin Key</label>
+          <input type="password" id="adminKeyInput" required
+            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="Enter your admin key">
+        </div>
+        <div id="loginError" class="text-red-500 text-sm mb-4 hidden"></div>
+        <button type="submit" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg transition">
+          Login
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div id="mainApp" class="hidden min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
+      <div class="px-4 py-3 flex justify-between items-center">
+        <div class="flex items-center">
+          <button id="sidebarToggle" class="mr-4 lg:hidden" onclick="toggleSidebar()">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+            </svg>
+          </button>
+          <h1 class="text-xl font-bold text-gray-800">Fairpick Admin</h1>
+          <span class="ml-3 px-2 py-1 bg-green-100 text-green-800 text-xs rounded">Live</span>
+        </div>
+        <button onclick="handleLogout()" class="text-gray-600 hover:text-gray-800">Logout</button>
+      </div>
+    </header>
+
+    <div class="flex">
+      <!-- Sidebar -->
+      <aside id="sidebar" class="hidden lg:block w-64 bg-white border-r border-gray-200 min-h-screen">
+        <nav class="p-4">
+          <a onclick="switchView('overview')" class="sidebar-item sidebar-active block px-4 py-3 rounded-lg cursor-pointer mb-1">
+            <span class="font-medium">📊 Overview</span>
+          </a>
+          <a onclick="switchView('events')" class="sidebar-item block px-4 py-3 rounded-lg cursor-pointer mb-1 hover:bg-gray-50">
+            <span class="font-medium">🎫 Events</span>
+          </a>
+          <a onclick="switchView('changes')" class="sidebar-item block px-4 py-3 rounded-lg cursor-pointer mb-1 hover:bg-gray-50">
+            <span class="font-medium">📝 Changes</span>
+          </a>
+          <a onclick="switchView('automation')" class="sidebar-item block px-4 py-3 rounded-lg cursor-pointer mb-1 hover:bg-gray-50">
+            <span class="font-medium">⚙️ Automation</span>
+          </a>
+          <a onclick="switchView('featured')" class="sidebar-item block px-4 py-3 rounded-lg cursor-pointer mb-1 hover:bg-gray-50">
+            <span class="font-medium">⭐ Featured</span>
+          </a>
+          <a onclick="switchView('analytics')" class="sidebar-item block px-4 py-3 rounded-lg cursor-pointer mb-1 hover:bg-gray-50 text-gray-400">
+            <span class="font-medium">📈 Analytics</span>
+          </a>
+        </nav>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="flex-1 p-6 overflow-auto">
+        <!-- Overview View -->
+        <div id="overviewView" class="view-content">
+          <h2 class="text-2xl font-bold mb-6">Dashboard Overview</h2>
+          
+          <!-- KPI Cards -->
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-lg shadow p-6">
+              <div class="text-gray-500 text-sm mb-1">Total Events</div>
+              <div id="kpi-totalEvents" class="text-3xl font-bold text-blue-600">-</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+              <div class="text-gray-500 text-sm mb-1">Featured</div>
+              <div id="kpi-featuredCount" class="text-3xl font-bold text-purple-600">-</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+              <div class="text-gray-500 text-sm mb-1">Updated (24h)</div>
+              <div id="kpi-recentUpdatedCount" class="text-3xl font-bold text-green-600">-</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+              <div class="text-gray-500 text-sm mb-1">New (24h)</div>
+              <div id="kpi-recentNewCount" class="text-3xl font-bold text-orange-600">-</div>
+            </div>
+          </div>
+
+          <!-- Recent Logs -->
+          <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b border-gray-200">
+              <h3 class="font-semibold text-lg">Recent Collection Logs</h3>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started At</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Success</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failed</th>
+                  </tr>
+                </thead>
+                <tbody id="recentLogsTable" class="divide-y divide-gray-200">
+                  <tr><td colspan="6" class="px-6 py-4 text-center text-gray-500">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Events View -->
+        <div id="eventsView" class="view-content hidden">
+          <h2 class="text-2xl font-bold mb-6">Events Management</h2>
+          
+          <!-- Filters -->
+          <div class="bg-white rounded-lg shadow p-4 mb-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <input type="text" id="filter-q" placeholder="Search title..." 
+                class="px-3 py-2 border border-gray-300 rounded-lg" oninput="debounceSearch()">
+              <select id="filter-category" class="px-3 py-2 border border-gray-300 rounded-lg" onchange="filterEvents()">
+                <option value="">All Categories</option>
+                <option value="공연">공연</option>
+                <option value="전시">전시</option>
+                <option value="축제">축제</option>
+                <option value="행사">행사</option>
+              </select>
+              <select id="filter-isFeatured" class="px-3 py-2 border border-gray-300 rounded-lg" onchange="filterEvents()">
+                <option value="">Featured: All</option>
+                <option value="true">Featured: Yes</option>
+                <option value="false">Featured: No</option>
+              </select>
+              <select id="filter-isDeleted" class="px-3 py-2 border border-gray-300 rounded-lg" onchange="filterEvents()">
+                <option value="false">Active Only</option>
+                <option value="">All (incl. Deleted)</option>
+                <option value="true">Deleted Only</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Table -->
+          <div class="bg-white rounded-lg shadow overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="w-full">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Region</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Updated</th>
+                  </tr>
+                </thead>
+                <tbody id="eventsTable" class="divide-y divide-gray-200"></tbody>
+              </table>
+            </div>
+            
+            <!-- Pagination -->
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-between items-center">
+              <div class="text-sm text-gray-500">
+                Total: <span id="events-totalCount">0</span> events
+              </div>
+              <div class="flex gap-2">
+                <button onclick="prevPage()" id="btn-prev" class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">Previous</button>
+                <span class="px-3 py-1">Page <span id="events-page">1</span></span>
+                <button onclick="nextPage()" id="btn-next" class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">Next</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Changes View -->
+        <div id="changesView" class="view-content hidden">
+          <h2 class="text-2xl font-bold mb-6">Change Logs</h2>
+          
+          <div class="bg-white rounded-lg shadow mb-4 p-4">
+            <div class="flex gap-4">
+              <select id="changes-type" class="px-3 py-2 border border-gray-300 rounded-lg" onchange="loadChanges()">
+                <option value="">All Types</option>
+                <option value="created">Created</option>
+                <option value="updated">Updated</option>
+                <option value="deleted">Deleted</option>
+                <option value="featured">Featured</option>
+                <option value="unfeatured">Unfeatured</option>
+              </select>
+              <select id="changes-hours" class="px-3 py-2 border border-gray-300 rounded-lg" onchange="loadChanges()">
+                <option value="24">Last 24 hours</option>
+                <option value="72">Last 3 days</option>
+                <option value="168">Last 7 days</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-lg shadow">
+            <div id="changesTable" class="divide-y divide-gray-200"></div>
+          </div>
+        </div>
+
+        <!-- Automation View -->
+        <div id="automationView" class="view-content hidden">
+          <h2 class="text-2xl font-bold mb-6">Automation Jobs</h2>
+          
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="bg-white rounded-lg shadow p-6">
+              <h3 class="font-semibold mb-2">Collection Jobs</h3>
+              <p class="text-gray-600 text-sm mb-4">Run data collection from external APIs</p>
+              <button onclick="runJob('collect')" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg w-full" disabled>
+                Run Collect (API Not Implemented)
+              </button>
+            </div>
+            
+            <div class="bg-white rounded-lg shadow p-6">
+              <h3 class="font-semibold mb-2">Cleanup Job</h3>
+              <p class="text-gray-600 text-sm mb-4">Soft delete expired events</p>
+              <button onclick="runJob('cleanup')" class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg w-full" disabled>
+                Run Cleanup (API Not Implemented)
+              </button>
+            </div>
+            
+            <div class="bg-white rounded-lg shadow p-6">
+              <h3 class="font-semibold mb-2">Auto-Unfeature</h3>
+              <p class="text-gray-600 text-sm mb-4">Remove featured status from expired events</p>
+              <button onclick="runJob('auto-unfeature')" class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg w-full">
+                Run Auto-Unfeature
+              </button>
+            </div>
+            
+            <div class="bg-white rounded-lg shadow p-6">
+              <h3 class="font-semibold mb-2">Recommend Update</h3>
+              <p class="text-gray-600 text-sm mb-4">Update recommendation scores</p>
+              <button onclick="runJob('recommend')" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg w-full" disabled>
+                Run Recommend (API Not Implemented)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Featured View -->
+        <div id="featuredView" class="view-content hidden">
+          <h2 class="text-2xl font-bold mb-6">Featured Events</h2>
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <p class="text-blue-800">💡 Tip: Featured management is now available in the <strong>Events</strong> tab for better control.</p>
+          </div>
+          <div class="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+            Please use the Events tab to manage featured events.
+          </div>
+        </div>
+
+        <!-- Analytics View -->
+        <div id="analyticsView" class="view-content hidden">
+          <h2 class="text-2xl font-bold mb-6">Analytics</h2>
+          <div class="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+            Analytics dashboard coming soon...
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Event Drawer -->
+  <div id="eventDrawer" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50" onclick="closeDrawer(event)">
+    <div class="absolute right-0 top-0 bottom-0 w-full md:w-1/2 lg:w-1/3 bg-white shadow-xl overflow-y-auto" onclick="event.stopPropagation()">
+      <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+        <h3 class="text-xl font-bold">Event Details</h3>
+        <button onclick="closeDrawer()" class="text-gray-500 hover:text-gray-700">✕</button>
+      </div>
+      
+      <div id="drawerContent" class="p-6">
+        <div class="text-center text-gray-500">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let adminKey = null;
+    let currentView = 'overview';
+    let eventsState = { page: 1, size: 20, q: '', category: '', isFeatured: '', isDeleted: 'false', sort: 'updated_at_desc' };
+    let selectedEventId = null;
+    let searchTimeout = null;
+
+    // Init
+    document.addEventListener('DOMContentLoaded', () => {
+      const stored = localStorage.getItem('adminKey');
+      if (stored) {
+        verifyAndLogin(stored);
+      }
+    });
+
+    // Auth
+    async function handleLogin(e) {
+      e.preventDefault();
+      const key = document.getElementById('adminKeyInput').value;
+      await verifyAndLogin(key);
+    }
+
+    async function verifyAndLogin(key) {
+      try {
+        const res = await fetch('/admin/verify', {
+          method: 'POST',
+          headers: { 'x-admin-key': key, 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        
+        if (res.ok && data.valid) {
+          adminKey = key;
+          localStorage.setItem('adminKey', key);
+          document.getElementById('loginScreen').classList.add('hidden');
+          document.getElementById('mainApp').classList.remove('hidden');
+          loadDashboard();
+        } else {
+          document.getElementById('loginError').textContent = 'Invalid admin key';
+          document.getElementById('loginError').classList.remove('hidden');
+        }
+      } catch (error) {
+        document.getElementById('loginError').textContent = 'Connection error';
+        document.getElementById('loginError').classList.remove('hidden');
+      }
+    }
+
+    function handleLogout() {
+      localStorage.removeItem('adminKey');
+      adminKey = null;
+      document.getElementById('loginScreen').classList.remove('hidden');
+      document.getElementById('mainApp').classList.add('hidden');
+    }
+
+    // API Helper
+    async function apiFetch(path, options = {}) {
+      try {
+        const res = await fetch(path, {
+          ...options,
+          headers: {
+            'x-admin-key': adminKey,
+            'Content-Type': 'application/json',
+            ...options.headers
+          }
+        });
+
+        if (res.status === 401) {
+          handleLogout();
+          throw new Error('Unauthorized');
+        }
+
+        const data = await res.json();
+        
+        if (!res.ok) {
+          throw new Error(data.error || data.message || 'API Error');
+        }
+
+        return data;
+      } catch (error) {
+        setErrorBanner(error.message);
+        throw error;
+      }
+    }
+
+    // UI Helpers
+    function setErrorBanner(message) {
+      document.getElementById('errorMessage').textContent = message;
+      document.getElementById('errorBanner').classList.remove('hidden');
+    }
+
+    function hideErrorBanner() {
+      document.getElementById('errorBanner').classList.add('hidden');
+    }
+
+    function showToast(type, message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = 'fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 ' + 
+        (type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white');
+      setTimeout(() => toast.classList.add('hidden'), 3000);
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) return '-';
+      return new Date(dateStr).toLocaleString('ko-KR', { 
+        year: 'numeric', month: '2-digit', day: '2-digit', 
+        hour: '2-digit', minute: '2-digit' 
+      });
+    }
+
+    function formatPeriod(start, end) {
+      if (!start) return '-';
+      const s = new Date(start).toISOString().split('T')[0];
+      const e = end ? new Date(end).toISOString().split('T')[0] : '?';
+      return `${s} ~ ${e}`;
+    }
+
+    // Navigation
+    function switchView(view) {
+      currentView = view;
+      document.querySelectorAll('.view-content').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('sidebar-active'));
+      
+      document.getElementById(view + 'View').classList.remove('hidden');
+      event.target.closest('.sidebar-item').classList.add('sidebar-active');
+
+      if (view === 'overview') loadDashboard();
+      else if (view === 'events') loadEvents();
+      else if (view === 'changes') loadChanges();
+    }
+
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('hidden');
+    }
+
+    // Dashboard
+    async function loadDashboard() {
+      try {
+        const data = await apiFetch('/admin/dashboard');
+        
+        document.getElementById('kpi-totalEvents').textContent = data.totalEvents || 0;
+        document.getElementById('kpi-featuredCount').textContent = data.featuredCount || 0;
+        document.getElementById('kpi-recentUpdatedCount').textContent = data.recentUpdatedCount || 0;
+        document.getElementById('kpi-recentNewCount').textContent = data.recentNewCount || 0;
+
+        const tbody = document.getElementById('recentLogsTable');
+        if (data.recentLogs && data.recentLogs.length > 0) {
+          tbody.innerHTML = data.recentLogs.map(log => `
+            <tr>
+              <td class="px-6 py-4 text-sm">${formatDate(log.started_at)}</td>
+              <td class="px-6 py-4 text-sm">${log.type}</td>
+              <td class="px-6 py-4 text-sm">
+                <span class="px-2 py-1 rounded text-xs ${log.status === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                  ${log.status}
+                </span>
+              </td>
+              <td class="px-6 py-4 text-sm">${log.items_count || 0}</td>
+              <td class="px-6 py-4 text-sm">${log.success_count || 0}</td>
+              <td class="px-6 py-4 text-sm">${log.failed_count || 0}</td>
+            </tr>
+          `).join('');
+        } else {
+          tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500">No logs yet</td></tr>';
+        }
+      } catch (error) {
+        console.error('Failed to load dashboard:', error);
+      }
+    }
+
+    // Events
+    function debounceSearch() {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        eventsState.q = document.getElementById('filter-q').value;
+        eventsState.page = 1;
+        loadEvents();
+      }, 500);
+    }
+
+    function filterEvents() {
+      eventsState.category = document.getElementById('filter-category').value;
+      eventsState.isFeatured = document.getElementById('filter-isFeatured').value;
+      eventsState.isDeleted = document.getElementById('filter-isDeleted').value;
+      eventsState.page = 1;
+      loadEvents();
+    }
+
+    async function loadEvents() {
+      try {
+        const params = new URLSearchParams({
+          page: eventsState.page,
+          size: eventsState.size,
+          ...(eventsState.q && { q: eventsState.q }),
+          ...(eventsState.category && { category: eventsState.category }),
+          ...(eventsState.isFeatured && { isFeatured: eventsState.isFeatured }),
+          ...(eventsState.isDeleted && { isDeleted: eventsState.isDeleted }),
+          sort: eventsState.sort
+        });
+
+        const data = await apiFetch(`/admin/events?${params}`);
+        
+        document.getElementById('events-totalCount').textContent = data.totalCount || 0;
+        document.getElementById('events-page').textContent = eventsState.page;
+
+        const tbody = document.getElementById('eventsTable');
+        if (data.items && data.items.length > 0) {
+          tbody.innerHTML = data.items.map(event => `
+            <tr class="hover:bg-gray-50 cursor-pointer" onclick="openEventDrawer('${event.id}')">
+              <td class="px-6 py-4">
+                <div class="font-medium">${event.title}</div>
+              </td>
+              <td class="px-6 py-4 text-sm">${event.region || '-'}</td>
+              <td class="px-6 py-4 text-sm">${event.main_category || '-'}</td>
+              <td class="px-6 py-4 text-sm">${formatPeriod(event.start_at, event.end_at)}</td>
+              <td class="px-6 py-4 text-sm">
+                ${event.is_featured ? '<span class="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs">Featured</span>' : ''}
+                ${event.is_deleted ? '<span class="px-2 py-1 bg-red-100 text-red-800 rounded text-xs">Deleted</span>' : ''}
+              </td>
+              <td class="px-6 py-4 text-sm text-gray-500">${formatDate(event.updated_at)}</td>
+            </tr>
+          `).join('');
+        } else {
+          tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500">No events found</td></tr>';
+        }
+
+        document.getElementById('btn-prev').disabled = eventsState.page === 1;
+        document.getElementById('btn-next').disabled = data.items.length < eventsState.size;
+      } catch (error) {
+        console.error('Failed to load events:', error);
+      }
+    }
+
+    function prevPage() {
+      if (eventsState.page > 1) {
+        eventsState.page--;
+        loadEvents();
+      }
+    }
+
+    function nextPage() {
+      eventsState.page++;
+      loadEvents();
+    }
+
+    // Event Drawer
+    async function openEventDrawer(eventId) {
+      selectedEventId = eventId;
+      document.getElementById('eventDrawer').classList.remove('hidden');
+      document.getElementById('drawerContent').innerHTML = '<div class="text-center text-gray-500">Loading...</div>';
+
+      try {
+        const data = await apiFetch(`/admin/events/${eventId}`);
+        const event = data.item;
+
+        document.getElementById('drawerContent').innerHTML = `
+          <div class="space-y-4">
+            <div>
+              <h4 class="font-semibold text-lg mb-2">${event.title}</h4>
+              <p class="text-gray-600 text-sm">ID: ${event.id}</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 text-sm">
+              <div><span class="text-gray-500">Region:</span> ${event.region || '-'}</div>
+              <div><span class="text-gray-500">Category:</span> ${event.main_category || '-'}</div>
+              <div><span class="text-gray-500">Start:</span> ${event.start_at || '-'}</div>
+              <div><span class="text-gray-500">End:</span> ${event.end_at || '-'}</div>
+            </div>
+
+            <hr>
+
+            <div>
+              <label class="flex items-center mb-2">
+                <input type="checkbox" id="edit-featured" ${event.is_featured ? 'checked' : ''} class="mr-2">
+                <span class="font-medium">Featured</span>
+              </label>
+              <input type="number" id="edit-order" value="${event.featured_order || ''}" 
+                placeholder="Featured order" class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+            </div>
+
+            <div>
+              <label class="flex items-center mb-2">
+                <input type="checkbox" id="edit-deleted" ${event.is_deleted ? 'checked' : ''} class="mr-2">
+                <span class="font-medium">Soft Deleted</span>
+              </label>
+              <input type="text" id="edit-reason" value="${event.deleted_reason || ''}" 
+                placeholder="Deleted reason" class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+            </div>
+
+            <button onclick="saveEvent()" class="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg">
+              Save Changes
+            </button>
+          </div>
+        `;
+      } catch (error) {
+        document.getElementById('drawerContent').innerHTML = '<div class="text-center text-red-500">Failed to load event</div>';
+      }
+    }
+
+    function closeDrawer(e) {
+      if (!e || e.target === e.currentTarget) {
+        document.getElementById('eventDrawer').classList.add('hidden');
+        selectedEventId = null;
+      }
+    }
+
+    async function saveEvent() {
+      if (!selectedEventId) return;
+
+      const body = {
+        is_featured: document.getElementById('edit-featured').checked,
+        featured_order: parseInt(document.getElementById('edit-order').value) || null,
+        is_deleted: document.getElementById('edit-deleted').checked,
+        deleted_reason: document.getElementById('edit-reason').value || null
+      };
+
+      try {
+        await apiFetch(`/admin/events/${selectedEventId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(body)
+        });
+
+        showToast('success', 'Event updated successfully');
+        loadEvents();
+        openEventDrawer(selectedEventId); // Refresh drawer
+      } catch (error) {
+        showToast('error', 'Failed to update event');
+      }
+    }
+
+    // Changes
+    async function loadChanges() {
+      const type = document.getElementById('changes-type').value;
+      const hours = document.getElementById('changes-hours').value;
+
+      try {
+        const params = new URLSearchParams({
+          ...(type && { type }),
+          sinceHours: hours,
+          limit: 50
+        });
+
+        const data = await apiFetch(`/admin/logs/changes?${params}`);
+        
+        const container = document.getElementById('changesTable');
+        if (data.items && data.items.length > 0) {
+          container.innerHTML = data.items.map(log => `
+            <div class="px-6 py-4">
+              <div class="flex justify-between items-start">
+                <div>
+                  <span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">${log.action}</span>
+                  <span class="ml-2 text-gray-600 text-sm">Event ID: ${log.event_id}</span>
+                </div>
+                <span class="text-gray-500 text-sm">${formatDate(log.created_at)}</span>
+              </div>
+            </div>
+          `).join('');
+        } else {
+          container.innerHTML = '<div class="px-6 py-4 text-center text-gray-500">No changes found</div>';
+        }
+      } catch (error) {
+        console.error('Failed to load changes:', error);
+      }
+    }
+
+    // Automation
+    async function runJob(job) {
+      const button = event.target;
+      button.disabled = true;
+      button.textContent = 'Running...';
+
+      try {
+        if (job === 'auto-unfeature') {
+          await apiFetch('/admin/jobs/auto-unfeature', { method: 'POST' });
+          showToast('success', 'Auto-unfeature completed');
+        } else {
+          showToast('error', 'API not implemented');
+        }
+        
+        if (currentView === 'overview') loadDashboard();
+      } catch (error) {
+        showToast('error', 'Job failed: ' + error.message);
+      } finally {
+        button.disabled = false;
+        button.textContent = button.textContent.replace('Running...', 'Run ' + job);
+      }
+    }
+  </script>
+</body>
+</html>

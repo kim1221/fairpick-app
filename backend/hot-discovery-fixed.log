@@ -1,0 +1,168 @@
+[dotenv@17.2.3] injecting env (24) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+[config] dotenv loaded: 24 variables from /Users/kimsungtae/toss/fairpick-app/backend/.env
+[AI] Gemini initialized (model: gemini-2.5-flash)
+[AdminHotDiscovery] 🚀 Starting 3-AI hybrid discovery job...
+[AdminHotDiscovery] Sampled 10 keywords
+[AdminHotDiscovery] [Step 3] Extracting seeds from 10 keywords...
+[NaverAPI] Blog search error: {
+  query: '코엑스 콜라보',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Cafe search error: {
+  query: '코엑스 콜라보',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '코엑스 콜라보',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '더현대 서울 팝업',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Cafe search error: {
+  query: '더현대 서울 팝업',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '더현대 서울 팝업',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '코엑스 팝업스토어',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '코엑스 팝업스토어',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Cafe search error: {
+  query: '코엑스 팝업스토어',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '스타필드 하남 플리마켓',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '스타필드 하남 플리마켓',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Cafe search error: {
+  query: '스타필드 하남 플리마켓',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '가로수길 콜라보',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '가로수길 콜라보',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Cafe search error: {
+  query: '가로수길 콜라보',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Cafe search error: {
+  query: '현대백화점 압구정본점 전시회 내일',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '현대백화점 압구정본점 전시회 내일',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '현대백화점 압구정본점 전시회 내일',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '더현대 서울 팝업 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Cafe search error: {
+  query: '더현대 서울 팝업 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '더현대 서울 팝업 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Cafe search error: {
+  query: '청담 콜라보 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '청담 콜라보 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '청담 콜라보 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '성수 굿즈 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Cafe search error: {
+  query: '성수 굿즈 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '성수 굿즈 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '신세계백화점 센텀시티 플리마켓 이번주',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '신세계백화점 센텀시티 플리마켓 이번주',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Cafe search error: {
+  query: '신세계백화점 센텀시티 플리마켓 이번주',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[AdminHotDiscovery] [Step 3] Total raw seeds: 0
+[AdminHotDiscovery] [Step 4-5] Searching 0 seeds...
+[AdminHotDiscovery] [Step 4-5] 0 candidates verified
+[AdminHotDiscovery] [Step 7] Normalizing 0 candidates...
+[AI] [Normalize] Normalizing 0 seeds...
+[AI] [Normalize] Normalized to 30 unique events: [ '노티드 팝업', '쿠키런 킹덤 팝업', '잔망루피 팝업', '카카오프렌즈 팝업', '라인프렌즈 팝업' ]
+[AdminHotDiscovery] [Step 7] 0 unique candidates after normalization
+[AdminHotDiscovery] Saving 0 suggestions...
+[AdminHotDiscovery] ✅ 0 suggestions saved
+[AdminHotDiscovery] ✅ Job completed in 33.61s
+[AdminHotDiscovery] 📊 Stats: 10 keywords → 0 seeds → 0 verified → 0 normalized → 0 saved
+[AdminHotDiscovery] Done

@@ -1,0 +1,970 @@
+[dotenv@17.2.3] injecting env (24) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
+[config] dotenv loaded: 24 variables from /Users/kimsungtae/toss/fairpick-app/backend/.env
+[AdminHotDiscovery] Gemini AI initialized (model: gemini-2.5-flash)
+[AdminHotDiscovery] Starting hot discovery job...
+[AdminHotDiscovery] Sampled 90 keywords
+[AdminHotDiscovery] Searching 90 keywords...
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 1 events from "롯데백화점 잠실점 팝업스토어"
+[AdminHotDiscovery] [Verify] "그린라이트 팝업스토어": ✓ (3 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "이태원 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "이태원 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "이태원 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "이태원 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "이태원 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "이태원 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "이태원 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "이태원 마켓"
+[AdminHotDiscovery] [AI] Extracted 1 events from "이태원 마켓"
+[AdminHotDiscovery] [Verify] "사업가 조찬모임(smart BCD)": ✓ (2 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "이태원 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 1 events from "스타필드 고양 팝업스토어"
+[AdminHotDiscovery] [Verify] "하랑한복 팝업스토어": ✗ (0 results)
+[AdminHotDiscovery] [Skip] Event not verified: "하랑한복 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 1 events from "스타필드 하남 플리마켓"
+[AdminHotDiscovery] [Verify] "코지마 팝업스토어": ✓ (5 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 1 events from "스타필드 하남 플리마켓"
+[AdminHotDiscovery] [Verify] "메가박스 낮잠나라 뜨개공주 이벤트": ✓ (2 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 1 events from "청담 팝업"
+[AdminHotDiscovery] [Verify] "치크밤 팝업": ✓ (4 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 1 events from "연남 굿즈"
+[AdminHotDiscovery] [Verify] "연남 - 전지적 독자 시점 [spot]팝업": ✗ (1 results)
+[AdminHotDiscovery] [Skip] Event not verified: "연남 - 전지적 독자 시점 [spot]팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 1 events from "연남 굿즈"
+[AdminHotDiscovery] [Verify] "전독시 팝업": ✓ (10 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 1 events from "신세계백화점 센텀시티 팝업스토어"
+[AdminHotDiscovery] [Verify] "MMMM Baby Room 팝업스토어": ✓ (4 results)
+[AdminHotDiscovery] [AI] Extracted 1 events from "신세계백화점 센텀시티 팝업스토어"
+[AdminHotDiscovery] [Verify] "플레이브 므메미무(MMMM) 인형 베이비룸 팝업스토어": ✗ (0 results)
+[AdminHotDiscovery] [Skip] Event not verified: "플레이브 므메미무(MMMM) 인형 베이비룸 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 1 events from "신세계백화점 센텀시티 팝업스토어"
+[AdminHotDiscovery] [Verify] "나메코 팝업 in 부산": ✓ (2 results)
+[AdminHotDiscovery] [AI] Extracted 1 events from "가로수길 체험"
+[AdminHotDiscovery] [Verify] "2026 시부야 드론쇼": ✓ (2 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 팝업"
+[AdminHotDiscovery] [AI] Extraction error: Expected ',' or ']' after array element in JSON at position 2
+[AdminHotDiscovery] [AI] Extracted 0 events from "가로수길 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 굿즈"
+[AdminHotDiscovery] [AI] Extracted 1 events from "성수 굿즈"
+[AdminHotDiscovery] [Verify] "마피아42 팝업스토어": ✓ (3 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 1 events from "코엑스 플리마켓"
+[AdminHotDiscovery] [Verify] "핸드아티코리아": ✓ (8 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 1 events from "코엑스 플리마켓"
+[AdminHotDiscovery] [Verify] "K-일러스트페어": ✓ (8 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 콜라보"
+[AdminHotDiscovery] [AI] Extracted 2 events from "신세계백화점 강남점 콜라보"
+[AdminHotDiscovery] [Verify] "두쫀쿠 팝업": ✓ (10 results)
+[AdminHotDiscovery] [Verify] "이색 콜라보: 영화관에서 즐기는 두쫀쿠": ✗ (1 results)
+[AdminHotDiscovery] [Skip] Event not verified: "이색 콜라보: 영화관에서 즐기는 두쫀쿠"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 강남점 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 1 events from "연남 플리마켓"
+[AdminHotDiscovery] [Verify] "에토스 아카이브 세일": ✗ (1 results)
+[AdminHotDiscovery] [Skip] Event not verified: "에토스 아카이브 세일"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "연남 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 1 events from "롯데백화점 본점 팝업"
+[AdminHotDiscovery] [Verify] "디즈니 K-Heritage 팝업": ✓ (5 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 1 events from "롯데백화점 본점 팝업"
+[AdminHotDiscovery] [Verify] "베르사체/삼보넷 테이블웨어 팝업스토어": ✗ (0 results)
+[AdminHotDiscovery] [Skip] Event not verified: "베르사체/삼보넷 테이블웨어 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 1 events from "롯데백화점 본점 팝업"
+[AdminHotDiscovery] [Verify] "디즈니 K-Heritage 팝업스토어": ✓ (3 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 1 events from "롯데백화점 본점 팝업"
+[AdminHotDiscovery] [Verify] "디즈니 K-Heritage 팝업스토어": ✓ (3 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 1 events from "현대백화점 압구정본점 팝업"
+[AdminHotDiscovery] [Verify] "르니나 장기 팝업": ✗ (0 results)
+[AdminHotDiscovery] [Skip] Event not verified: "르니나 장기 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 체험"
+[AdminHotDiscovery] [AI] Extracted 1 events from "현대백화점 압구정본점 체험"
+[AdminHotDiscovery] [Verify] "디솔트 팝업": ✓ (3 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 체험"
+[AdminHotDiscovery] [AI] Extracted 1 events from "현대백화점 압구정본점 체험"
+[AdminHotDiscovery] [Verify] "카페오마케 팝업스토어": ✗ (1 results)
+[AdminHotDiscovery] [Skip] Event not verified: "카페오마케 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "한남 콜라보"
+[AdminHotDiscovery] [AI] Extracted 1 events from "한남 콜라보"
+[AdminHotDiscovery] [Verify] "가나 취향위크": ✓ (5 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "한남 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "한남 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "한남 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "한남 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "한남 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "한남 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "한남 콜라보"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "IFC몰 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 체험"
+[AdminHotDiscovery] [AI] Extracted 1 events from "롯데백화점 본점 체험"
+[AdminHotDiscovery] [Verify] "디즈니 K-Heritage 팝업스토어": ✓ (3 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 체험"
+[AdminHotDiscovery] [AI] Extracted 1 events from "롯데백화점 본점 체험"
+[AdminHotDiscovery] [Verify] "셀바티코 팝업": ✓ (6 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 굿즈"
+[AdminHotDiscovery] [AI] Extracted 1 events from "코엑스 굿즈"
+[AdminHotDiscovery] [Verify] "비건·클린뷰티페어": ✓ (10 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "을지로 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "을지로 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "을지로 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "을지로 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "을지로 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "을지로 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "을지로 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "을지로 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "을지로 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "을지로 전시회"
+[AdminHotDiscovery] [AI] Extracted 1 events from "신세계백화점 센텀시티 팝업"
+[AdminHotDiscovery] [Verify] "MMMM Baby Room 팝업스토어": ✓ (4 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "신세계백화점 센텀시티 팝업"
+[AdminHotDiscovery] [AI] Extracted 4 events from "성수 전시"
+[AdminHotDiscovery] [Verify] "NCT WISH 팝업": ✓ (10 results)
+[AdminHotDiscovery] [Verify] "레고 팝업": ✓ (10 results)
+[AdminHotDiscovery] [Verify] "맥캘란 팝업": ✓ (10 results)
+[AdminHotDiscovery] [Verify] "블랙핑크 팝업": ✓ (10 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "성수 전시"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 잠실점 플리마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "코엑스 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 1 events from "현대백화점 압구정본점 굿즈"
+[AdminHotDiscovery] [Verify] "데가제 팝업": ✓ (2 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 굿즈"
+[AdminHotDiscovery] [AI] Extracted 1 events from "현대백화점 압구정본점 굿즈"
+[AdminHotDiscovery] [Verify] "카페오마케": ✓ (10 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 굿즈"
+[AdminHotDiscovery] [AI] Extracted 0 events from "압구정 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "압구정 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "압구정 전시회"
+[AdminHotDiscovery] [AI] Extracted 1 events from "압구정 전시회"
+[AdminHotDiscovery] [Verify] "괴짜전": ✓ (10 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "압구정 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "압구정 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "압구정 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "압구정 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "압구정 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "압구정 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "현대백화점 압구정본점 마켓"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 고양 전시회"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "청담 체험"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 1 events from "스타필드 하남 팝업스토어"
+[AdminHotDiscovery] [Verify] "오쿠쿠 베이커리 스타필드하남 팝업스토어": ✓ (5 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 1 events from "스타필드 하남 팝업스토어"
+[AdminHotDiscovery] [Verify] "네스프레소 X 스타벅스 네오 팝업스토어": ✓ (2 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "스타필드 하남 팝업스토어"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업 주말"
+[AdminHotDiscovery] [AI] Extracted 1 events from "롯데백화점 본점 팝업 주말"
+[AdminHotDiscovery] [Verify] "디즈니 K-Heritage 팝업스토어": ✓ (3 results)
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업 주말"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업 주말"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업 주말"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업 주말"
+[AdminHotDiscovery] [AI] Extracted 1 events from "롯데백화점 본점 팝업 주말"
+[NaverAPI] Blog search error: {
+  query: '"픽베이크 PICK BAKE 에그타르트 팝업" 명동 롯데백화점 본점 2026',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '"픽베이크 PICK BAKE 에그타르트 팝업" 명동 롯데백화점 본점 2026',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[AdminHotDiscovery] [Verify] "픽베이크 PICK BAKE 에그타르트 팝업": ✗ (0 results)
+[AdminHotDiscovery] [Skip] Event not verified: "픽베이크 PICK BAKE 에그타르트 팝업"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업 주말"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업 주말"
+[AdminHotDiscovery] [AI] Extracted 0 events from "롯데백화점 본점 팝업 주말"
+[NaverAPI] Web search error: {
+  query: '현대백화점 압구정본점 굿즈 진행중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '현대백화점 압구정본점 굿즈 진행중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '롯데백화점 잠실점 전시회 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '롯데백화점 잠실점 전시회 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '코엑스 전시회 2026년 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '코엑스 전시회 2026년 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '압구정 플리마켓 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '압구정 플리마켓 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '스타필드 고양 팝업스토어 예약중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '스타필드 고양 팝업스토어 예약중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '가로수길 마켓 진행중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '가로수길 마켓 진행중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '신세계백화점 센텀시티 플리마켓 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '신세계백화점 센텀시티 플리마켓 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: 'IFC몰 플리마켓 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: 'IFC몰 플리마켓 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '롯데백화점 잠실점 마켓 예약중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '롯데백화점 잠실점 마켓 예약중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '신세계백화점 센텀시티 플리마켓 오늘',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '신세계백화점 센텀시티 플리마켓 오늘',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '스타필드 고양 마켓 내일',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '스타필드 고양 마켓 내일',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '롯데백화점 잠실점 체험 오픈예정',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '롯데백화점 잠실점 체험 오픈예정',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: 'IFC몰 팝업 이번주',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: 'IFC몰 팝업 이번주',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '청담 마켓 2026년 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '청담 마켓 2026년 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '연남 플리마켓 오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '연남 플리마켓 오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '현대백화점 압구정본점 마켓 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '현대백화점 압구정본점 마켓 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: 'IFC몰 팝업스토어 이번주',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: 'IFC몰 팝업스토어 이번주',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '삼청동 팝업스토어 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '삼청동 팝업스토어 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '이태원 전시회 진행중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '이태원 전시회 진행중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '청담 팝업스토어 진행중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '청담 팝업스토어 진행중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '가로수길 팝업 2026년 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '가로수길 팝업 2026년 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '삼청동 팝업 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '삼청동 팝업 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '압구정 전시회 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '압구정 전시회 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '삼청동 굿즈 오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '삼청동 굿즈 오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '이태원 전시회 오픈예정',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '이태원 전시회 오픈예정',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '연남 굿즈 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '연남 굿즈 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '현대백화점 압구정본점 전시 오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '현대백화점 압구정본점 전시 오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '이태원 전시회 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '이태원 전시회 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '더현대 서울 마켓 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '더현대 서울 마켓 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '스타필드 고양 굿즈 내일',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '스타필드 고양 굿즈 내일',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '청담 전시회 오픈예정',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '청담 전시회 오픈예정',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '신세계백화점 센텀시티 팝업 2026년 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '신세계백화점 센텀시티 팝업 2026년 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '롯데백화점 잠실점 마켓 오늘',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '롯데백화점 잠실점 마켓 오늘',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '청담 전시 이번주',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '청담 전시 이번주',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '이태원 팝업 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '이태원 팝업 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '을지로 팝업 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '을지로 팝업 신규오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '한남 팝업스토어 오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '한남 팝업스토어 오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '연남 체험 오픈예정',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '연남 체험 오픈예정',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '신세계백화점 센텀시티 전시회 예약중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '신세계백화점 센텀시티 전시회 예약중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '청담 팝업스토어 오늘',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '청담 팝업스토어 오늘',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '롯데백화점 본점 콜라보 2026년 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '롯데백화점 본점 콜라보 2026년 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '신세계백화점 센텀시티 체험 오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '신세계백화점 센텀시티 체험 오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '압구정 전시 오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '압구정 전시 오픈',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: 'IFC몰 굿즈 진행중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: 'IFC몰 굿즈 진행중',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '신세계백화점 강남점 팝업스토어 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '신세계백화점 강남점 팝업스토어 주말',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '이태원 마켓 오늘',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '이태원 마켓 오늘',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '롯데백화점 본점 전시 오늘',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '롯데백화점 본점 전시 오늘',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Blog search error: {
+  query: '스타필드 고양 전시 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[NaverAPI] Web search error: {
+  query: '스타필드 고양 전시 2월',
+  error: 'Request failed with status code 429',
+  status: 429
+}
+[AdminHotDiscovery] Found 375 raw candidates
+[AdminHotDiscovery] After deduplication: 342 candidates
+[AdminHotDiscovery] Saving 50 suggestions...
+[AdminHotDiscovery] ✅ 50 suggestions saved
+[AdminHotDiscovery] ✅ Job completed in 2516.86s
+[AdminHotDiscovery] Done
