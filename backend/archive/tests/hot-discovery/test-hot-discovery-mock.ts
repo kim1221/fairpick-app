@@ -3,8 +3,8 @@
  * (네이버 API Rate Limit 회피)
  */
 
-import { pool } from '../db';
-import { extractEventSeeds, normalizeAndDeduplicateEvents } from '../lib/aiExtractor';
+import { pool } from '../../../src/db';
+import { extractEventSeeds, normalizeAndDeduplicateEvents } from '../../../src/lib/aiExtractor';
 
 // Mock 데이터
 const mockBlogItems = [

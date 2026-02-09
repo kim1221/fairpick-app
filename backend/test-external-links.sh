@@ -46,7 +46,7 @@ echo "3️⃣  테스트 실행..."
 echo "   예상 시간: 약 30초"
 echo ""
 
-ts-node -r dotenv/config test-external-links.ts
+ts-node -r dotenv/config tests/integration/ai-enrichment/test-external-links.ts
 
 echo ""
 echo "✅ 테스트 완료!"

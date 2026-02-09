@@ -3,7 +3,7 @@
  * /admin/events/:id/enrich 엔드포인트가 제안을 생성하는지 확인
  */
 
-import { pool } from '../db';
+import { pool } from '../../../src/db';
 import axios from 'axios';
 
 const API_BASE = 'http://localhost:5001';

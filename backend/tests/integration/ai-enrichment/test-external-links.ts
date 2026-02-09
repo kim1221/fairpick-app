@@ -3,9 +3,9 @@
  * 다양한 카테고리의 이벤트에서 external_links 추출 정확도 확인
  */
 
-import { pool } from './src/db';
-import { searchEventInfo, mergeSearchResults } from './src/lib/naverApi';
-import { extractEventInfo } from './src/lib/aiExtractor';
+import { pool } from '../../../src/db';
+import { searchEventInfo, mergeSearchResults } from '../../../src/lib/naverApi';
+import { extractEventInfo } from '../../../src/lib/aiExtractor';
 
 interface Event {
   id: string;
