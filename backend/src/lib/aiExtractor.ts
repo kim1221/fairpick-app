@@ -890,7 +890,8 @@ function buildExtractionPromptWithSections(
     official: string[];
     place: string[];
     blog: string[];
-  }
+  },
+  useGoogleSearch: boolean = false // 🆕 Google Search 모드
 ): string {
   // 섹션별 컨텍스트 구성
   const ticketSection = sections.ticket.length > 0 
@@ -909,7 +910,11 @@ function buildExtractionPromptWithSections(
     ? `\n=== 📝 참고 정보 (블로그) ===\n${sections.blog.join('\n---\n')}`
     : '';
 
-  return `당신은 이벤트 정보 추출 전문가입니다. 주어진 정보에서 구조화된 데이터를 추출해주세요.
+  const contextSection = useGoogleSearch 
+    ? `\n⭐ **Google Search를 사용하여 최신 정보를 검색하세요!** 네이버, 공식 홈페이지, 티켓 사이트 등을 참고하여 정확한 정보만 추출하세요.`
+    : `${ticketSection}${officialSection}${placeSection}${blogSection}`;
+
+  return `당신은 이벤트 정보 추출 전문가입니다. ${useGoogleSearch ? '웹 검색을 통해' : '주어진 정보에서'} 구조화된 데이터를 추출해주세요.
 
 # 이벤트 정보
 - 제목: ${eventTitle}
@@ -934,10 +939,7 @@ ${overview}
 3. **overview (사용자용) 작성**: overview_raw를 바탕으로 매력적이고 간결하게 재작성
 
 # 검색 결과 (섹션별 분류)
-${ticketSection}
-${officialSection}
-${placeSection}
-${blogSection}
+${contextSection}
 
 ---
 
@@ -1355,12 +1357,21 @@ export async function extractEventInfoEnhanced(
     return null;
   }
 
+  // sections가 모두 비어있으면 Google Search Grounding 사용
+  const totalSectionItems = sections.ticket.length + sections.official.length + sections.place.length + sections.blog.length;
+  const useGoogleSearch = totalSectionItems === 0;
+
+  if (useGoogleSearch) {
+    console.log('[AI] 🔍 No sections provided, using Google Search Grounding');
+  }
+
   const prompt = buildExtractionPromptWithSections(
     eventTitle, 
     category, 
     overview, 
     yearTokens, 
-    sections
+    sections,
+    useGoogleSearch // 🆕 Google Search 모드 전달
   );
 
   try {
@@ -1368,8 +1379,21 @@ export async function extractEventInfoEnhanced(
     console.log('[AI] 🔍 Prompt length:', prompt.length, 'chars');
     console.log('[AI] 🔍 Category:', category);
     console.log('[AI] 🔍 Overview length:', overview?.length || 0, 'chars');
+    console.log('[AI] 🔍 Google Search mode:', useGoogleSearch);
 
-    const result = await model.generateContent(prompt);
+    // Google Search Grounding 사용 시 다른 모델 설정
+    let currentModel = model;
+    if (useGoogleSearch) {
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+      currentModel = genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        tools: [{ googleSearch: {} } as any], // Google Search Grounding (타입 우회)
+      });
+      console.log('[AI] 🔍 Using Gemini 2.5 Flash with Google Search Grounding');
+    }
+
+    const result = await currentModel.generateContent(prompt);
     const response = await result.response;
     const content = response.text();
     

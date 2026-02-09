@@ -154,6 +154,15 @@ function formatResultsForAI(results: ScoredSearchResult[]): string {
 import OpenAI from 'openai';
 
 const app = express();
+
+// 🔍 [DEBUG] 서버 식별 헤더 (모든 응답에 포함, 최우선)
+const PORT = Number(process.env.PORT ?? 4000);
+app.use((req, res, next) => {
+  res.setHeader('X-Backend-PID', process.pid.toString());
+  res.setHeader('X-Backend-Port', PORT.toString());
+  next();
+});
+
 app.use(cors());
 app.use(express.json());
 
@@ -928,6 +937,28 @@ app.get('/admin/image-stats', requireAdminAuth, async (req, res) => {
     console.error('[Admin] Image stats error:', error);
     res.status(500).json({ error: 'Failed to get image stats' });
   }
+});
+
+// 🔍 [DEBUG] 라우트 목록 조회 (임시 디버그용)
+app.get('/__debug/routes', (req, res) => {
+  const routes: Array<{ path: string; methods: string }> = [];
+  app._router?.stack?.forEach((middleware: any) => {
+    if (middleware.route) {
+      const methods = Object.keys(middleware.route.methods).join(',').toUpperCase();
+      routes.push({ path: middleware.route.path, methods });
+    }
+  });
+
+  const hasEnrichAIDirect = routes.some(r => r.path.includes('enrich-ai-direct'));
+
+  res.json({
+    pid: process.pid,
+    port: PORT,
+    startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+    uptime: Math.floor(process.uptime()),
+    routes,
+    hasEnrichAIDirect,
+  });
 });
 
 // Admin: 이벤트 목록
@@ -4475,10 +4506,63 @@ app.post('/events/:id/action', async (req, res) => {
  */
 app.post('/admin/events/enrich-preview', requireAdminAuth, async (req, res) => {
   try {
-    const { title, venue, main_category, overview, start_at, end_at } = req.body;
+    const { title, venue, main_category, overview, start_at, end_at, aiOnly, selectedFields } = req.body;
 
     if (!title) {
       return res.status(400).json({ error: 'Title is required' });
+    }
+
+    // 🆕 AI만으로 선택한 필드 재생성 (네이버 API 없이)
+    if (aiOnly && selectedFields && selectedFields.length > 0) {
+      console.log('[Admin] [Preview-AI-Direct] Using Google Search Grounding for selected fields:', { title, selectedFields });
+
+      // 연도 정보 추출
+      const startYear = start_at ? dayjs(start_at).year() : dayjs().year();
+      const endYear = end_at ? dayjs(end_at).year() : startYear;
+      const yearTokens = startYear === endYear ? `${startYear}` : `${startYear} ${endYear}`;
+
+      // extractEventInfoEnhanced 사용 (네이버 검색 건너뛰기)
+      const extracted = await extractEventInfoEnhanced(
+        title,
+        main_category || '행사',
+        overview || null,
+        yearTokens,
+        { ticket: [], official: [], place: [], blog: [] } // 빈 sections = Google Search 모드
+      );
+
+      if (!extracted) {
+        return res.json({
+          success: false,
+          message: 'AI 분석에 실패했습니다.',
+        });
+      }
+
+      // Phase 5: 저장 직전 검증
+      const validated = validateExtractedData(extracted, { startYear, endYear });
+
+      // 🆕 Phase 2: 제안 시스템 - AI 결과를 제안으로 변환
+      const { buildSuggestionsFromAI } = await import('./lib/suggestionBuilder');
+      const suggestions = buildSuggestionsFromAI(validated, {
+        hasSearchResults: false, // Google Search Grounding이지만 네이버 검색은 없음
+        searchResultCount: 0,
+        category: main_category || '행사',
+        currentEvent: {
+          title,
+          venue,
+          overview,
+          start_at,
+          end_at,
+        },
+        forceFields: selectedFields, // 선택한 필드만
+      });
+
+      console.log('[Preview-AI-Direct] Generated suggestions:', Object.keys(suggestions));
+
+      return res.json({
+        success: true,
+        message: `✅ AI로 ${Object.keys(suggestions).length}개 제안 생성 완료`,
+        suggestions, // 🆕 제안으로 반환
+      });
     }
 
     console.log('[Admin] [Phase A] AI enrich preview:', { title, venue, start_at, end_at });
@@ -4649,28 +4733,28 @@ app.post('/admin/events/enrich-preview', requireAdminAuth, async (req, res) => {
       finalAddress: finalAddress || 'none'
     });
 
+    // 🆕 Phase 2: 제안 시스템 - AI 결과를 제안으로 변환
+    const { buildSuggestionsFromAI } = await import('./lib/suggestionBuilder');
+    const suggestions = buildSuggestionsFromAI(extracted, {
+      hasSearchResults: true,
+      searchResultCount: allResults.length,
+      category: main_category || '행사',
+      currentEvent: {
+        // preview에서는 현재 이벤트가 없으므로, 사용자 입력 데이터만 전달
+        title,
+        venue,
+        overview,
+        start_at,
+        end_at,
+      },
+      forceFields: selectedFields || [], // 선택한 필드 또는 빈 필드만
+    });
+
+    console.log('[Admin] [Preview] Generated suggestions:', Object.keys(suggestions));
+
     res.json({
       success: true,
-      enriched: {
-        // 기본 정보
-        start_date: extracted.start_date || null,
-        end_date: extracted.end_date || null,
-        venue: finalVenue,
-        address: finalAddress,
-        overview: extracted.overview || overview || null,
-        
-        // 지오코딩 결과
-        lat,
-        lng,
-        region,
-        
-        // 추가 정보
-        derived_tags: extracted.derived_tags || [],
-        opening_hours: extracted.opening_hours || null,
-        price_min: extracted.price_min ?? null,
-        price_max: extracted.price_max ?? null,
-        external_links: externalLinks,
-      },
+      suggestions, // 🆕 제안으로 반환
     });
 
   } catch (error: any) {
@@ -4696,9 +4780,9 @@ app.post('/admin/events/enrich-preview', requireAdminAuth, async (req, res) => {
 app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { forceFields = [] } = req.body; // 🆕 forceFields 옵션 추가
+    const { forceFields = [], aiOnly = false } = req.body; // 🆕 aiOnly 옵션 추가
 
-    console.log('[Admin] [Enrich] forceFields:', forceFields);
+    console.log('[Admin] [Enrich] forceFields:', forceFields, 'aiOnly:', aiOnly);
 
     // 이벤트 조회 (기존 데이터 포함)
     const eventResult = await pool.query(
@@ -4738,70 +4822,74 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
 
     console.log('[Admin] [Phase A] Event years:', { startYear, endYear, yearTokens });
 
-    // Phase 1: 검색 확장 (카테고리별 특화 쿼리 포함)
-    const allResults = await searchEventInfoEnhanced(
-      event.title,
-      event.venue || '',
-      startYear,
-      endYear,
-      event.main_category  // 🆕 카테고리 추가
-    );
+    // Phase 1: 검색 확장 (aiOnly가 false일 때만)
+    let allResults: any[] = [];
+    let sections: any = { ticket: [], official: [], place: [], blog: [] };
+    let aiContext: any = { ticket: [], official: [], place: [], blog: [] };
+    
+    if (!aiOnly) {
+      allResults = await searchEventInfoEnhanced(
+        event.title,
+        event.venue || '',
+        startYear,
+        endYear,
+        event.main_category  // 🆕 카테고리 추가
+      );
 
-    if (!allResults || allResults.length === 0) {
-      return res.json({
-        success: false,
-        message: '검색 결과가 없습니다.',
-        enriched: null,
-      });
+      if (!allResults || allResults.length === 0) {
+        console.log('[Admin] [Phase A] No search results, continuing with AI-only mode');
+      } else {
+        console.log(`[Admin] [Phase A] Total raw results: ${allResults.length}`);
+
+        // Phase 2: 방어 필터링 (hard drop)
+        const filtered = filterSearchResults(allResults, [startYear, endYear]);
+        console.log(`[Admin] [Phase A] After filtering: ${filtered.length}`);
+
+        // Phase 3: 스코어링 (soft penalty)
+        const scored = scoreSearchResults(filtered, {
+          title: event.title,
+          venue: event.venue || '',
+          startYear,
+          endYear,
+          startMonth,
+        });
+
+        // Phase 3.5: 도메인별 제한 (다양성)
+        const capped = capResultsByDomain(scored, {
+          maxPerDomain: 2,
+          maxWeb: 15,
+          maxBlog: 6,
+          maxPlace: 3,
+        });
+
+        // Phase 4: 섹션별 그룹핑
+        sections = groupResultsBySection(capped);
+        console.log('[Admin] [Phase A] Sections:', {
+          ticket: sections.ticket.length,
+          official: sections.official.length,
+          place: sections.place.length,
+          blog: sections.blog.length,
+        });
+
+        // AI용 컨텍스트 생성
+        aiContext = {
+          ticket: sections.ticket.map((r: any) => formatResultsForAI([r])),
+          official: sections.official.map((r: any) => formatResultsForAI([r])),
+          place: sections.place.map((r: any) => formatResultsForAI([r])),
+          blog: sections.blog.map((r: any) => formatResultsForAI([r])),
+        };
+      }
+    } else {
+      console.log('[Admin] [Phase A] AI-only mode: Skipping Naver API search');
     }
 
-    console.log(`[Admin] [Phase A] Total raw results: ${allResults.length}`);
-
-    // Phase 2: 방어 필터링 (hard drop)
-    const filtered = filterSearchResults(allResults, [startYear, endYear]);
-    console.log(`[Admin] [Phase A] After filtering: ${filtered.length}`);
-
-    // Phase 3: 스코어링 (soft penalty)
-    const scored = scoreSearchResults(filtered, {
-      title: event.title,
-      venue: event.venue || '',
-      startYear,
-      endYear,
-      startMonth,
-    });
-
-    // Phase 3.5: 도메인별 제한 (다양성)
-    const capped = capResultsByDomain(scored, {
-      maxPerDomain: 2,
-      maxWeb: 15,
-      maxBlog: 6,
-      maxPlace: 3,
-    });
-
-    // Phase 4: 섹션별 그룹핑
-    const sections = groupResultsBySection(capped);
-    console.log('[Admin] [Phase A] Sections:', {
-      ticket: sections.ticket.length,
-      official: sections.official.length,
-      place: sections.place.length,
-      blog: sections.blog.length,
-    });
-
-    // AI용 컨텍스트 생성
-    const aiContext = {
-      ticket: sections.ticket.map(r => formatResultsForAI([r])),
-      official: sections.official.map(r => formatResultsForAI([r])),
-      place: sections.place.map(r => formatResultsForAI([r])),
-      blog: sections.blog.map(r => formatResultsForAI([r])),
-    };
-
-    // Gemini AI 분석 (섹션별 분리)
+    // Gemini AI 분석
     let extracted = await extractEventInfoEnhanced(
       event.title,
       event.main_category,
       event.overview,
       yearTokens,
-      aiContext
+      aiOnly ? { ticket: [], official: [], place: [], blog: [] } : aiContext // 🆕 aiOnly 모드에서는 빈 sections 전달
     );
 
     if (!extracted) {
@@ -4821,8 +4909,9 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
       performanceData: (extracted as any).performance_display,
     });
 
-    // Phase 5: 저장 직전 검증
-    extracted = validateExtractedData(extracted, { startYear, endYear });
+    // Phase 5: 저장 직전 검증 (enrich API)
+    let validatedExtracted = validateExtractedData(extracted, { startYear, endYear });
+    extracted = validatedExtracted; // 이후 코드에서 extracted 계속 사용
 
     // ⭐ AI 보완 정책: forceFields에 따라 조건부 재생성
     console.log('[Admin] [Enrich] 기존 데이터 체크:', {
@@ -4857,7 +4946,7 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
     };
     
     // Place 섹션에서 official 링크가 없을 때만 추가
-    if (!externalLinks.official && sections.place.length > 0) {
+    if (!externalLinks.official && !aiOnly && sections.place.length > 0) {
       externalLinks.official = sections.place[0].link;
       console.log('[Admin] [Enrich] Place 링크를 official로 사용:', externalLinks.official);
     }
@@ -4871,7 +4960,7 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
     if (shouldForce('opening_hours')) {
       // 강제 재생성: AI 값 우선
       if (hasAIHours) {
-        finalOpeningHours = extracted.opening_hours;
+        finalOpeningHours = validatedExtracted.opening_hours;
         console.log('[Admin] [Enrich] 🔧 강제 재생성: AI 운영시간 사용');
       } else {
         const category = event.main_category || '행사';
@@ -5011,25 +5100,43 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
  * Request Body:
  * - selectedFields?: string[] - 보완할 필드 목록
  */
+console.log('[REGISTER] 📝 Registering route: POST /admin/events/:id/enrich-ai-direct');
 app.post('/admin/events/:id/enrich-ai-direct', requireAdminAuth, async (req, res) => {
+  console.log('[Backend] 🎯 ROUTE REACHED: /admin/events/:id/enrich-ai-direct');
+
   try {
     const { id } = req.params;
     const { selectedFields = [] } = req.body;
 
-    console.log('[Admin] [AI-Direct] Enriching event:', { id, selectedFields });
+    console.log('[Backend] 📥 Request params/body:', {
+      id,
+      idType: typeof id,
+      selectedFields,
+      fieldsCount: selectedFields.length
+    });
 
     // 이벤트 조회
+    console.log('[Backend] 🔍 DB query starting for id:', id);
+
     const eventResult = await pool.query(
-      `SELECT id, title, main_category, venue, address, overview, 
-              external_links, opening_hours, price_min, price_max, 
-              start_at, end_at, derived_tags, metadata 
+      `SELECT id, title, main_category, venue, address, overview,
+              external_links, opening_hours, price_min, price_max,
+              start_at, end_at, derived_tags, metadata
        FROM canonical_events WHERE id = $1`,
       [id]
     );
 
+    console.log('[Backend] 📊 DB query result count:', eventResult.rows.length);
+
     if (eventResult.rows.length === 0) {
+      console.warn('[Backend] ❌ Event NOT FOUND in DB for id:', id);
       return res.status(404).json({ error: 'Event not found' });
     }
+
+    console.log('[Backend] ✅ Event FOUND:', {
+      id: eventResult.rows[0].id,
+      title: eventResult.rows[0].title
+    });
 
     const event = eventResult.rows[0];
 
@@ -5169,48 +5276,31 @@ ${requestedFields}
 
     console.log('[AI-Direct] AI extracted data:', Object.keys(aiData));
 
-    // metadata 업데이트
-    const currentMetadata = event.metadata || {};
-    if (!currentMetadata.display) currentMetadata.display = {};
-    if (!currentMetadata.display.popup) currentMetadata.display.popup = {};
+    // 🆕 Phase 2: AI 제안 시스템 - selectedFields에 따라 제안 생성
+    const { buildSuggestionsFromAIDirect } = await import('./lib/suggestionBuilder');
+    
+    const aiSuggestions = buildSuggestionsFromAIDirect(aiData, {
+      selectedFields: selectedFields,
+      category: event.main_category,
+      currentEvent: event,
+    });
 
-    // AI 데이터 병합
-    if (aiData.photo_zone) currentMetadata.display.popup.photo_zone = aiData.photo_zone;
-    if (aiData.waiting_time) currentMetadata.display.popup.waiting_time = aiData.waiting_time;
-    if (aiData.parking) currentMetadata.display.popup.parking = aiData.parking;
-    if (aiData.reservation) currentMetadata.display.popup.reservation = aiData.reservation;
-    if (aiData.fnb_items) currentMetadata.display.popup.fnb_items = aiData.fnb_items;
+    console.log('[AI-Direct] Generated suggestions:', Object.keys(aiSuggestions).length);
 
-    // opening_hours 업데이트
-    let updatedOpeningHours = event.opening_hours || {};
-    if (aiData.opening_hours) {
-      updatedOpeningHours = { ...updatedOpeningHours, ...aiData.opening_hours };
-    }
-
-    // DB 업데이트
+    // DB에 ai_suggestions 저장
     await pool.query(`
       UPDATE canonical_events
-      SET metadata = $1,
-          opening_hours = $2,
+      SET ai_suggestions = $1,
           updated_at = NOW()
-      WHERE id = $3
-    `, [JSON.stringify(currentMetadata), JSON.stringify(updatedOpeningHours), id]);
+      WHERE id = $2
+    `, [JSON.stringify(aiSuggestions), id]);
 
-    console.log('[AI-Direct] ✅ Event enriched successfully');
-
-    // 채워진 필드 목록
-    const filledFields: string[] = [];
-    if (aiData.photo_zone) filledFields.push('포토존');
-    if (aiData.waiting_time) filledFields.push('대기시간');
-    if (aiData.opening_hours) filledFields.push('운영시간');
-    if (aiData.parking) filledFields.push('주차');
-    if (aiData.reservation) filledFields.push('예약');
-    if (aiData.fnb_items) filledFields.push('메뉴');
+    console.log('[AI-Direct] ✅ AI suggestions saved to DB');
 
     res.json({
       success: true,
-      message: `✅ AI가 ${filledFields.length}개 필드를 채웠습니다: ${filledFields.join(', ')}`,
-      enriched: aiData,
+      message: `✅ ${Object.keys(aiSuggestions).length}개의 AI 제안이 생성되었습니다.\n\n아래 "AI 제안" 섹션에서 확인하세요.`,
+      suggestions: aiSuggestions,
       sources: aiData.sources || [],
     });
 
@@ -5833,10 +5923,25 @@ app.post('/admin/hot-suggestions/:id/approve-simple', requireAdminAuth, async (r
   }
 });
 
-const PORT = Number(process.env.PORT ?? 4000);
+// PORT는 최상단에서 이미 선언됨
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`[API] Server listening on http://0.0.0.0:${PORT}`);
-  console.log(`[API] Access from network: http://172.20.10.4:${PORT}`);
+  console.log(`[API] PID: ${process.pid}`);
+  console.log(`[API] Started at: ${new Date().toISOString()}`);
+
+  // 🔍 [DEBUG] 등록된 라우트 덤프
+  console.log('\n[DEBUG] 📋 Registered routes:');
+  const routes: Array<{ path: string; methods: string }> = [];
+  app._router?.stack?.forEach((middleware: any) => {
+    if (middleware.route) {
+      const methods = Object.keys(middleware.route.methods).join(',').toUpperCase();
+      routes.push({ path: middleware.route.path, methods });
+      console.log(`  ${methods} ${middleware.route.path}`);
+    }
+  });
+
+  const hasEnrichAIDirect = routes.some(r => r.path.includes('enrich-ai-direct'));
+  console.log(`\n[DEBUG] ✓ Route /admin/events/:id/enrich-ai-direct registered: ${hasEnrichAIDirect}\n`);
 
   // Initialize scheduler
   initScheduler();

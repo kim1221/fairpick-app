@@ -81,7 +81,7 @@ export function buildSuggestionsFromAI(
 
   // overview_raw: 내부용이므로 제안하지 않음 (AI가 자동으로 참고용으로만 사용)
 
-  // 날짜: 빈 값일 때만 제안 (null, undefined, 빈 문자열 체크)
+  // 날짜: 선택한 필드에 포함되어 있으면 제안
   const hasStartDate = currentEvent.start_at !== null && 
                        currentEvent.start_at !== undefined && 
                        currentEvent.start_at !== '';
@@ -89,7 +89,7 @@ export function buildSuggestionsFromAI(
                      currentEvent.end_at !== undefined && 
                      currentEvent.end_at !== '';
   
-  if (extracted.start_date && !hasStartDate) {
+  if (extracted.start_date && shouldSuggest('start_at', hasStartDate)) {
     suggestions.start_at = createSuggestion(
       extracted.start_date,
       'AI',
@@ -99,7 +99,7 @@ export function buildSuggestionsFromAI(
     );
   }
 
-  if (extracted.end_date && !hasEndDate) {
+  if (extracted.end_date && shouldSuggest('end_at', hasEndDate)) {
     suggestions.end_at = createSuggestion(
       extracted.end_date,
       'AI',
@@ -109,11 +109,11 @@ export function buildSuggestionsFromAI(
     );
   }
 
-  // 장소/주소: 빈 값일 때만 제안 (null, undefined, 빈 문자열 체크)
+  // 장소/주소: 선택한 필드에 포함되어 있으면 제안
   const hasVenue = currentEvent.venue && currentEvent.venue.trim() !== '';
   const hasAddress = currentEvent.address && currentEvent.address.trim() !== '';
   
-  if (extracted.venue && !hasVenue) {
+  if (extracted.venue && shouldSuggest('venue', hasVenue)) {
     suggestions.venue = createSuggestion(
       extracted.venue,
       'AI',
@@ -123,7 +123,7 @@ export function buildSuggestionsFromAI(
     );
   }
 
-  if (extracted.address && !hasAddress) {
+  if (extracted.address && shouldSuggest('address', hasAddress)) {
     suggestions.address = createSuggestion(
       extracted.address,
       'AI',
@@ -133,8 +133,11 @@ export function buildSuggestionsFromAI(
     );
   }
 
-  // 2. 가격: 빈 값일 때만 제안
-  if (extracted.price_min !== undefined && extracted.price_min !== null && currentEvent.price_min == null) {
+  // 2. 가격: 선택한 필드에 포함되어 있으면 제안
+  const hasPriceMin = currentEvent.price_min != null;
+  const hasPriceMax = currentEvent.price_max != null;
+  
+  if (extracted.price_min !== undefined && extracted.price_min !== null && shouldSuggest('price_min', hasPriceMin)) {
     suggestions.price_min = createSuggestion(
       extracted.price_min,
       'AI',
@@ -144,7 +147,7 @@ export function buildSuggestionsFromAI(
     );
   }
 
-  if (extracted.price_max !== undefined && extracted.price_max !== null && currentEvent.price_max == null) {
+  if (extracted.price_max !== undefined && extracted.price_max !== null && shouldSuggest('price_max', hasPriceMax)) {
     suggestions.price_max = createSuggestion(
       extracted.price_max,
       'AI',
@@ -154,8 +157,9 @@ export function buildSuggestionsFromAI(
     );
   }
 
-  // 3. 태그: 빈 값일 때만 제안
-  if (extracted.derived_tags && extracted.derived_tags.length > 0 && (!currentEvent.derived_tags || currentEvent.derived_tags.length === 0)) {
+  // 3. 태그: 선택한 필드에 포함되어 있으면 제안
+  const hasTags = currentEvent.derived_tags && currentEvent.derived_tags.length > 0;
+  if (extracted.derived_tags && extracted.derived_tags.length > 0 && shouldSuggest('derived_tags', hasTags)) {
     suggestions.derived_tags = createSuggestion(
       extracted.derived_tags,
       'AI',
@@ -165,10 +169,10 @@ export function buildSuggestionsFromAI(
     );
   }
 
-  // 4. 운영 시간: 빈 값일 때만 제안
+  // 4. 운영 시간: 선택한 필드에 포함되어 있으면 제안
   const currentOpeningHours = currentEvent.opening_hours || {};
   const hasCurrentOpeningHours = Object.values(currentOpeningHours).some((v: any) => v !== null && v !== '');
-  if (extracted.opening_hours && !hasCurrentOpeningHours) {
+  if (extracted.opening_hours && shouldSuggest('opening_hours', hasCurrentOpeningHours)) {
     const hasContent = Object.values(extracted.opening_hours).some(v => v !== null && v !== '');
     if (hasContent) {
       suggestions.opening_hours = createSuggestion(
@@ -181,12 +185,16 @@ export function buildSuggestionsFromAI(
     }
   }
 
-  // 5. 외부 링크: 빈 값일 때만 제안
+  // 5. 외부 링크: 선택한 필드에 포함되어 있으면 제안
   if (extracted.external_links) {
     const links = extracted.external_links;
     const currentLinks = currentEvent.external_links || {};
     
-    if (links.official && !currentLinks.official) {
+    const hasOfficialLink = !!currentLinks.official;
+    const hasTicketLink = !!currentLinks.ticket;
+    const hasReservationLink = !!currentLinks.reservation;
+    
+    if (links.official && shouldSuggest('external_links.official', hasOfficialLink)) {
       suggestions['external_links.official'] = createSuggestion(
         links.official,
         'AI',
@@ -195,7 +203,7 @@ export function buildSuggestionsFromAI(
         { hasContextualData: context.hasSearchResults }
       );
     }
-    if (links.ticket && !currentLinks.ticket) {
+    if (links.ticket && shouldSuggest('external_links.ticket', hasTicketLink)) {
       suggestions['external_links.ticket'] = createSuggestion(
         links.ticket,
         'AI',
@@ -204,7 +212,7 @@ export function buildSuggestionsFromAI(
         { hasContextualData: context.hasSearchResults }
       );
     }
-    if (links.reservation && !currentLinks.reservation) {
+    if (links.reservation && shouldSuggest('external_links.reservation', hasReservationLink)) {
       suggestions['external_links.reservation'] = createSuggestion(
         links.reservation,
         'AI',
@@ -215,7 +223,7 @@ export function buildSuggestionsFromAI(
     }
   }
 
-  // 6. 카테고리 특화 필드: 개별 필드 단위로 제안 (빈 값일 때만)
+  // 6. 카테고리 특화 필드: 개별 필드 단위로 제안 (선택한 필드에 포함되어 있으면)
   const currentMetadata = currentEvent.metadata || {};
   const currentDisplay = currentMetadata.display || {};
   
@@ -224,8 +232,8 @@ export function buildSuggestionsFromAI(
     const currentExhibition = currentDisplay.exhibition || {};
     
     // 개별 필드 단위로 제안
-    if (exhibitionData.artists && exhibitionData.artists.length > 0 && 
-        (!currentExhibition.artists || currentExhibition.artists.length === 0)) {
+    const hasArtists = currentExhibition.artists && currentExhibition.artists.length > 0;
+    if (exhibitionData.artists && exhibitionData.artists.length > 0 && shouldSuggest('metadata.display.exhibition.artists', hasArtists)) {
       suggestions['metadata.display.exhibition.artists'] = createSuggestion(
         exhibitionData.artists,
         'AI',
@@ -235,8 +243,8 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (exhibitionData.genre && exhibitionData.genre.length > 0 && 
-        (!currentExhibition.genre || currentExhibition.genre.length === 0)) {
+    const hasGenre = currentExhibition.genre && currentExhibition.genre.length > 0;
+    if (exhibitionData.genre && exhibitionData.genre.length > 0 && shouldSuggest('metadata.display.exhibition.genre', hasGenre)) {
       suggestions['metadata.display.exhibition.genre'] = createSuggestion(
         exhibitionData.genre,
         'AI',
@@ -246,7 +254,8 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (exhibitionData.duration_minutes && !currentExhibition.duration_minutes) {
+    const hasDuration = !!currentExhibition.duration_minutes;
+    if (exhibitionData.duration_minutes && shouldSuggest('metadata.display.exhibition.duration_minutes', hasDuration)) {
       suggestions['metadata.display.exhibition.duration_minutes'] = createSuggestion(
         exhibitionData.duration_minutes,
         'AI',
@@ -256,12 +265,35 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (exhibitionData.type && !currentExhibition.type) {
+    const hasType = !!currentExhibition.type;
+    if (exhibitionData.type && shouldSuggest('metadata.display.exhibition.type', hasType)) {
       suggestions['metadata.display.exhibition.type'] = createSuggestion(
         exhibitionData.type,
         'AI',
         'Gemini extracted exhibition type',
         'metadata.display.exhibition.type',
+        { hasContextualData: context.hasSearchResults }
+      );
+    }
+    
+    const hasFacilities = !!currentExhibition.facilities;
+    if (exhibitionData.facilities && shouldSuggest('metadata.display.exhibition.facilities', hasFacilities)) {
+      suggestions['metadata.display.exhibition.facilities'] = createSuggestion(
+        exhibitionData.facilities,
+        'AI',
+        'Gemini extracted facilities',
+        'metadata.display.exhibition.facilities',
+        { hasContextualData: context.hasSearchResults }
+      );
+    }
+    
+    const hasDocentTour = !!currentExhibition.docent_tour;
+    if (exhibitionData.docent_tour && shouldSuggest('metadata.display.exhibition.docent_tour', hasDocentTour)) {
+      suggestions['metadata.display.exhibition.docent_tour'] = createSuggestion(
+        exhibitionData.docent_tour,
+        'AI',
+        'Gemini extracted docent tour info',
+        'metadata.display.exhibition.docent_tour',
         { hasContextualData: context.hasSearchResults }
       );
     }
@@ -272,8 +304,8 @@ export function buildSuggestionsFromAI(
     const currentPerformance = currentDisplay.performance || {};
     
     // 개별 필드 단위로 제안
-    if (performanceData.cast && performanceData.cast.length > 0 && 
-        (!currentPerformance.cast || currentPerformance.cast.length === 0)) {
+    const hasCast = currentPerformance.cast && currentPerformance.cast.length > 0;
+    if (performanceData.cast && performanceData.cast.length > 0 && shouldSuggest('metadata.display.performance.cast', hasCast)) {
       suggestions['metadata.display.performance.cast'] = createSuggestion(
         performanceData.cast,
         'AI',
@@ -283,8 +315,8 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (performanceData.genre && performanceData.genre.length > 0 && 
-        (!currentPerformance.genre || currentPerformance.genre.length === 0)) {
+    const hasGenre = currentPerformance.genre && currentPerformance.genre.length > 0;
+    if (performanceData.genre && performanceData.genre.length > 0 && shouldSuggest('metadata.display.performance.genre', hasGenre)) {
       suggestions['metadata.display.performance.genre'] = createSuggestion(
         performanceData.genre,
         'AI',
@@ -294,7 +326,8 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (performanceData.duration_minutes && !currentPerformance.duration_minutes) {
+    const hasDuration = !!currentPerformance.duration_minutes;
+    if (performanceData.duration_minutes && shouldSuggest('metadata.display.performance.duration_minutes', hasDuration)) {
       suggestions['metadata.display.performance.duration_minutes'] = createSuggestion(
         performanceData.duration_minutes,
         'AI',
@@ -304,7 +337,8 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (performanceData.age_limit && !currentPerformance.age_limit) {
+    const hasAgeLimit = !!currentPerformance.age_limit;
+    if (performanceData.age_limit && shouldSuggest('metadata.display.performance.age_limit', hasAgeLimit)) {
       suggestions['metadata.display.performance.age_limit'] = createSuggestion(
         performanceData.age_limit,
         'AI',
@@ -314,8 +348,19 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (performanceData.discounts && performanceData.discounts.length > 0 && 
-        (!currentPerformance.discounts || currentPerformance.discounts.length === 0)) {
+    const hasIntermission = !!currentPerformance.intermission;
+    if (performanceData.intermission && shouldSuggest('metadata.display.performance.intermission', hasIntermission)) {
+      suggestions['metadata.display.performance.intermission'] = createSuggestion(
+        performanceData.intermission,
+        'AI',
+        'Gemini extracted intermission info',
+        'metadata.display.performance.intermission',
+        { hasContextualData: context.hasSearchResults }
+      );
+    }
+    
+    const hasDiscounts = currentPerformance.discounts && currentPerformance.discounts.length > 0;
+    if (performanceData.discounts && performanceData.discounts.length > 0 && shouldSuggest('metadata.display.performance.discounts', hasDiscounts)) {
       suggestions['metadata.display.performance.discounts'] = createSuggestion(
         performanceData.discounts,
         'AI',
@@ -332,7 +377,8 @@ export function buildSuggestionsFromAI(
     const currentFestival = currentDisplay.festival || {};
     
     // 개별 필드 단위로 제안
-    if (festivalData.organizer && !currentFestival.organizer) {
+    const hasOrganizer = !!currentFestival.organizer;
+    if (festivalData.organizer && shouldSuggest('metadata.display.festival.organizer', hasOrganizer)) {
       suggestions['metadata.display.festival.organizer'] = createSuggestion(
         festivalData.organizer,
         'AI',
@@ -342,7 +388,8 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (festivalData.program_highlights && !currentFestival.program_highlights) {
+    const hasProgramHighlights = !!currentFestival.program_highlights;
+    if (festivalData.program_highlights && shouldSuggest('metadata.display.festival.program_highlights', hasProgramHighlights)) {
       suggestions['metadata.display.festival.program_highlights'] = createSuggestion(
         festivalData.program_highlights,
         'AI',
@@ -352,7 +399,8 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (festivalData.food_and_booths && !currentFestival.food_and_booths) {
+    const hasFoodAndBooths = !!currentFestival.food_and_booths;
+    if (festivalData.food_and_booths && shouldSuggest('metadata.display.festival.food_and_booths', hasFoodAndBooths)) {
       suggestions['metadata.display.festival.food_and_booths'] = createSuggestion(
         festivalData.food_and_booths,
         'AI',
@@ -362,7 +410,8 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (festivalData.scale_text && !currentFestival.scale_text) {
+    const hasScaleText = !!currentFestival.scale_text;
+    if (festivalData.scale_text && shouldSuggest('metadata.display.festival.scale_text', hasScaleText)) {
       suggestions['metadata.display.festival.scale_text'] = createSuggestion(
         festivalData.scale_text,
         'AI',
@@ -372,7 +421,8 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (festivalData.parking_tips && !currentFestival.parking_tips) {
+    const hasParkingTips = !!currentFestival.parking_tips;
+    if (festivalData.parking_tips && shouldSuggest('metadata.display.festival.parking_tips', hasParkingTips)) {
       suggestions['metadata.display.festival.parking_tips'] = createSuggestion(
         festivalData.parking_tips,
         'AI',
@@ -389,7 +439,8 @@ export function buildSuggestionsFromAI(
     const currentEventDisplay = currentDisplay.event || {};
     
     // 개별 필드 단위로 제안
-    if (eventData.target_audience && !currentEventDisplay.target_audience) {
+    const hasTargetAudience = !!currentEventDisplay.target_audience;
+    if (eventData.target_audience && shouldSuggest('metadata.display.event.target_audience', hasTargetAudience)) {
       suggestions['metadata.display.event.target_audience'] = createSuggestion(
         eventData.target_audience,
         'AI',
@@ -399,7 +450,8 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (eventData.capacity && !currentEventDisplay.capacity) {
+    const hasCapacity = !!currentEventDisplay.capacity;
+    if (eventData.capacity && shouldSuggest('metadata.display.event.capacity', hasCapacity)) {
       suggestions['metadata.display.event.capacity'] = createSuggestion(
         eventData.capacity,
         'AI',
@@ -409,7 +461,8 @@ export function buildSuggestionsFromAI(
       );
     }
     
-    if (eventData.registration && !currentEventDisplay.registration) {
+    const hasRegistration = !!currentEventDisplay.registration;
+    if (eventData.registration && shouldSuggest('metadata.display.event.registration', hasRegistration)) {
       suggestions['metadata.display.event.registration'] = createSuggestion(
         eventData.registration,
         'AI',
@@ -577,6 +630,86 @@ export function buildSuggestionsFromAI(
     }
   }
 
+  // 🆕 선택한 필드 중 정보를 못 찾은 필드에 대한 설명 추가
+  if (forceFields.length > 0) {
+    console.log('[SuggestionBuilder] Checking for missing fields in forceFields:', forceFields);
+    
+    const fieldDescriptions: Record<string, string> = {
+      'overview': '개요',
+      'start_at': '시작 날짜',
+      'end_at': '종료 날짜',
+      'venue': '장소',
+      'address': '주소',
+      'price_min': '최소 가격',
+      'price_max': '최대 가격',
+      'derived_tags': '태그',
+      'opening_hours': '운영 시간',
+      'external_links': '외부 링크',
+      'external_links.official': '공식 링크',
+      'external_links.ticket': '티켓 링크',
+      'external_links.reservation': '예약 링크',
+      'metadata.display.exhibition.artists': '작가/아티스트',
+      'metadata.display.exhibition.genre': '전시 장르',
+      'metadata.display.exhibition.type': '전시 유형',
+      'metadata.display.exhibition.duration_minutes': '관람 시간',
+      'metadata.display.exhibition.facilities': '편의시설',
+      'metadata.display.exhibition.docent_tour': '도슨트 투어',
+      'metadata.display.performance.cast': '출연진',
+      'metadata.display.performance.genre': '공연 장르',
+      'metadata.display.performance.duration_minutes': '공연 시간',
+      'metadata.display.performance.intermission': '인터미션',
+      'metadata.display.performance.age_limit': '연령 제한',
+      'metadata.display.performance.discounts': '할인 정보',
+      'metadata.display.festival.organizer': '주최/주관',
+      'metadata.display.festival.program_highlights': '주요 프로그램',
+      'metadata.display.festival.food_and_booths': '먹거리/부스',
+      'metadata.display.festival.scale_text': '규모',
+      'metadata.display.festival.parking_tips': '주차 정보',
+      'metadata.display.event.target_audience': '참가 대상',
+      'metadata.display.event.capacity': '정원',
+      'metadata.display.event.registration': '사전 등록 정보',
+      'metadata.display.popup.type': '팝업 타입',
+      'metadata.display.popup.brands': '브랜드',
+      'metadata.display.popup.collab_description': '콜라보 설명',
+      'metadata.display.popup.fnb_items': 'F&B 메뉴',
+      'metadata.display.popup.fnb_items.signature_menu': '시그니처 메뉴',
+      'metadata.display.popup.fnb_items.menu_categories': '메뉴 카테고리',
+      'metadata.display.popup.fnb_items.price_range': 'F&B 가격대',
+      'metadata.display.popup.goods_items': '굿즈',
+      'metadata.display.popup.photo_zone': '포토존 여부',
+      'metadata.display.popup.photo_zone_desc': '포토존 설명',
+      'metadata.display.popup.waiting_hint': '대기 시간',
+    };
+    
+    forceFields.forEach(fieldName => {
+      // 이미 제안이 있는 필드는 건너뛰기
+      if (suggestions[fieldName]) return;
+      
+      // 부모 필드가 제안되었는지 확인 (예: external_links.official의 부모는 external_links)
+      const parentField = fieldName.split('.').slice(0, -1).join('.');
+      if (parentField && suggestions[parentField]) return;
+      
+      // 자식 필드가 제안되었는지 확인 (예: metadata.display.popup의 자식들)
+      const hasChildSuggestion = Object.keys(suggestions).some(key => key.startsWith(fieldName + '.'));
+      if (hasChildSuggestion) return;
+      
+      // 정보를 못 찾은 필드에 대한 설명 추가
+      const fieldDesc = fieldDescriptions[fieldName] || fieldName;
+      const searchMethod = context.hasSearchResults ? '네이버 검색 결과' : 'AI 직접 검색 (Google Grounding)';
+      
+      console.log(`[SuggestionBuilder] ⚠️ No suggestion for selected field: ${fieldName} (${fieldDesc})`);
+      
+      suggestions[fieldName] = {
+        value: null,
+        confidence: 0,
+        source: 'AI',
+        source_detail: `${searchMethod}에서 찾을 수 없음`,
+        warning: `⚠️ "${fieldDesc}" 정보를 찾을 수 없습니다.\n\n가능한 이유:\n• ${searchMethod}에 해당 정보가 없음\n• 이벤트명이 부정확하거나 너무 일반적임\n• 이벤트가 최신이어서 온라인에 정보가 부족함\n\n💡 수동으로 입력하거나, 다른 소스에서 정보를 확인해주세요.`,
+        extracted_at: new Date().toISOString(),
+      };
+    });
+  }
+
   return suggestions;
 }
 
@@ -649,6 +782,129 @@ export function buildSuggestionsFromExisting(
     );
   }
 
+  return suggestions;
+}
+
+/**
+ * AI 직접 검색 (Gemini + Google Search) 결과를 제안으로 변환
+ * @param aiData - Gemini API의 직접 검색 결과
+ * @param context - 현재 이벤트 및 선택한 필드 정보
+ */
+export function buildSuggestionsFromAIDirect(
+  aiData: any,
+  context: {
+    selectedFields: string[];
+    category?: string;
+    currentEvent?: any;
+  }
+): EventSuggestions {
+  const suggestions: EventSuggestions = {};
+  const currentEvent = context.currentEvent || {};
+  const selectedFields = context.selectedFields || [];
+  
+  // Helper: 필드가 제안 대상인지 확인
+  const shouldSuggest = (fieldName: string): boolean => {
+    // selectedFields가 비어있으면: 모든 필드 제안
+    if (selectedFields.length === 0) return true;
+    
+    // selectedFields에 포함되어 있으면: 제안
+    return selectedFields.some(f => {
+      if (f === '*') return true; // 모든 필드
+      if (fieldName === f) return true; // 정확히 일치
+      if (fieldName.startsWith(f + '.')) return true; // 부모 필드 포함
+      if (f.startsWith(fieldName + '.')) return true; // 자식 필드 포함
+      return false;
+    });
+  };
+  
+  // 🏪 팝업 - 포토존
+  if (aiData.photo_zone && shouldSuggest('metadata.display.popup.photo_zone')) {
+    suggestions['metadata.display.popup.photo_zone'] = createSuggestion(
+      aiData.photo_zone,
+      'AI',
+      'Gemini direct search (Google Grounding)',
+      'metadata.display.popup.photo_zone',
+      { hasContextualData: true }
+    );
+  }
+  
+  // 🏪 팝업 - 대기시간
+  if (aiData.waiting_time && shouldSuggest('metadata.display.popup.waiting_time')) {
+    suggestions['metadata.display.popup.waiting_time'] = createSuggestion(
+      aiData.waiting_time,
+      'AI',
+      'Gemini direct search (Google Grounding)',
+      'metadata.display.popup.waiting_time',
+      { hasContextualData: true }
+    );
+  }
+  
+  // 🏪 팝업 - 주차 정보
+  if (aiData.parking && shouldSuggest('metadata.display.popup.parking')) {
+    suggestions['metadata.display.popup.parking'] = createSuggestion(
+      aiData.parking,
+      'AI',
+      'Gemini direct search (Google Grounding)',
+      'metadata.display.popup.parking',
+      { hasContextualData: true }
+    );
+  }
+  
+  // 🏪 팝업 - 예약 정보
+  if (aiData.reservation && shouldSuggest('metadata.display.popup.reservation')) {
+    suggestions['metadata.display.popup.reservation'] = createSuggestion(
+      aiData.reservation,
+      'AI',
+      'Gemini direct search (Google Grounding)',
+      'metadata.display.popup.reservation',
+      { hasContextualData: true }
+    );
+  }
+  
+  // 🏪 팝업 - F&B 메뉴
+  if (aiData.fnb_items && shouldSuggest('metadata.display.popup.fnb_items')) {
+    suggestions['metadata.display.popup.fnb_items'] = createSuggestion(
+      aiData.fnb_items,
+      'AI',
+      'Gemini direct search (Google Grounding)',
+      'metadata.display.popup.fnb_items',
+      { hasContextualData: true }
+    );
+  }
+  
+  // ⏰ 운영시간
+  if (aiData.opening_hours && shouldSuggest('opening_hours')) {
+    suggestions['opening_hours'] = createSuggestion(
+      aiData.opening_hours,
+      'AI',
+      'Gemini direct search (Google Grounding)',
+      'opening_hours',
+      { hasContextualData: true }
+    );
+  }
+  
+  // 🎨 전시 - 작가
+  if (aiData.artists && shouldSuggest('metadata.display.exhibition.artists')) {
+    suggestions['metadata.display.exhibition.artists'] = createSuggestion(
+      aiData.artists,
+      'AI',
+      'Gemini direct search (Google Grounding)',
+      'metadata.display.exhibition.artists',
+      { hasContextualData: true }
+    );
+  }
+  
+  // 🎭 공연 - 출연진
+  if (aiData.cast && shouldSuggest('metadata.display.performance.cast')) {
+    suggestions['metadata.display.performance.cast'] = createSuggestion(
+      aiData.cast,
+      'AI',
+      'Gemini direct search (Google Grounding)',
+      'metadata.display.performance.cast',
+      { hasContextualData: true }
+    );
+  }
+  
   return suggestions;
 }
 
