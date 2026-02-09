@@ -3,8 +3,8 @@
  * Phase 1: Migration 확인 및 기본 기능 테스트
  */
 
-import { pool } from '../db';
-import { createSuggestion, getConfidenceLevel } from '../lib/confidenceCalculator';
+import { pool } from '../../../src/db';
+import { createSuggestion, getConfidenceLevel } from '../../../src/lib/confidenceCalculator';
 
 async function testAISuggestions() {
   console.log('🧪 AI 제안 시스템 Phase 1 테스트\n');

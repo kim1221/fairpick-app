@@ -1,12 +1,12 @@
 /**
  * 공공 API 데이터 보호 테스트
  * 
- * 실행: ts-node -r dotenv/config src/scripts/test-data-protection.ts
+ * 실행: ts-node -r dotenv/config tests/integration/data-protection/test-data-protection.ts
  */
 
-import { pool } from '../db';
-import { searchEventInfo, mergeSearchResults } from '../lib/naverApi';
-import { extractEventInfo } from '../lib/aiExtractor';
+import { pool } from '../../../src/db';
+import { searchEventInfo, mergeSearchResults } from '../../../src/lib/naverApi';
+import { extractEventInfo } from '../../../src/lib/aiExtractor';
 
 async function testDataProtection() {
   try {

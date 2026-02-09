@@ -5,7 +5,7 @@
  * 개선: "사진이 할 수 있는 모든 것 서울시립 사진미술관 2026"
  */
 
-import { searchNaverBlog } from './src/lib/naverApi';
+import { searchNaverBlog } from '../../../src/lib/naverApi';
 
 async function testQueryImprovement() {
   console.log('========================================');
