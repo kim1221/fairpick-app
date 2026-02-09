@@ -4,7 +4,7 @@
  */
 
 import { parseStringPromise } from 'xml2js';
-import http from './src/lib/http';
+import http from '../../../src/lib/http';
 
 const KOPIS_API_BASE = 'http://www.kopis.or.kr/openApi/restful';
 const KOPIS_SERVICE_KEY = 'bbef54b0049c4570b7b1f46f52b6dd8f';

@@ -1,5 +1,5 @@
-import http from './src/lib/http';
-import { config } from './src/config';
+import http from '../../../src/lib/http';
+import { config } from '../../../src/config';
 
 async function testKakaoApi() {
   console.log('[Test] KAKAO_REST_API_KEY exists:', !!config.kakaoRestApiKey);
