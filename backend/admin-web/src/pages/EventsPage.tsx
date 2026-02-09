@@ -22,10 +22,20 @@ export default function EventsPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [enriching, setEnriching] = useState(false);
-  
+
   // 🆕 AI 보완 옵션
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
   const [showFieldSelector, setShowFieldSelector] = useState(false);
+
+  // 🔍 [RUNTIME DEBUG] Component mount
+  useEffect(() => {
+    console.log('[EventsPage] 🚀 MOUNTED', { time: new Date().toISOString() });
+  }, []);
+
+  // 🔍 [RUNTIME DEBUG] showFieldSelector tracking
+  useEffect(() => {
+    console.log('[EventsPage] 📊 showFieldSelector changed =', showFieldSelector);
+  }, [showFieldSelector]);
 
   // Debounce search (500ms delay)
   useEffect(() => {
@@ -55,10 +65,20 @@ export default function EventsPage() {
 
   // 🆕 AI만으로 빈 필드 보완 (네이버 API 없이)
   const handleAIEnrichDirect = async () => {
-    if (!selectedEvent) return;
+    if (!selectedEvent) {
+      alert('이벤트가 선택되지 않았습니다.');
+      return;
+    }
+
+    if (!selectedEvent.id) {
+      alert('이벤트 ID가 없습니다.');
+      console.error('[AI-Direct] Missing event ID:', selectedEvent);
+      return;
+    }
 
     console.log('[AI-Direct] Starting enrichment:', {
       eventId: selectedEvent.id,
+      eventIdType: typeof selectedEvent.id,
       eventTitle: selectedEvent.title,
       selectedFields: selectedFields,
       fieldsCount: selectedFields.length,
@@ -66,7 +86,13 @@ export default function EventsPage() {
 
     setEnriching(true);
     try {
-      const result = await adminApi.enrichEventAIOnly(selectedEvent.id, selectedFields);
+      console.log('[AI-Direct] Calling enrich API with aiOnly=true, eventId:', selectedEvent.id);
+      
+      // 🆕 기존 enrich API를 aiOnly 모드로 호출
+      const result = await adminApi.enrichEvent(selectedEvent.id, {
+        forceFields: selectedFields.length > 0 ? selectedFields : [], // 빈 배열 = 빈 필드만 채우기
+        aiOnly: true, // 네이버 API 단계 건너뛰기
+      });
 
       console.log('[AI-Direct] API response:', result);
 
@@ -677,8 +703,48 @@ export default function EventsPage() {
                     {enriching ? '🔄 AI 검색 중...' : '🔍 AI만으로 빈 필드 보완'}
                   </button>
                 </div>
-                
+
                 {/* 🆕 필드 선택 체크박스 */}
+                {(() => {
+                  console.log('[EventsPage] 🎨 Rendering button block, showFieldSelector =', showFieldSelector);
+                  return null;
+                })()}
+                {showFieldSelector && (
+                  <>
+                    {(() => {
+                      console.log('[EventsPage] ✅ RENDERING AI-only button (inside conditional)');
+                      return null;
+                    })()}
+                    <div className="flex gap-2 mb-2">
+                      <button
+                        onClick={handleAIEnrichDirect}
+                        disabled={enriching || selectedFields.length === 0}
+                        className="btn btn-success text-sm flex items-center gap-2"
+                        title={selectedFields.length === 0 ? '재생성할 필드를 선택하세요' : ''}
+                      >
+                        {enriching ? '🔄 AI 생성 중...' : '🤖 AI만으로 선택한 필드 재생성'}
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!selectedEvent) return;
+                          if (selectedFields.length === 0) {
+                            alert('재생성할 필드를 선택하세요.');
+                            return;
+                          }
+                          if (confirm(`선택한 ${selectedFields.length}개 필드를 재생성합니다.\n(네이버 API 사용)\n\n계속하시겠습니까?`)) {
+                            handleAIEnrich(selectedFields);
+                          }
+                        }}
+                        disabled={enriching || selectedFields.length === 0}
+                        className="btn btn-outline text-sm flex items-center gap-2"
+                        title={selectedFields.length === 0 ? '재생성할 필드를 선택하세요' : ''}
+                      >
+                        🎯 선택한 필드만 재생성 (네이버 API)
+                      </button>
+                    </div>
+                  </>
+                )}
+
                 {showFieldSelector && (
                   <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-2">
                     <p className="text-sm font-semibold text-gray-700 mb-2">재생성할 필드 선택:</p>

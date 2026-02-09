@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { Event, DashboardStats, PaginatedResponse, PopupFormData, UploadImageResponse } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 // Axios 인스턴스 생성
 const api = axios.create({
@@ -120,22 +120,23 @@ export const adminApi = {
     venue?: string;
     main_category?: string;
     overview?: string;
+    selectedFields?: string[]; // 🆕 선택한 필드만 재생성
   }): Promise<{
     success: boolean;
     message?: string;
-    enriched: {
+    enriched?: {
       // 기본 정보
       start_date?: string | null;
       end_date?: string | null;
       venue?: string | null;
       address?: string | null;
       overview?: string | null;
-      
+
       // 지오코딩 결과
       lat?: number | null;
       lng?: number | null;
       region?: string | null;
-      
+
       // 추가 정보
       derived_tags?: string[];
       opening_hours?: any;
@@ -147,8 +148,58 @@ export const adminApi = {
         reservation?: string;
       };
     } | null;
+    // 🆕 Phase 2: 제안 시스템
+    suggestions?: any;
   }> => {
     const { data } = await api.post('/admin/events/enrich-preview', params);
+    return data;
+  },
+
+  // AI만으로 빈 필드 보완 (이벤트 생성 전 미리보기, 네이버 검색 없이)
+  enrichEventPreviewAIOnly: async (params: {
+    title: string;
+    venue?: string;
+    main_category?: string;
+    overview?: string;
+    selectedFields?: string[]; // 🆕 선택한 필드만 재생성
+  }): Promise<{
+    success: boolean;
+    message?: string;
+    enriched?: {
+      // 기본 정보
+      start_date?: string | null;
+      end_date?: string | null;
+      venue?: string | null;
+      address?: string | null;
+      overview?: string | null;
+
+      // 지오코딩 결과
+      lat?: number | null;
+      lng?: number | null;
+      region?: string | null;
+
+      // 추가 정보
+      derived_tags?: string[];
+      opening_hours?: any;
+      price_min?: number | null;
+      price_max?: number | null;
+      external_links?: {
+        official?: string;
+        ticket?: string;
+        reservation?: string;
+      };
+
+      // 카테고리별 특화 필드
+      metadata?: {
+        display?: {
+          [category: string]: any;
+        };
+      };
+    } | null;
+    // 🆕 Phase 2: 제안 시스템
+    suggestions?: any;
+  }> => {
+    const { data } = await api.post('/admin/events/enrich-preview', { ...params, aiOnly: true });
     return data;
   },
 
@@ -157,6 +208,7 @@ export const adminApi = {
     eventId: string,
     options?: {
       forceFields?: string[]; // 강제 재생성할 필드 목록
+      aiOnly?: boolean; // 🆕 네이버 API 건너뛰고 AI만 사용
     }
   ): Promise<{
     success: boolean;
@@ -193,6 +245,7 @@ export const adminApi = {
   }> => {
     const { data } = await api.post(`/admin/events/${eventId}/enrich`, {
       forceFields: options?.forceFields || [],
+      aiOnly: options?.aiOnly || false, // 🆕 aiOnly 옵션 전달
     });
     return data;
   },
@@ -238,9 +291,26 @@ export const adminApi = {
     enriched?: any;
     sources?: string[];
   }> => {
-    const { data } = await api.post(`/admin/events/${eventId}/enrich-ai-direct`, {
+    if (!eventId) {
+      throw new Error('eventId is required');
+    }
+    const encodedId = encodeURIComponent(eventId);
+
+    // 🔍 [RUNTIME DEBUG] API call
+    console.log('[API] 🚀 enrichEventAIOnly called', {
+      eventId,
+      eventIdType: typeof eventId,
+      encodedId,
+      selectedFields,
+      url: `/admin/events/${encodedId}/enrich-ai-direct`
+    });
+
+    const { data } = await api.post(`/admin/events/${encodedId}/enrich-ai-direct`, {
       selectedFields: selectedFields || [],
     });
+
+    console.log('[API] ✅ enrichEventAIOnly response', { success: data.success });
+
     return data;
   },
 

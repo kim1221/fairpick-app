@@ -66,7 +66,12 @@ export default function CreateEventPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [agreedCopyright, setAgreedCopyright] = useState(false);
   const [autoFillStatus, setAutoFillStatus] = useState<Record<string, boolean>>({});
-  
+  // 🆕 필드 선택 기능
+  const [showFieldSelector, setShowFieldSelector] = useState(false);
+  const [selectedFields, setSelectedFields] = useState<string[]>([]);
+  // 🆕 AI 제안 시스템
+  const [aiSuggestions, setAiSuggestions] = useState<any>(null);
+
   // Hot Suggestion에서 전달된 데이터
   const hotSuggestionState = location.state as {
     fromHotSuggestion?: boolean;
@@ -155,6 +160,7 @@ export default function CreateEventPage() {
     };
   });
 
+  // 빈 필드만 AI 보완 (네이버 API + AI) - 직접 적용
   const handleAutoFill = async () => {
     if (!formData.title) {
       alert('제목을 먼저 입력하세요!');
@@ -172,6 +178,47 @@ export default function CreateEventPage() {
         overview: formData.overview || undefined,
       });
 
+      // 🆕 Phase 2: 제안 시스템
+      if (result.suggestions) {
+        // 빈 필드만 보완은 자동 적용
+        const enriched: any = {};
+        Object.keys(result.suggestions).forEach((fieldName) => {
+          const suggestion = result.suggestions[fieldName];
+          enriched[fieldName] = suggestion.value;
+        });
+
+        // 결과를 폼에 자동 입력 (빈 필드만)
+        setFormData((prev) => ({
+          ...prev,
+          // 기본 정보 (빈 필드만)
+          startAt: !prev.startAt && enriched.start_at ? enriched.start_at : prev.startAt,
+          endAt: !prev.endAt && enriched.end_at ? enriched.end_at : prev.endAt,
+          venue: !prev.venue && enriched.venue ? enriched.venue : prev.venue,
+          address: !prev.address && enriched.address ? enriched.address : prev.address,
+          overview: !prev.overview && enriched.overview ? enriched.overview : prev.overview,
+
+          // 지오코딩 결과 (빈 필드만)
+          lat: prev.lat ?? enriched.lat ?? prev.lat,
+          lng: prev.lng ?? enriched.lng ?? prev.lng,
+          region: !prev.region && enriched.region ? enriched.region : prev.region,
+
+          // 추가 정보 (빈 필드만)
+          derivedTags: !prev.derivedTags?.length && enriched.derived_tags ? enriched.derived_tags : prev.derivedTags,
+          openingHours: Object.keys(prev.openingHours || {}).length === 0 && enriched.opening_hours ? enriched.opening_hours : prev.openingHours,
+          priceMin: prev.priceMin == null && enriched.price_min != null ? enriched.price_min : prev.priceMin,
+          priceMax: prev.priceMax == null && enriched.price_max != null ? enriched.price_max : prev.priceMax,
+          externalLinks: {
+            official: prev.externalLinks?.official || enriched['external_links.official'] || '',
+            ticket: prev.externalLinks?.ticket || enriched['external_links.ticket'] || '',
+            reservation: prev.externalLinks?.reservation || enriched['external_links.reservation'] || '',
+          },
+        }));
+
+        alert(`✅ 빈 필드 ${Object.keys(result.suggestions).length}개 자동 채우기 완료!`);
+        return;
+      }
+
+      // 🆕 Fallback (기존 enriched 형식)
       if (!result.success || !result.enriched) {
         alert(result.message || 'AI 분석에 실패했습니다.');
         return;
@@ -188,12 +235,12 @@ export default function CreateEventPage() {
         venue: enriched.venue || prev.venue,
         address: enriched.address || prev.address,
         overview: enriched.overview || prev.overview,
-        
+
         // 지오코딩 결과
         lat: enriched.lat ?? prev.lat,
         lng: enriched.lng ?? prev.lng,
         region: enriched.region || prev.region,
-        
+
         // 추가 정보
         derivedTags: enriched.derived_tags || prev.derivedTags,
         openingHours: enriched.opening_hours || prev.openingHours,
@@ -235,6 +282,315 @@ export default function CreateEventPage() {
       alert(`✅ AI 자동 채우기 완료!\n\n채워진 항목: ${filledFields.join(', ')}`);
     } catch (error: any) {
       console.error('[AutoFill] Error:', error);
+      alert('AI 분석 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
+    } finally {
+      setAutoFillLoading(false);
+    }
+  };
+
+  // AI만으로 빈 필드 보완 (네이버 API 없이) - 직접 적용
+  const handleAutoFillAIOnly = async () => {
+    if (!formData.title) {
+      alert('제목을 먼저 입력하세요!');
+      return;
+    }
+
+    setAutoFillLoading(true);
+    setAutoFillStatus({});
+
+    try {
+      const result = await adminApi.enrichEventPreviewAIOnly({
+        title: formData.title,
+        venue: formData.venue || undefined,
+        main_category: formData.mainCategory || undefined,
+        overview: formData.overview || undefined,
+      });
+
+      // 🆕 Phase 2: 제안 시스템
+      if (result.suggestions) {
+        // AI만으로 빈 필드 보완은 자동 적용
+        const enriched: any = {};
+        Object.keys(result.suggestions).forEach((fieldName) => {
+          const suggestion = result.suggestions[fieldName];
+          enriched[fieldName] = suggestion.value;
+        });
+
+        // 결과를 폼에 "빈 필드만" merge
+        setFormData((prev) => ({
+          ...prev,
+          startAt: !prev.startAt && enriched.start_at ? enriched.start_at : prev.startAt,
+          endAt: !prev.endAt && enriched.end_at ? enriched.end_at : prev.endAt,
+          venue: !prev.venue && enriched.venue ? enriched.venue : prev.venue,
+          address: !prev.address && enriched.address ? enriched.address : prev.address,
+          overview: !prev.overview && enriched.overview ? enriched.overview : prev.overview,
+          lat: prev.lat ?? enriched.lat ?? prev.lat,
+          lng: prev.lng ?? enriched.lng ?? prev.lng,
+          region: !prev.region && enriched.region ? enriched.region : prev.region,
+          derivedTags: !prev.derivedTags?.length && enriched.derived_tags ? enriched.derived_tags : prev.derivedTags,
+          openingHours: Object.keys(prev.openingHours || {}).length === 0 && enriched.opening_hours ? enriched.opening_hours : prev.openingHours,
+          priceMin: prev.priceMin == null && enriched.price_min != null ? enriched.price_min : prev.priceMin,
+          priceMax: prev.priceMax == null && enriched.price_max != null ? enriched.price_max : prev.priceMax,
+          externalLinks: {
+            official: prev.externalLinks?.official || enriched['external_links.official'] || '',
+            ticket: prev.externalLinks?.ticket || enriched['external_links.ticket'] || '',
+            reservation: prev.externalLinks?.reservation || enriched['external_links.reservation'] || '',
+          },
+        }));
+
+        alert(`✅ AI만으로 빈 필드 ${Object.keys(result.suggestions).length}개 자동 채우기 완료! (네이버 검색 없이)`);
+        return;
+      }
+
+      // Fallback
+      if (!result.success || !result.enriched) {
+        alert(result.message || 'AI 분석에 실패했습니다.');
+        return;
+      }
+
+      const enriched = result.enriched;
+
+      // 결과를 폼에 "빈 필드만" merge (기존 값은 덮어쓰지 않음)
+      setFormData((prev) => ({
+        ...prev,
+        // 기본 정보 (빈 필드만)
+        startAt: prev.startAt || enriched.start_date || prev.startAt,
+        endAt: prev.endAt || enriched.end_date || prev.endAt,
+        venue: prev.venue || enriched.venue || prev.venue,
+        address: prev.address || enriched.address || prev.address,
+        overview: prev.overview || enriched.overview || prev.overview,
+
+        // 지오코딩 결과 (빈 필드만)
+        lat: prev.lat ?? enriched.lat ?? prev.lat,
+        lng: prev.lng ?? enriched.lng ?? prev.lng,
+        region: prev.region || enriched.region || prev.region,
+
+        // 추가 정보 (빈 필드만)
+        derivedTags: prev.derivedTags?.length ? prev.derivedTags : (enriched.derived_tags || prev.derivedTags),
+        openingHours: Object.keys(prev.openingHours || {}).length > 0 ? prev.openingHours : (enriched.opening_hours || prev.openingHours),
+        priceMin: prev.priceMin ?? enriched.price_min ?? prev.priceMin,
+        priceMax: prev.priceMax ?? enriched.price_max ?? prev.priceMax,
+        externalLinks: {
+          official: prev.externalLinks?.official || enriched.external_links?.official || '',
+          ticket: prev.externalLinks?.ticket || enriched.external_links?.ticket || '',
+          reservation: prev.externalLinks?.reservation || enriched.external_links?.reservation || '',
+        },
+      }));
+
+      // 채워진 필드 표시
+      setAutoFillStatus({
+        startAt: !!enriched.start_date,
+        endAt: !!enriched.end_date,
+        venue: !!enriched.venue,
+        address: !!enriched.address,
+        overview: !!enriched.overview,
+        derivedTags: !!enriched.derived_tags && enriched.derived_tags.length > 0,
+        openingHours: !!enriched.opening_hours,
+        priceMin: enriched.price_min !== null && enriched.price_min !== undefined,
+        priceMax: enriched.price_max !== null && enriched.price_max !== undefined,
+        externalLinks: !!enriched.external_links,
+      });
+
+      // 성공 메시지
+      const filledFields: string[] = [];
+      if (enriched.start_date && !formData.startAt) filledFields.push('시작일');
+      if (enriched.end_date && !formData.endAt) filledFields.push('종료일');
+      if (enriched.venue && !formData.venue) filledFields.push('장소');
+      if (enriched.address && !formData.address) filledFields.push('주소');
+      if (enriched.lat && enriched.lng && !formData.lat) filledFields.push('좌표');
+      if (enriched.overview && !formData.overview) filledFields.push('개요');
+      if (enriched.derived_tags?.length && !formData.derivedTags?.length) filledFields.push('태그');
+      if (enriched.opening_hours && !Object.keys(formData.openingHours || {}).length) filledFields.push('운영시간');
+      if ((enriched.price_min !== null || enriched.price_max !== null) && (formData.priceMin === null || formData.priceMin === undefined)) filledFields.push('가격');
+      if (enriched.external_links && !formData.externalLinks?.official) filledFields.push('예매링크');
+
+      alert(`✅ AI만으로 빈 필드 보완 완료! (네이버 검색 없이)\n\n채워진 항목: ${filledFields.length > 0 ? filledFields.join(', ') : '없음 (모든 필드가 이미 채워져 있습니다)'}`);
+    } catch (error: any) {
+      console.error('[AutoFillAIOnly] Error:', error);
+      alert('AI 분석 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
+    } finally {
+      setAutoFillLoading(false);
+    }
+  };
+
+  // 🆕 네이버 API로 선택한 필드만 재생성 → 제안으로 표시
+  const handleAutoFillSelected = async () => {
+    if (!formData.title) {
+      alert('제목을 먼저 입력하세요!');
+      return;
+    }
+
+    if (selectedFields.length === 0) {
+      alert('재생성할 필드를 선택하세요!');
+      return;
+    }
+
+    setAutoFillLoading(true);
+    try {
+      const result = await adminApi.enrichEventPreview({
+        title: formData.title,
+        venue: formData.venue || undefined,
+        main_category: formData.mainCategory || undefined,
+        overview: formData.overview || undefined,
+        selectedFields: selectedFields, // 🆕 선택한 필드만 요청
+      });
+
+      // 🆕 Phase 2: 제안 시스템
+      if (result.suggestions) {
+        setAiSuggestions(result.suggestions);
+        alert(`✅ ${Object.keys(result.suggestions).length}개 필드에 대한 AI 제안이 생성되었습니다.\n\n아래 "AI 제안" 섹션에서 확인하고 적용하세요.`);
+        return;
+      }
+
+      // Fallback
+      if (!result.success || !result.enriched) {
+        alert(result.message || 'AI 분석에 실패했습니다.');
+        return;
+      }
+
+      const enriched = result.enriched;
+
+      // 선택한 필드만 merge
+      setFormData((prev) => {
+        const updated = { ...prev };
+
+        selectedFields.forEach((field) => {
+          switch (field) {
+            case 'venue':
+              if (enriched.venue) updated.venue = enriched.venue;
+              break;
+            case 'address':
+              if (enriched.address) updated.address = enriched.address;
+              break;
+            case 'overview':
+              if (enriched.overview) updated.overview = enriched.overview;
+              break;
+            case 'opening_hours':
+              if (enriched.opening_hours) updated.openingHours = enriched.opening_hours;
+              break;
+            case 'price_min':
+              if (enriched.price_min !== null && enriched.price_min !== undefined) updated.priceMin = enriched.price_min;
+              break;
+            case 'price_max':
+              if (enriched.price_max !== null && enriched.price_max !== undefined) updated.priceMax = enriched.price_max;
+              break;
+            case 'derived_tags':
+              if (enriched.derived_tags?.length) updated.derivedTags = enriched.derived_tags;
+              break;
+            case 'external_links':
+              if (enriched.external_links) updated.externalLinks = enriched.external_links;
+              break;
+          }
+        });
+
+        return updated;
+      });
+
+      alert(`✅ 네이버 API로 ${selectedFields.length}개 필드 재생성 완료!`);
+    } catch (error: any) {
+      console.error('[AutoFillSelected] Error:', error);
+      alert('AI 분석 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
+    } finally {
+      setAutoFillLoading(false);
+    }
+  };
+
+  // 🆕 AI만으로 선택한 필드만 재생성
+  const handleAutoFillAIOnlySelected = async () => {
+    if (!formData.title) {
+      alert('제목을 먼저 입력하세요!');
+      return;
+    }
+
+    if (selectedFields.length === 0) {
+      alert('재생성할 필드를 선택하세요!');
+      return;
+    }
+
+    setAutoFillLoading(true);
+    try {
+      const result = await adminApi.enrichEventPreviewAIOnly({
+        title: formData.title,
+        venue: formData.venue || undefined,
+        main_category: formData.mainCategory || undefined,
+        overview: formData.overview || undefined,
+        selectedFields: selectedFields,
+      });
+
+      // 🆕 Phase 2: 제안 시스템
+      if (result.suggestions) {
+        setAiSuggestions(result.suggestions);
+        alert(`✅ ${Object.keys(result.suggestions).length}개 필드에 대한 AI 제안이 생성되었습니다.\n\n아래 "AI 제안" 섹션에서 확인하고 적용하세요.`);
+        return;
+      }
+
+      // Fallback
+      if (!result.success || !result.enriched) {
+        alert(result.message || 'AI 분석에 실패했습니다.');
+        return;
+      }
+
+      const enriched = result.enriched;
+
+      // 선택한 필드만 merge (기존 값을 덮어씀)
+      setFormData((prev) => {
+        const updated = { ...prev };
+
+        // 각 필드별로 선택된 경우에만 업데이트
+        selectedFields.forEach((field) => {
+          switch (field) {
+            case 'venue':
+              if (enriched.venue) updated.venue = enriched.venue;
+              break;
+            case 'address':
+              if (enriched.address) updated.address = enriched.address;
+              break;
+            case 'overview':
+              if (enriched.overview) updated.overview = enriched.overview;
+              break;
+            case 'opening_hours':
+              if (enriched.opening_hours) updated.openingHours = enriched.opening_hours;
+              break;
+            case 'price_min':
+              if (enriched.price_min !== null && enriched.price_min !== undefined) updated.priceMin = enriched.price_min;
+              break;
+            case 'price_max':
+              if (enriched.price_max !== null && enriched.price_max !== undefined) updated.priceMax = enriched.price_max;
+              break;
+            case 'derived_tags':
+              if (enriched.derived_tags?.length) updated.derivedTags = enriched.derived_tags;
+              break;
+            case 'external_links':
+              if (enriched.external_links) updated.externalLinks = enriched.external_links;
+              break;
+            // metadata 필드들
+            default:
+              if (field.startsWith('metadata.')) {
+                const parts = field.split('.');
+                if (enriched.metadata && parts.length >= 3) {
+                  if (!updated.metadata) updated.metadata = {};
+                  if (!updated.metadata.display) updated.metadata.display = {};
+
+                  const category = parts[2]; // popup, exhibition, performance, etc.
+                  const fieldName = parts[3];
+
+                  if (enriched.metadata.display && (enriched.metadata.display as any)[category]?.[fieldName]) {
+                    if (!(updated.metadata.display as any)[category]) {
+                      (updated.metadata.display as any)[category] = {};
+                    }
+                    (updated.metadata.display as any)[category][fieldName] = (enriched.metadata.display as any)[category][fieldName];
+                  }
+                }
+              }
+              break;
+          }
+        });
+
+        return updated;
+      });
+
+      alert(`✅ AI로 ${selectedFields.length}개 필드 재생성 완료!\n\n${result.message || ''}`);
+    } catch (error: any) {
+      console.error('[AutoFillAIOnlySelected] Error:', error);
       alert('AI 분석 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
     } finally {
       setAutoFillLoading(false);
@@ -569,11 +925,11 @@ export default function CreateEventPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => alert('이 기능은 이벤트 생성 후 상세 페이지에서 사용할 수 있습니다.')}
+                    onClick={() => setShowFieldSelector(!showFieldSelector)}
                     disabled={!formData.title}
                     className="btn btn-outline text-sm flex items-center gap-2"
                   >
-                    🎯 선택한 필드만 재생성
+                    {showFieldSelector ? '✕ 선택 취소' : '🎯 선택한 필드만 재생성'}
                   </button>
                   <button
                     type="button"
@@ -589,17 +945,427 @@ export default function CreateEventPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => alert('⚠️ 이 기능은 이벤트를 먼저 저장한 후 사용할 수 있습니다.\n\n이벤트 관리 페이지에서 이벤트를 선택하고 "AI만으로 빈 필드 보완" 버튼을 사용해주세요.')}
-                    disabled={true}
-                    className="btn btn-secondary text-sm flex items-center gap-2 opacity-50 cursor-not-allowed"
+                    onClick={handleAutoFillAIOnly}
+                    disabled={!formData.title || autoFillLoading}
+                    className="btn btn-secondary text-sm flex items-center gap-2"
                   >
-                    🔍 AI만으로 빈 필드 보완
+                    {autoFillLoading ? '🔄 분석 중...' : '🔍 AI만으로 빈 필드 보완'}
                   </button>
                 </div>
-                
+
+                {/* 🆕 필드 선택 UI */}
+                {showFieldSelector && (
+                  <>
+                    <div className="flex gap-2 mb-2 w-full">
+                      <button
+                        type="button"
+                        onClick={handleAutoFillAIOnlySelected}
+                        disabled={autoFillLoading || selectedFields.length === 0}
+                        className="btn btn-success text-sm flex items-center gap-2"
+                        title={selectedFields.length === 0 ? '재생성할 필드를 선택하세요' : ''}
+                      >
+                        {autoFillLoading ? '🔄 AI 생성 중...' : '🤖 AI만으로 선택한 필드 재생성'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAutoFillSelected}
+                        disabled={autoFillLoading || selectedFields.length === 0}
+                        className="btn btn-outline text-sm flex items-center gap-2"
+                        title={selectedFields.length === 0 ? '재생성할 필드를 선택하세요' : ''}
+                      >
+                        {autoFillLoading ? '🔄 분석 중...' : '🎯 선택한 필드만 재생성 (네이버 API)'}
+                      </button>
+                    </div>
+
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-2 w-full">
+                      <p className="text-sm font-semibold text-gray-700 mb-2">재생성할 필드 선택:</p>
+
+                      {/* 공통 필드 */}
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 mb-1">📋 공통 필드</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            { id: 'overview', label: '개요 (Overview)' },
+                            { id: 'derived_tags', label: '태그 (Tags)' },
+                            { id: 'opening_hours', label: '운영시간 (Hours)' },
+                            { id: 'external_links', label: '외부 링크 (Links)' },
+                            { id: 'price_min', label: '최소 가격' },
+                            { id: 'price_max', label: '최대 가격' },
+                            { id: 'venue', label: '장소 (Venue)' },
+                            { id: 'address', label: '주소 (Address)' },
+                          ].map((field) => (
+                            <label key={field.id} className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={selectedFields.includes(field.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedFields([...selectedFields, field.id]);
+                                  } else {
+                                    setSelectedFields(selectedFields.filter((f) => f !== field.id));
+                                  }
+                                }}
+                                className="rounded"
+                              />
+                              <span>{field.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 🆕 카테고리별 특화 필드 */}
+                      {formData.mainCategory === '전시' && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-600 mb-1 mt-3">🎨 전시 특화 필드</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              { id: 'metadata.display.exhibition.artists', label: '작가/아티스트' },
+                              { id: 'metadata.display.exhibition.genre', label: '장르' },
+                              { id: 'metadata.display.exhibition.type', label: '전시 유형' },
+                              { id: 'metadata.display.exhibition.duration_minutes', label: '관람 시간' },
+                              { id: 'metadata.display.exhibition.facilities', label: '편의시설' },
+                              { id: 'metadata.display.exhibition.docent_tour', label: '도슨트 투어' },
+                            ].map((field) => (
+                              <label key={field.id} className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedFields.includes(field.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedFields([...selectedFields, field.id]);
+                                    } else {
+                                      setSelectedFields(selectedFields.filter((f) => f !== field.id));
+                                    }
+                                  }}
+                                  className="rounded"
+                                />
+                                <span>{field.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {formData.mainCategory === '공연' && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-600 mb-1 mt-3">🎭 공연 특화 필드</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              { id: 'metadata.display.performance.cast', label: '출연진' },
+                              { id: 'metadata.display.performance.genre', label: '장르' },
+                              { id: 'metadata.display.performance.duration_minutes', label: '공연 시간' },
+                              { id: 'metadata.display.performance.intermission', label: '인터미션' },
+                              { id: 'metadata.display.performance.age_limit', label: '연령 제한' },
+                              { id: 'metadata.display.performance.discounts', label: '할인 정보' },
+                            ].map((field) => (
+                              <label key={field.id} className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedFields.includes(field.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedFields([...selectedFields, field.id]);
+                                    } else {
+                                      setSelectedFields(selectedFields.filter((f) => f !== field.id));
+                                    }
+                                  }}
+                                  className="rounded"
+                                />
+                                <span>{field.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 🎪 축제 특화 필드 */}
+                      {formData.mainCategory === '축제' && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-600 mb-1 mt-3">🎪 축제 특화 필드</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              { id: 'metadata.display.festival.organizer', label: '주최/주관' },
+                              { id: 'metadata.display.festival.program_highlights', label: '주요 프로그램' },
+                              { id: 'metadata.display.festival.food_and_booths', label: '먹거리/부스' },
+                              { id: 'metadata.display.festival.scale_text', label: '규모' },
+                              { id: 'metadata.display.festival.parking_tips', label: '주차 정보' },
+                            ].map((field) => (
+                              <label key={field.id} className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedFields.includes(field.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedFields([...selectedFields, field.id]);
+                                    } else {
+                                      setSelectedFields(selectedFields.filter((f) => f !== field.id));
+                                    }
+                                  }}
+                                  className="rounded"
+                                />
+                                <span>{field.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 📅 행사 특화 필드 */}
+                      {formData.mainCategory === '행사' && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-600 mb-1 mt-3">📅 행사 특화 필드</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              { id: 'metadata.display.event.target_audience', label: '참가 대상' },
+                              { id: 'metadata.display.event.capacity', label: '정원' },
+                              { id: 'metadata.display.event.registration', label: '사전 등록 정보' },
+                            ].map((field) => (
+                              <label key={field.id} className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedFields.includes(field.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedFields([...selectedFields, field.id]);
+                                    } else {
+                                      setSelectedFields(selectedFields.filter((f) => f !== field.id));
+                                    }
+                                  }}
+                                  className="rounded"
+                                />
+                                <span>{field.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 🏪 팝업 특화 필드 */}
+                      {formData.mainCategory === '팝업' && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-600 mb-1 mt-3">🏪 팝업 특화 필드</p>
+                          
+                          {/* 공통 필드 */}
+                          <div className="grid grid-cols-2 gap-2 mb-3">
+                            {[
+                              { id: 'metadata.display.popup.type', label: '팝업 타입' },
+                              { id: 'metadata.display.popup.brands', label: '브랜드' },
+                            ].map((field) => (
+                              <label key={field.id} className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedFields.includes(field.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedFields([...selectedFields, field.id]);
+                                    } else {
+                                      setSelectedFields(selectedFields.filter((f) => f !== field.id));
+                                    }
+                                  }}
+                                  className="rounded"
+                                />
+                                <span>{field.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                          
+                          {/* 🍔 F&B (디저트/카페) 특화 필드 */}
+                          <div className="bg-yellow-50 p-2 rounded mb-2">
+                            <p className="text-xs font-medium text-yellow-800 mb-2">🍔 F&B 메뉴 정보</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              {[
+                                { id: 'metadata.display.popup.fnb_items.signature_menu', label: '시그니처 메뉴' },
+                                { id: 'metadata.display.popup.fnb_items.menu_categories', label: '메뉴 카테고리' },
+                                { id: 'metadata.display.popup.fnb_items.price_range', label: '가격대' },
+                              ].map((field) => (
+                                <label key={field.id} className="flex items-center gap-2 text-sm">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedFields.includes(field.id)}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedFields([...selectedFields, field.id]);
+                                      } else {
+                                        setSelectedFields(selectedFields.filter((f) => f !== field.id));
+                                      }
+                                    }}
+                                    className="rounded"
+                                  />
+                                  <span>{field.label}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                          
+                          {/* 🤝 콜라보 (브랜드 협업) 특화 필드 */}
+                          <div className="bg-purple-50 p-2 rounded mb-2">
+                            <p className="text-xs font-medium text-purple-800 mb-2">🤝 콜라보 설명</p>
+                            <label className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={selectedFields.includes('metadata.display.popup.collab_description')}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedFields([...selectedFields, 'metadata.display.popup.collab_description']);
+                                  } else {
+                                    setSelectedFields(selectedFields.filter((f) => f !== 'metadata.display.popup.collab_description'));
+                                  }
+                                }}
+                                className="rounded"
+                              />
+                              <span>콜라보 설명</span>
+                            </label>
+                          </div>
+                          
+                          {/* 일반 팝업 필드 */}
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              { id: 'metadata.display.popup.goods_items', label: '굿즈' },
+                              { id: 'metadata.display.popup.photo_zone', label: '포토존 여부' },
+                              { id: 'metadata.display.popup.photo_zone_desc', label: '포토존 설명' },
+                              { id: 'metadata.display.popup.waiting_hint', label: '대기 시간' },
+                            ].map((field) => (
+                              <label key={field.id} className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedFields.includes(field.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedFields([...selectedFields, field.id]);
+                                    } else {
+                                      setSelectedFields(selectedFields.filter((f) => f !== field.id));
+                                    }
+                                  }}
+                                  className="rounded"
+                                />
+                                <span>{field.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {/* 🆕 AI 제안 섹션 */}
+                {aiSuggestions && Object.keys(aiSuggestions).length > 0 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold text-blue-900">💡 AI 제안 ({Object.keys(aiSuggestions).length}개)</h4>
+                      <button
+                        type="button"
+                        onClick={() => setAiSuggestions(null)}
+                        className="text-xs text-gray-500 hover:text-gray-700"
+                      >
+                        모두 닫기
+                      </button>
+                    </div>
+                    
+                    {Object.entries(aiSuggestions).map(([fieldName, suggestion]: [string, any]) => (
+                      <div key={fieldName} className="bg-white border border-gray-200 rounded p-3 space-y-2">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-gray-700">{fieldName}</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              출처: {suggestion.source} ({suggestion.confidence}% 신뢰도)
+                            </p>
+                          </div>
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            suggestion.confidence >= 80
+                              ? 'bg-green-100 text-green-700'
+                              : suggestion.confidence >= 60
+                              ? 'bg-yellow-100 text-yellow-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}>
+                            {suggestion.confidence >= 80 ? '높음' : suggestion.confidence >= 60 ? '중간' : '낮음'}
+                          </span>
+                        </div>
+                        
+                        <div className="bg-gray-50 p-2 rounded text-sm">
+                          <pre className="whitespace-pre-wrap font-mono text-xs">
+                            {typeof suggestion.value === 'object' 
+                              ? JSON.stringify(suggestion.value, null, 2) 
+                              : String(suggestion.value)}
+                          </pre>
+                        </div>
+                        
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              // Apply suggestion
+                              const value = suggestion.value;
+                              setFormData((prev) => {
+                                const updated = { ...prev };
+                                
+                                if (fieldName === 'start_at') updated.startAt = value;
+                                else if (fieldName === 'end_at') updated.endAt = value;
+                                else if (fieldName === 'venue') updated.venue = value;
+                                else if (fieldName === 'address') updated.address = value;
+                                else if (fieldName === 'overview') updated.overview = value;
+                                else if (fieldName === 'derived_tags') updated.derivedTags = value;
+                                else if (fieldName === 'opening_hours') updated.openingHours = value;
+                                else if (fieldName === 'price_min') updated.priceMin = value;
+                                else if (fieldName === 'price_max') updated.priceMax = value;
+                                else if (fieldName.startsWith('external_links.')) {
+                                  const linkType = fieldName.split('.')[1];
+                                  updated.externalLinks = {
+                                    ...updated.externalLinks,
+                                    [linkType]: value,
+                                  };
+                                }
+                                else if (fieldName.startsWith('metadata.display.')) {
+                                  const parts = fieldName.split('.');
+                                  const category = parts[2];
+                                  const field = parts[3];
+                                  
+                                  if (!updated.metadata) updated.metadata = { display: {} };
+                                  if (!updated.metadata.display) updated.metadata.display = {};
+                                  if (!updated.metadata.display[category as 'exhibition' | 'performance' | 'festival' | 'event' | 'popup']) {
+                                    (updated.metadata.display as any)[category] = {};
+                                  }
+                                  (updated.metadata.display as any)[category][field] = value;
+                                }
+
+                                return updated;
+                              });
+
+                              // Remove from suggestions
+                              setAiSuggestions((prev: any) => {
+                                if (!prev) return prev;
+                                const newSuggestions = { ...prev };
+                                delete newSuggestions[fieldName];
+                                return Object.keys(newSuggestions).length > 0 ? newSuggestions : null;
+                              });
+                            }}
+                            className="btn btn-sm btn-primary"
+                          >
+                            ✅ 적용
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAiSuggestions((prev: any) => {
+                                if (!prev) return prev;
+                                const newSuggestions = { ...prev };
+                                delete newSuggestions[fieldName];
+                                return Object.keys(newSuggestions).length > 0 ? newSuggestions : null;
+                              });
+                            }}
+                            className="btn btn-sm btn-outline"
+                          >
+                            ❌ 거부
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <p className="text-xs text-gray-600 w-full">
                   💡 <strong>빈 필드만 AI 보완:</strong> 네이버 검색 + AI로 기본 정보 자동 채우기<br/>
-                  💡 <strong>선택한 필드만 재생성:</strong> 특정 필드만 골라서 AI 재생성 (이벤트 생성 후 사용 가능)<br/>
+                  💡 <strong>선택한 필드만 재생성:</strong> 특정 필드만 골라서 AI 재생성 (선택 후 사용)<br/>
                   💡 <strong>강제 재생성:</strong> 모든 필드를 AI로 덮어쓰기<br/>
                   💡 <strong>AI만으로 빈 필드 보완:</strong> 네이버 없이 AI 직접 검색 (포토존, 대기시간 등 상세 정보)
                 </p>
@@ -1125,15 +1891,16 @@ export default function CreateEventPage() {
             </div>
           </section>
 
-          {/* 🆕 카테고리별 특화 필드 */}
+          {/* 🆕 카테고리별 특화 필드 (EventsPage.tsx와 동일) */}
           
           {/* 전시 특화 필드 */}
           {formData.mainCategory === '전시' && (
             <section>
               <h3 className="text-lg font-bold text-gray-900 mb-4 pb-2 border-b">🎨 전시 특화 정보</h3>
               <div className="space-y-4">
+                {/* 작가/아티스트 */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
                     작가/아티스트 (쉼표로 구분)
                   </label>
                   <input
@@ -1148,8 +1915,21 @@ export default function CreateEventPage() {
                           display: {
                             ...formData.metadata?.display,
                             exhibition: {
-                              ...formData.metadata?.display?.exhibition,
                               artists,
+                              genre: formData.metadata?.display?.exhibition?.genre || [],
+                              type: formData.metadata?.display?.exhibition?.type || '기획전',
+                              duration_minutes: formData.metadata?.display?.exhibition?.duration_minutes || 60,
+                              facilities: formData.metadata?.display?.exhibition?.facilities || {
+                                photo_zone: false,
+                                audio_guide: false,
+                                goods_shop: false,
+                                cafe: false,
+                              },
+                              docent_tour: formData.metadata?.display?.exhibition?.docent_tour || null,
+                              special_programs: formData.metadata?.display?.exhibition?.special_programs || [],
+                              age_recommendation: formData.metadata?.display?.exhibition?.age_recommendation || null,
+                              photography_allowed: formData.metadata?.display?.exhibition?.photography_allowed || null,
+                              last_admission: formData.metadata?.display?.exhibition?.last_admission || null,
                             },
                           },
                         },
@@ -1159,8 +1939,10 @@ export default function CreateEventPage() {
                     placeholder="예: 팀랩, 구사마 야요이"
                   />
                 </div>
+
+                {/* 장르 */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
                     장르 (쉼표로 구분)
                   </label>
                   <input
@@ -1175,8 +1957,21 @@ export default function CreateEventPage() {
                           display: {
                             ...formData.metadata?.display,
                             exhibition: {
-                              ...formData.metadata?.display?.exhibition,
+                              artists: formData.metadata?.display?.exhibition?.artists || [],
                               genre,
+                              type: formData.metadata?.display?.exhibition?.type || '기획전',
+                              duration_minutes: formData.metadata?.display?.exhibition?.duration_minutes || 60,
+                              facilities: formData.metadata?.display?.exhibition?.facilities || {
+                                photo_zone: false,
+                                audio_guide: false,
+                                goods_shop: false,
+                                cafe: false,
+                              },
+                              docent_tour: formData.metadata?.display?.exhibition?.docent_tour || null,
+                              special_programs: formData.metadata?.display?.exhibition?.special_programs || [],
+                              age_recommendation: formData.metadata?.display?.exhibition?.age_recommendation || null,
+                              photography_allowed: formData.metadata?.display?.exhibition?.photography_allowed || null,
+                              last_admission: formData.metadata?.display?.exhibition?.last_admission || null,
                             },
                           },
                         },
@@ -1186,9 +1981,13 @@ export default function CreateEventPage() {
                     placeholder="예: 미디어아트, 현대미술"
                   />
                 </div>
+
+                {/* 전시 유형 + 권장 관람 시간 */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">전시 유형</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      전시 유형
+                    </label>
                     <select
                       value={formData.metadata?.display?.exhibition?.type || '기획전'}
                       onChange={(e) => {
@@ -1199,8 +1998,21 @@ export default function CreateEventPage() {
                             display: {
                               ...formData.metadata?.display,
                               exhibition: {
-                                ...formData.metadata?.display?.exhibition,
+                                artists: formData.metadata?.display?.exhibition?.artists || [],
+                                genre: formData.metadata?.display?.exhibition?.genre || [],
                                 type: e.target.value,
+                                duration_minutes: formData.metadata?.display?.exhibition?.duration_minutes || 60,
+                                facilities: formData.metadata?.display?.exhibition?.facilities || {
+                                  photo_zone: false,
+                                  audio_guide: false,
+                                  goods_shop: false,
+                                  cafe: false,
+                                },
+                                docent_tour: formData.metadata?.display?.exhibition?.docent_tour || null,
+                                special_programs: formData.metadata?.display?.exhibition?.special_programs || [],
+                                age_recommendation: formData.metadata?.display?.exhibition?.age_recommendation || null,
+                                photography_allowed: formData.metadata?.display?.exhibition?.photography_allowed || null,
+                                last_admission: formData.metadata?.display?.exhibition?.last_admission || null,
                               },
                             },
                           },
@@ -1215,7 +2027,9 @@ export default function CreateEventPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">권장 관람 시간 (분)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      권장 관람 시간 (분)
+                    </label>
                     <input
                       type="number"
                       value={formData.metadata?.display?.exhibition?.duration_minutes || 60}
@@ -1227,8 +2041,21 @@ export default function CreateEventPage() {
                             display: {
                               ...formData.metadata?.display,
                               exhibition: {
-                                ...formData.metadata?.display?.exhibition,
-                                duration_minutes: parseInt(e.target.value) || 60,
+                                artists: formData.metadata?.display?.exhibition?.artists || [],
+                                genre: formData.metadata?.display?.exhibition?.genre || [],
+                                type: formData.metadata?.display?.exhibition?.type || '기획전',
+                                duration_minutes: parseInt(e.target.value) || null,
+                                facilities: formData.metadata?.display?.exhibition?.facilities || {
+                                  photo_zone: false,
+                                  audio_guide: false,
+                                  goods_shop: false,
+                                  cafe: false,
+                                },
+                                docent_tour: formData.metadata?.display?.exhibition?.docent_tour || null,
+                                special_programs: formData.metadata?.display?.exhibition?.special_programs || [],
+                                age_recommendation: formData.metadata?.display?.exhibition?.age_recommendation || null,
+                                photography_allowed: formData.metadata?.display?.exhibition?.photography_allowed || null,
+                                last_admission: formData.metadata?.display?.exhibition?.last_admission || null,
                               },
                             },
                           },
@@ -1239,6 +2066,93 @@ export default function CreateEventPage() {
                     />
                   </div>
                 </div>
+
+                {/* 편의시설 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">편의시설</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { id: 'photo_zone', label: '📸 포토존' },
+                      { id: 'audio_guide', label: '🎧 오디오 가이드' },
+                      { id: 'goods_shop', label: '🛍️ 굿즈샵' },
+                      { id: 'cafe', label: '☕ 카페' },
+                    ].map((facility) => (
+                      <label key={facility.id} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={formData.metadata?.display?.exhibition?.facilities?.[facility.id as 'photo_zone' | 'audio_guide' | 'goods_shop' | 'cafe'] || false}
+                          onChange={(e) => {
+                            setFormData({
+                              ...formData,
+                              metadata: {
+                                ...formData.metadata,
+                                display: {
+                                  ...formData.metadata?.display,
+                                  exhibition: {
+                                    artists: formData.metadata?.display?.exhibition?.artists || [],
+                                    genre: formData.metadata?.display?.exhibition?.genre || [],
+                                    type: formData.metadata?.display?.exhibition?.type || '기획전',
+                                    duration_minutes: formData.metadata?.display?.exhibition?.duration_minutes || 60,
+                                    facilities: {
+                                      ...formData.metadata?.display?.exhibition?.facilities,
+                                      [facility.id]: e.target.checked,
+                                    },
+                                    docent_tour: formData.metadata?.display?.exhibition?.docent_tour || null,
+                                    special_programs: formData.metadata?.display?.exhibition?.special_programs || [],
+                                    age_recommendation: formData.metadata?.display?.exhibition?.age_recommendation || null,
+                                    photography_allowed: formData.metadata?.display?.exhibition?.photography_allowed || null,
+                                    last_admission: formData.metadata?.display?.exhibition?.last_admission || null,
+                                  },
+                                },
+                              },
+                            });
+                          }}
+                          className="rounded"
+                        />
+                        <span>{facility.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 도슨트 투어 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">도슨트 투어</label>
+                  <input
+                    type="text"
+                    value={formData.metadata?.display?.exhibition?.docent_tour || ''}
+                    onChange={(e) => {
+                      setFormData({
+                        ...formData,
+                        metadata: {
+                          ...formData.metadata,
+                          display: {
+                            ...formData.metadata?.display,
+                            exhibition: {
+                              artists: formData.metadata?.display?.exhibition?.artists || [],
+                              genre: formData.metadata?.display?.exhibition?.genre || [],
+                              type: formData.metadata?.display?.exhibition?.type || '기획전',
+                              duration_minutes: formData.metadata?.display?.exhibition?.duration_minutes || 60,
+                              facilities: formData.metadata?.display?.exhibition?.facilities || {
+                                photo_zone: false,
+                                audio_guide: false,
+                                goods_shop: false,
+                                cafe: false,
+                              },
+                              docent_tour: e.target.value || null,
+                              special_programs: formData.metadata?.display?.exhibition?.special_programs || [],
+                              age_recommendation: formData.metadata?.display?.exhibition?.age_recommendation || null,
+                              photography_allowed: formData.metadata?.display?.exhibition?.photography_allowed || null,
+                              last_admission: formData.metadata?.display?.exhibition?.last_admission || null,
+                            },
+                          },
+                        },
+                      });
+                    }}
+                    className="input"
+                    placeholder="예: 매일 14:00, 16:00"
+                  />
+                </div>
               </div>
             </section>
           )}
@@ -1248,8 +2162,9 @@ export default function CreateEventPage() {
             <section>
               <h3 className="text-lg font-bold text-gray-900 mb-4 pb-2 border-b">🎭 공연 특화 정보</h3>
               <div className="space-y-4">
+                {/* 출연진 */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
                     출연진 (쉼표로 구분)
                   </label>
                   <input
@@ -1264,19 +2179,33 @@ export default function CreateEventPage() {
                           display: {
                             ...formData.metadata?.display,
                             performance: {
-                              ...formData.metadata?.display?.performance,
                               cast,
+                              genre: formData.metadata?.display?.performance?.genre || [],
+                              duration_minutes: formData.metadata?.display?.performance?.duration_minutes || null,
+                              intermission: formData.metadata?.display?.performance?.intermission || false,
+                              age_limit: formData.metadata?.display?.performance?.age_limit || '전체관람가',
+                              showtimes: formData.metadata?.display?.performance?.showtimes || {},
+                              runtime: formData.metadata?.display?.performance?.runtime || null,
+                              crew: formData.metadata?.display?.performance?.crew || {
+                                director: null,
+                                writer: null,
+                                composer: null,
+                              },
+                              discounts: formData.metadata?.display?.performance?.discounts || [],
+                              last_admission: formData.metadata?.display?.performance?.last_admission || null,
                             },
                           },
                         },
                       });
                     }}
                     className="input"
-                    placeholder="예: 홍길동, 김철수"
+                    placeholder="예: 조승우, 홍광호"
                   />
                 </div>
+
+                {/* 장르 */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
                     장르 (쉼표로 구분)
                   </label>
                   <input
@@ -1291,23 +2220,39 @@ export default function CreateEventPage() {
                           display: {
                             ...formData.metadata?.display,
                             performance: {
-                              ...formData.metadata?.display?.performance,
+                              cast: formData.metadata?.display?.performance?.cast || [],
                               genre,
+                              duration_minutes: formData.metadata?.display?.performance?.duration_minutes || null,
+                              intermission: formData.metadata?.display?.performance?.intermission || false,
+                              age_limit: formData.metadata?.display?.performance?.age_limit || '전체관람가',
+                              showtimes: formData.metadata?.display?.performance?.showtimes || {},
+                              runtime: formData.metadata?.display?.performance?.runtime || null,
+                              crew: formData.metadata?.display?.performance?.crew || {
+                                director: null,
+                                writer: null,
+                                composer: null,
+                              },
+                              discounts: formData.metadata?.display?.performance?.discounts || [],
+                              last_admission: formData.metadata?.display?.performance?.last_admission || null,
                             },
                           },
                         },
                       });
                     }}
                     className="input"
-                    placeholder="예: 뮤지컬, 콘서트"
+                    placeholder="예: 뮤지컬, 창작"
                   />
                 </div>
+
+                {/* 공연 시간 + 인터미션 */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">공연 시간 (분)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      공연 시간 (분)
+                    </label>
                     <input
                       type="number"
-                      value={formData.metadata?.display?.performance?.duration_minutes || 120}
+                      value={formData.metadata?.display?.performance?.duration_minutes || ''}
                       onChange={(e) => {
                         setFormData({
                           ...formData,
@@ -1316,8 +2261,20 @@ export default function CreateEventPage() {
                             display: {
                               ...formData.metadata?.display,
                               performance: {
-                                ...formData.metadata?.display?.performance,
-                                duration_minutes: parseInt(e.target.value) || 120,
+                                cast: formData.metadata?.display?.performance?.cast || [],
+                                genre: formData.metadata?.display?.performance?.genre || [],
+                                duration_minutes: parseInt(e.target.value) || null,
+                                intermission: formData.metadata?.display?.performance?.intermission || false,
+                                age_limit: formData.metadata?.display?.performance?.age_limit || '전체관람가',
+                                showtimes: formData.metadata?.display?.performance?.showtimes || {},
+                                runtime: formData.metadata?.display?.performance?.runtime || null,
+                                crew: formData.metadata?.display?.performance?.crew || {
+                                  director: null,
+                                  writer: null,
+                                  composer: null,
+                                },
+                                discounts: formData.metadata?.display?.performance?.discounts || [],
+                                last_admission: formData.metadata?.display?.performance?.last_admission || null,
                               },
                             },
                           },
@@ -1328,29 +2285,124 @@ export default function CreateEventPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">연령 제한</label>
-                    <input
-                      type="text"
-                      value={formData.metadata?.display?.performance?.age_limit || ''}
-                      onChange={(e) => {
-                        setFormData({
-                          ...formData,
-                          metadata: {
-                            ...formData.metadata,
-                            display: {
-                              ...formData.metadata?.display,
-                              performance: {
-                                ...formData.metadata?.display?.performance,
-                                age_limit: e.target.value,
+                    <label className="block text-sm font-medium text-gray-700 mb-1">인터미션</label>
+                    <label className="flex items-center gap-2 mt-2">
+                      <input
+                        type="checkbox"
+                        checked={formData.metadata?.display?.performance?.intermission || false}
+                        onChange={(e) => {
+                          setFormData({
+                            ...formData,
+                            metadata: {
+                              ...formData.metadata,
+                              display: {
+                                ...formData.metadata?.display,
+                                performance: {
+                                  cast: formData.metadata?.display?.performance?.cast || [],
+                                  genre: formData.metadata?.display?.performance?.genre || [],
+                                  duration_minutes: formData.metadata?.display?.performance?.duration_minutes || null,
+                                  intermission: e.target.checked,
+                                  age_limit: formData.metadata?.display?.performance?.age_limit || '전체관람가',
+                                  showtimes: formData.metadata?.display?.performance?.showtimes || {},
+                                  runtime: formData.metadata?.display?.performance?.runtime || null,
+                                  crew: formData.metadata?.display?.performance?.crew || {
+                                    director: null,
+                                    writer: null,
+                                    composer: null,
+                                  },
+                                  discounts: formData.metadata?.display?.performance?.discounts || [],
+                                  last_admission: formData.metadata?.display?.performance?.last_admission || null,
+                                },
                               },
                             },
-                          },
-                        });
-                      }}
-                      className="input"
-                      placeholder="예: 만 13세 이상"
-                    />
+                          });
+                        }}
+                        className="rounded"
+                      />
+                      <span className="text-sm">중간 휴식 있음</span>
+                    </label>
                   </div>
+                </div>
+
+                {/* 연령 제한 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    연령 제한
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.metadata?.display?.performance?.age_limit || ''}
+                    onChange={(e) => {
+                      setFormData({
+                        ...formData,
+                        metadata: {
+                          ...formData.metadata,
+                          display: {
+                            ...formData.metadata?.display,
+                            performance: {
+                              cast: formData.metadata?.display?.performance?.cast || [],
+                              genre: formData.metadata?.display?.performance?.genre || [],
+                              duration_minutes: formData.metadata?.display?.performance?.duration_minutes || null,
+                              intermission: formData.metadata?.display?.performance?.intermission || false,
+                              age_limit: e.target.value || '전체관람가',
+                              showtimes: formData.metadata?.display?.performance?.showtimes || {},
+                              runtime: formData.metadata?.display?.performance?.runtime || null,
+                              crew: formData.metadata?.display?.performance?.crew || {
+                                director: null,
+                                writer: null,
+                                composer: null,
+                              },
+                              discounts: formData.metadata?.display?.performance?.discounts || [],
+                              last_admission: formData.metadata?.display?.performance?.last_admission || null,
+                            },
+                          },
+                        },
+                      });
+                    }}
+                    className="input"
+                    placeholder="예: 만 7세 이상, 전체관람가"
+                  />
+                </div>
+
+                {/* 할인 정보 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    할인 정보 (쉼표로 구분)
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.metadata?.display?.performance?.discounts?.join(', ') || ''}
+                    onChange={(e) => {
+                      const discounts = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                      setFormData({
+                        ...formData,
+                        metadata: {
+                          ...formData.metadata,
+                          display: {
+                            ...formData.metadata?.display,
+                            performance: {
+                              cast: formData.metadata?.display?.performance?.cast || [],
+                              genre: formData.metadata?.display?.performance?.genre || [],
+                              duration_minutes: formData.metadata?.display?.performance?.duration_minutes || null,
+                              intermission: formData.metadata?.display?.performance?.intermission || false,
+                              age_limit: formData.metadata?.display?.performance?.age_limit || '전체관람가',
+                              showtimes: formData.metadata?.display?.performance?.showtimes || {},
+                              runtime: formData.metadata?.display?.performance?.runtime || null,
+                              crew: formData.metadata?.display?.performance?.crew || {
+                                director: null,
+                                writer: null,
+                                composer: null,
+                              },
+                              discounts,
+                              last_admission: formData.metadata?.display?.performance?.last_admission || null,
+                            },
+                          },
+                        },
+                      });
+                    }}
+                    className="input"
+                    placeholder="예: 조기예매 20%, 청소년 30%"
+                  />
                 </div>
               </div>
             </section>
@@ -1361,8 +2413,11 @@ export default function CreateEventPage() {
             <section>
               <h3 className="text-lg font-bold text-gray-900 mb-4 pb-2 border-b">🎪 축제 특화 정보</h3>
               <div className="space-y-4">
+                {/* 주최/주관 */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">주최/주관</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    주최/주관 기관
+                  </label>
                   <input
                     type="text"
                     value={formData.metadata?.display?.festival?.organizer || ''}
@@ -1382,11 +2437,15 @@ export default function CreateEventPage() {
                       });
                     }}
                     className="input"
-                    placeholder="예: 서울시, 관광공사"
+                    placeholder="서울시 관광재단, 문화체육관광부"
                   />
                 </div>
+
+                {/* 주요 프로그램 */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">주요 프로그램</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    주요 프로그램
+                  </label>
                   <textarea
                     value={formData.metadata?.display?.festival?.program_highlights || ''}
                     onChange={(e) => {
@@ -1404,10 +2463,256 @@ export default function CreateEventPage() {
                         },
                       });
                     }}
-                    className="input"
                     rows={3}
-                    placeholder="축제의 주요 프로그램을 입력하세요"
+                    className="input"
+                    placeholder="개막식 불꽃놀이, K-POP 공연, LED 등불 전시"
                   />
+                </div>
+
+                {/* 먹거리/체험 부스 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    먹거리/체험 부스
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.metadata?.display?.festival?.food_and_booths || ''}
+                    onChange={(e) => {
+                      setFormData({
+                        ...formData,
+                        metadata: {
+                          ...formData.metadata,
+                          display: {
+                            ...formData.metadata?.display,
+                            festival: {
+                              ...formData.metadata?.display?.festival,
+                              food_and_booths: e.target.value,
+                            },
+                          },
+                        },
+                      });
+                    }}
+                    className="input"
+                    placeholder="푸드트럭 20개, 체험 부스 10개"
+                  />
+                </div>
+
+                {/* 규모 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    규모
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.metadata?.display?.festival?.scale_text || ''}
+                    onChange={(e) => {
+                      setFormData({
+                        ...formData,
+                        metadata: {
+                          ...formData.metadata,
+                          display: {
+                            ...formData.metadata?.display,
+                            festival: {
+                              ...formData.metadata?.display?.festival,
+                              scale_text: e.target.value,
+                            },
+                          },
+                        },
+                      });
+                    }}
+                    className="input"
+                    placeholder="작년 50만 명 방문"
+                  />
+                </div>
+
+                {/* 주차 정보 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    주차 정보
+                  </label>
+                  <textarea
+                    value={formData.metadata?.display?.festival?.parking_tips || ''}
+                    onChange={(e) => {
+                      setFormData({
+                        ...formData,
+                        metadata: {
+                          ...formData.metadata,
+                          display: {
+                            ...formData.metadata?.display,
+                            festival: {
+                              ...formData.metadata?.display?.festival,
+                              parking_tips: e.target.value,
+                            },
+                          },
+                        },
+                      });
+                    }}
+                    rows={2}
+                    className="input"
+                    placeholder="행사장 주차 불가, 인근 공영주차장 이용 권장"
+                  />
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* 행사 특화 필드 */}
+          {formData.mainCategory === '행사' && (
+            <section>
+              <h3 className="text-lg font-bold text-gray-900 mb-4 pb-2 border-b">📅 행사 특화 정보</h3>
+              <div className="space-y-4">
+                {/* 참가 대상 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    참가 대상
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.metadata?.display?.event?.target_audience || ''}
+                    onChange={(e) => {
+                      setFormData({
+                        ...formData,
+                        metadata: {
+                          ...formData.metadata,
+                          display: {
+                            ...formData.metadata?.display,
+                            event: {
+                              ...formData.metadata?.display?.event,
+                              target_audience: e.target.value,
+                            },
+                          },
+                        },
+                      });
+                    }}
+                    className="input"
+                    placeholder="대학생, 취준생, 초등학생 이상"
+                  />
+                </div>
+
+                {/* 정원 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    정원
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.metadata?.display?.event?.capacity || ''}
+                    onChange={(e) => {
+                      setFormData({
+                        ...formData,
+                        metadata: {
+                          ...formData.metadata,
+                          display: {
+                            ...formData.metadata?.display,
+                            event: {
+                              ...formData.metadata?.display?.event,
+                              capacity: e.target.value,
+                            },
+                          },
+                        },
+                      });
+                    }}
+                    className="input"
+                    placeholder="선착순 50명, 정원 100명"
+                  />
+                </div>
+
+                {/* 사전 등록 정보 */}
+                <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <h5 className="font-semibold mb-3 text-sm">📝 사전 등록 정보</h5>
+
+                  {/* 사전 등록 필요 여부 */}
+                  <div className="mb-3">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={formData.metadata?.display?.event?.registration?.required || false}
+                        onChange={(e) => {
+                          setFormData({
+                            ...formData,
+                            metadata: {
+                              ...formData.metadata,
+                              display: {
+                                ...formData.metadata?.display,
+                                event: {
+                                  ...formData.metadata?.display?.event,
+                                  registration: {
+                                    ...formData.metadata?.display?.event?.registration,
+                                    required: e.target.checked,
+                                  },
+                                },
+                              },
+                            },
+                          });
+                        }}
+                        className="rounded"
+                      />
+                      <span className="text-sm font-medium">사전 등록 필요</span>
+                    </label>
+                  </div>
+
+                  {/* 사전 등록 링크 (필요한 경우에만) */}
+                  {formData.metadata?.display?.event?.registration?.required && (
+                    <>
+                      <div className="mb-3">
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          등록 링크
+                        </label>
+                        <input
+                          type="url"
+                          value={formData.metadata?.display?.event?.registration?.link || ''}
+                          onChange={(e) => {
+                            setFormData({
+                              ...formData,
+                              metadata: {
+                                ...formData.metadata,
+                                display: {
+                                  ...formData.metadata?.display,
+                                  event: {
+                                    ...formData.metadata?.display?.event,
+                                    registration: {
+                                      ...formData.metadata?.display?.event?.registration,
+                                      link: e.target.value,
+                                    },
+                                  },
+                                },
+                              },
+                            });
+                          }}
+                          className="input text-sm"
+                          placeholder="https://..."
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          마감일
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.metadata?.display?.event?.registration?.deadline || ''}
+                          onChange={(e) => {
+                            setFormData({
+                              ...formData,
+                              metadata: {
+                                ...formData.metadata,
+                                display: {
+                                  ...formData.metadata?.display,
+                                  event: {
+                                    ...formData.metadata?.display?.event,
+                                    registration: {
+                                      ...formData.metadata?.display?.event?.registration,
+                                      deadline: e.target.value,
+                                    },
+                                  },
+                                },
+                              },
+                            });
+                          }}
+                          className="input text-sm"
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </section>
@@ -1418,12 +2723,303 @@ export default function CreateEventPage() {
             <section>
               <h3 className="text-lg font-bold text-gray-900 mb-4 pb-2 border-b">🏪 팝업 특화 정보</h3>
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">팝업 타입</label>
+                {/* 브랜드 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    브랜드 (쉼표로 구분)
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.metadata?.display?.popup?.brands?.join(', ') || ''}
+                    onChange={(e) => {
+                      const brands = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                      setFormData({
+                        ...formData,
+                        metadata: {
+                          ...formData.metadata,
+                          display: {
+                            ...formData.metadata?.display,
+                            popup: {
+                              ...formData.metadata?.display?.popup,
+                              brands,
+                              is_fnb: formData.metadata?.display?.popup?.is_fnb || false,
+                            },
+                          },
+                        },
+                      });
+                    }}
+                    className="input"
+                    placeholder="노티드, 케이스티파이"
+                  />
+                </div>
+
+                {/* 팝업 타입 선택 (라디오 버튼) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    팝업 타입 선택
+                  </label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="popup-type"
+                        value="fnb"
+                        checked={formData.metadata?.display?.popup?.type === 'fnb'}
+                        onChange={(e) => {
+                          setFormData({
+                            ...formData,
+                            metadata: {
+                              ...formData.metadata,
+                              display: {
+                                ...formData.metadata?.display,
+                                popup: {
+                                  ...formData.metadata?.display?.popup,
+                                  type: 'fnb',
+                                  brands: formData.metadata?.display?.popup?.brands || [],
+                                },
+                              },
+                            },
+                          });
+                        }}
+                      />
+                      <span className="text-sm font-medium">🍰 F&B (디저트/카페)</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="popup-type"
+                        value="collab"
+                        checked={formData.metadata?.display?.popup?.type === 'collab'}
+                        onChange={(e) => {
+                          setFormData({
+                            ...formData,
+                            metadata: {
+                              ...formData.metadata,
+                              display: {
+                                ...formData.metadata?.display,
+                                popup: {
+                                  ...formData.metadata?.display?.popup,
+                                  type: 'collab',
+                                  brands: formData.metadata?.display?.popup?.brands || [],
+                                },
+                              },
+                            },
+                          });
+                        }}
+                      />
+                      <span className="text-sm font-medium">🤝 콜라보 (브랜드 협업)</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="popup-type"
+                        value="general"
+                        checked={formData.metadata?.display?.popup?.type === 'general' || !formData.metadata?.display?.popup?.type}
+                        onChange={(e) => {
+                          setFormData({
+                            ...formData,
+                            metadata: {
+                              ...formData.metadata,
+                              display: {
+                                ...formData.metadata?.display,
+                                popup: {
+                                  ...formData.metadata?.display?.popup,
+                                  type: 'general',
+                                  brands: formData.metadata?.display?.popup?.brands || [],
+                                },
+                              },
+                            },
+                          });
+                        }}
+                      />
+                      <span className="text-sm font-medium">📦 일반 팝업</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* ⭐ 콜라보 설명 (type === 'collab'일 때만) */}
+                {formData.metadata?.display?.popup?.type === 'collab' && (
+                  <div className="ml-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
+                    <h5 className="font-semibold mb-3 text-sm">🤝 콜라보 정보</h5>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        콜라보 설명
+                      </label>
+                      <textarea
+                        value={formData.metadata?.display?.popup?.collab_description || ''}
+                        onChange={(e) => {
+                          setFormData({
+                            ...formData,
+                            metadata: {
+                              ...formData.metadata,
+                              display: {
+                                ...formData.metadata?.display,
+                                popup: {
+                                  ...formData.metadata?.display?.popup,
+                                  type: 'collab',
+                                  collab_description: e.target.value,
+                                  brands: formData.metadata?.display?.popup?.brands || [],
+                                },
+                              },
+                            },
+                          });
+                        }}
+                        className="textarea textarea-bordered w-full text-sm"
+                        rows={3}
+                        placeholder="예: 노티드와 산리오 캐릭터즈의 첫 공식 콜라보레이션"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* ⭐ F&B 정보 (type === 'fnb'일 때만) */}
+                {formData.metadata?.display?.popup?.type === 'fnb' && (
+                  <div className="ml-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                    <h5 className="font-semibold mb-3 text-sm">🍰 메뉴 정보</h5>
+
+                    {/* 시그니처 메뉴 */}
+                    <div className="mb-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        ⭐ 시그니처 메뉴 (쉼표로 구분)
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.metadata?.display?.popup?.fnb_items?.signature_menu?.join(', ') || ''}
+                        onChange={(e) => {
+                          const signature_menu = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                          setFormData({
+                            ...formData,
+                            metadata: {
+                              ...formData.metadata,
+                              display: {
+                                ...formData.metadata?.display,
+                                popup: {
+                                  ...formData.metadata?.display?.popup,
+                                  type: 'fnb',
+                                  brands: formData.metadata?.display?.popup?.brands || [],
+                                  fnb_items: {
+                                    ...formData.metadata?.display?.popup?.fnb_items,
+                                    signature_menu,
+                                  },
+                                },
+                              },
+                            },
+                          });
+                        }}
+                        className="input text-sm"
+                        placeholder="두쫀쿠, 쪽파 베이글, 딸기 케이크"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        대표 메뉴를 쉼표로 구분해서 입력하세요
+                      </p>
+                    </div>
+
+                    {/* 메뉴 카테고리 */}
+                    <div className="mb-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        메뉴 카테고리 (쉼표로 구분)
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.metadata?.display?.popup?.fnb_items?.menu_categories?.join(', ') || ''}
+                        onChange={(e) => {
+                          const menu_categories = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                          setFormData({
+                            ...formData,
+                            metadata: {
+                              ...formData.metadata,
+                              display: {
+                                ...formData.metadata?.display,
+                                popup: {
+                                  ...formData.metadata?.display?.popup,
+                                  type: 'fnb',
+                                  brands: formData.metadata?.display?.popup?.brands || [],
+                                  fnb_items: {
+                                    ...formData.metadata?.display?.popup?.fnb_items,
+                                    menu_categories,
+                                  },
+                                },
+                              },
+                            },
+                          });
+                        }}
+                        className="input text-sm"
+                        placeholder="디저트, 음료, 브런치"
+                      />
+                    </div>
+
+                    {/* 가격대 */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        가격대
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.metadata?.display?.popup?.fnb_items?.price_range || ''}
+                        onChange={(e) => {
+                          setFormData({
+                            ...formData,
+                            metadata: {
+                              ...formData.metadata,
+                              display: {
+                                ...formData.metadata?.display,
+                                popup: {
+                                  ...formData.metadata?.display?.popup,
+                                  type: 'fnb',
+                                  brands: formData.metadata?.display?.popup?.brands || [],
+                                  fnb_items: {
+                                    ...formData.metadata?.display?.popup?.fnb_items,
+                                    price_range: e.target.value,
+                                  },
+                                },
+                              },
+                            },
+                          });
+                        }}
+                        className="input text-sm"
+                        placeholder="5천원-1만원대"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* 일반 굿즈 정보 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    판매 굿즈 (쉼표로 구분)
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.metadata?.display?.popup?.goods_items?.join(', ') || ''}
+                    onChange={(e) => {
+                      const goods_items = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                      setFormData({
+                        ...formData,
+                        metadata: {
+                          ...formData.metadata,
+                          display: {
+                            ...formData.metadata?.display,
+                            popup: {
+                              ...formData.metadata?.display?.popup,
+                              goods_items,
+                              is_fnb: formData.metadata?.display?.popup?.is_fnb || false,
+                              brands: formData.metadata?.display?.popup?.brands || [],
+                            },
+                          },
+                        },
+                      });
+                    }}
+                    className="input"
+                    placeholder="키링, 에코백, 포토카드"
+                  />
+                </div>
+
+                {/* 포토존 */}
+                <div>
+                  <label className="flex items-center gap-2 mb-2">
                     <input
-                      type="text"
-                      value={formData.metadata?.display?.popup?.type || ''}
+                      type="checkbox"
+                      checked={formData.metadata?.display?.popup?.photo_zone || false}
                       onChange={(e) => {
                         setFormData({
                           ...formData,
@@ -1433,49 +3029,60 @@ export default function CreateEventPage() {
                               ...formData.metadata?.display,
                               popup: {
                                 ...formData.metadata?.display?.popup,
-                                type: e.target.value,
+                                photo_zone: e.target.checked,
+                                is_fnb: formData.metadata?.display?.popup?.is_fnb || false,
+                                brands: formData.metadata?.display?.popup?.brands || [],
                               },
                             },
                           },
                         });
                       }}
-                      className="input"
-                      placeholder="예: F&B, 콜라보, 굿즈"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">브랜드</label>
-                    <input
-                      type="text"
-                      value={formData.metadata?.display?.popup?.brands || ''}
-                      onChange={(e) => {
-                        setFormData({
-                          ...formData,
-                          metadata: {
-                            ...formData.metadata,
-                            display: {
-                              ...formData.metadata?.display,
-                              popup: {
-                                ...formData.metadata?.display?.popup,
-                                brands: e.target.value,
-                              },
-                            },
-                          },
-                        });
-                      }}
-                      className="input"
-                      placeholder="예: 로와이드"
-                    />
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    포토존 여부 및 설명
+                    <span className="text-sm font-medium">포토존 있음</span>
                   </label>
-                  <textarea
-                    value={formData.metadata?.display?.popup?.photo_zone || ''}
+                  
+                  {/* 포토존 상세 설명 (포토존이 있을 때만 표시) */}
+                  {formData.metadata?.display?.popup?.photo_zone && (
+                    <div className="ml-6 mt-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        포토존 상세 설명
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.metadata?.display?.popup?.photo_zone_desc || ''}
+                        onChange={(e) => {
+                          setFormData({
+                            ...formData,
+                            metadata: {
+                              ...formData.metadata,
+                              display: {
+                                ...formData.metadata?.display,
+                                popup: {
+                                  ...formData.metadata?.display?.popup,
+                                  photo_zone_desc: e.target.value,
+                                  is_fnb: formData.metadata?.display?.popup?.is_fnb || false,
+                                  brands: formData.metadata?.display?.popup?.brands || [],
+                                },
+                              },
+                            },
+                          });
+                        }}
+                        className="input"
+                        placeholder="예: 대형 곰인형 포토존, 2층 입구"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* 대기 시간 힌트 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    대기 시간 수준
+                  </label>
+                  <select
+                    value={formData.metadata?.display?.popup?.waiting_hint?.level || ''}
                     onChange={(e) => {
+                      const level = e.target.value as 'low' | 'medium' | 'high' | '';
                       setFormData({
                         ...formData,
                         metadata: {
@@ -1484,43 +3091,59 @@ export default function CreateEventPage() {
                             ...formData.metadata?.display,
                             popup: {
                               ...formData.metadata?.display?.popup,
-                              photo_zone: e.target.value,
+                              waiting_hint: level ? {
+                                level,
+                                text: formData.metadata?.display?.popup?.waiting_hint?.text || '',
+                              } : undefined,
+                              is_fnb: formData.metadata?.display?.popup?.is_fnb || false,
+                              brands: formData.metadata?.display?.popup?.brands || [],
                             },
                           },
                         },
                       });
                     }}
                     className="input"
-                    rows={3}
-                    placeholder="포토존이 있으면 상세 설명을 입력하세요"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    대기 시간 안내
-                  </label>
-                  <textarea
-                    value={formData.metadata?.display?.popup?.waiting_time || ''}
-                    onChange={(e) => {
-                      setFormData({
-                        ...formData,
-                        metadata: {
-                          ...formData.metadata,
-                          display: {
-                            ...formData.metadata?.display,
-                            popup: {
-                              ...formData.metadata?.display?.popup,
-                              waiting_time: e.target.value,
+                  >
+                    <option value="">선택 안함</option>
+                    <option value="low">🟢 Low (빠름)</option>
+                    <option value="medium">🟡 Medium (보통)</option>
+                    <option value="high">🔴 High (혼잡)</option>
+                  </select>
+                  
+                  {/* 대기 시간 설명 텍스트 */}
+                  {formData.metadata?.display?.popup?.waiting_hint?.level && (
+                    <div className="mt-2">
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        대기 시간 상세 설명
+                      </label>
+                      <textarea
+                        value={formData.metadata?.display?.popup?.waiting_hint?.text || ''}
+                        onChange={(e) => {
+                          setFormData({
+                            ...formData,
+                            metadata: {
+                              ...formData.metadata,
+                              display: {
+                                ...formData.metadata?.display,
+                                popup: {
+                                  ...formData.metadata?.display?.popup,
+                                  waiting_hint: {
+                                    level: formData.metadata?.display?.popup?.waiting_hint?.level!,
+                                    text: e.target.value,
+                                  },
+                                  is_fnb: formData.metadata?.display?.popup?.is_fnb || false,
+                                  brands: formData.metadata?.display?.popup?.brands || [],
+                                },
+                              },
                             },
-                          },
-                        },
-                      });
-                    }}
-                    className="input"
-                    rows={2}
-                    placeholder="예: 주말 오후 2-5시 평균 10-15분 대기"
-                  />
+                          });
+                        }}
+                        className="textarea textarea-bordered w-full text-sm"
+                        rows={2}
+                        placeholder="예: 평일 오후는 대기 없음, 주말 오픈런 추천"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </section>
