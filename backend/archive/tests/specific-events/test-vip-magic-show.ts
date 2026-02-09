@@ -1,10 +1,10 @@
 /**
- * 스노우 팝업 단일 테스트
+ * VIP매직쇼 단일 테스트
  */
 
-import { pool } from './src/db';
-import { searchEventInfo, mergeSearchResults } from './src/lib/naverApi';
-import { extractEventInfo } from './src/lib/aiExtractor';
+import { pool } from '../../../src/db';
+import { searchEventInfo, mergeSearchResults } from '../../../src/lib/naverApi';
+import { extractEventInfo } from '../../../src/lib/aiExtractor';
 
 interface Event {
   id: string;
@@ -14,20 +14,20 @@ interface Event {
   overview: string | null;
 }
 
-async function testSnowPopup() {
-  console.log('\n🍦 스노우 팝업 단일 테스트\n');
+async function testVIPMagicShow() {
+  console.log('\n🎪 VIP매직쇼 단일 테스트\n');
 
   try {
-    // 스노우 팝업 조회
+    // VIP매직쇼 조회
     const result = await pool.query<Event>(`
       SELECT id, title, main_category, venue, overview
       FROM canonical_events
-      WHERE title LIKE '%스노우%롯데월드몰%'
+      WHERE title LIKE '%VIP매직쇼%'
       LIMIT 1
     `);
 
     if (result.rows.length === 0) {
-      console.log('❌ 스노우 팝업을 찾을 수 없습니다.');
+      console.log('❌ VIP매직쇼를 찾을 수 없습니다.');
       process.exit(1);
     }
 
@@ -43,9 +43,8 @@ async function testSnowPopup() {
     const searchResult = await searchEventInfo(event.title, event.venue || undefined);
     const searchText = mergeSearchResults(searchResult.place, searchResult.blog, searchResult.web);
     
-    console.log('📄 검색 결과 전체:');
-    console.log(searchText);
-    console.log('\n' + '='.repeat(80) + '\n');
+    console.log('📄 검색 결과 미리보기:');
+    console.log(searchText.slice(0, 500) + '...\n');
 
     // 네이버 플레이스 링크 추출
     let naverPlaceLink: string | null = null;
@@ -157,5 +156,5 @@ async function testSnowPopup() {
   }
 }
 
-testSnowPopup();
+testVIPMagicShow();
 

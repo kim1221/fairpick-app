@@ -2,7 +2,7 @@
  * 네이버 플레이스 검색 단독 테스트
  */
 
-import { searchNaverPlace } from './src/lib/naverApi';
+import { searchNaverPlace } from '../../../src/lib/naverApi';
 
 async function testPlaceSearch() {
   console.log('\n🔍 네이버 플레이스 검색 테스트\n');
