@@ -1,11 +1,11 @@
 /**
  * 축제/행사/팝업 특화 정보 백필 테스트
  * 
- * 실행: npx tsx src/scripts/test-category-display-backfill.ts
+ * 실행: npx tsx archive/tests/category-enrichment/test-category-display-backfill.ts
  */
 
-import { pool } from '../db';
-import { aiEnrichmentBackfill } from '../jobs/aiEnrichmentBackfill';
+import { pool } from '../../../src/db';
+import { aiEnrichmentBackfill } from '../../../src/jobs/aiEnrichmentBackfill';
 
 async function testCategoryDisplayBackfill() {
   console.log('\n🧪 축제/행사/팝업 특화 정보 백필 테스트');

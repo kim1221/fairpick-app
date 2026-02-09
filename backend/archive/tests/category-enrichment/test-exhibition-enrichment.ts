@@ -1,12 +1,12 @@
 /**
  * 전시 이벤트 Phase 3 필드 테스트 스크립트
  * 
- * 실행: ts-node -r dotenv/config src/scripts/test-exhibition-enrichment.ts
+ * 실행: ts-node -r dotenv/config archive/tests/category-enrichment/test-exhibition-enrichment.ts
  */
 
-import { pool } from '../db';
-import { searchEventInfo, mergeSearchResults } from '../lib/naverApi';
-import { extractEventInfo } from '../lib/aiExtractor';
+import { pool } from '../../../src/db';
+import { searchEventInfo, mergeSearchResults } from '../../../src/lib/naverApi';
+import { extractEventInfo } from '../../../src/lib/aiExtractor';
 
 async function testExhibitionEnrichment() {
   try {

@@ -2,9 +2,9 @@
  * 특정 축제 이벤트로 AI 추출 테스트
  */
 
-import { pool } from '../db';
-import { searchEventInfo, mergeSearchResults } from '../lib/naverApi';
-import { extractEventInfo } from '../lib/aiExtractor';
+import { pool } from '../../../src/db';
+import { searchEventInfo, mergeSearchResults } from '../../../src/lib/naverApi';
+import { extractEventInfo } from '../../../src/lib/aiExtractor';
 
 async function testFestivalAI() {
   const festivalId = '9721e6e7-ab51-4e2d-89b3-0026c50276a2'; // 대관령눈꽃축제
