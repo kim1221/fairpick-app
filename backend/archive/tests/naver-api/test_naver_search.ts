@@ -1,4 +1,4 @@
-import { searchEventInfo } from './src/lib/naverApi';
+import { searchEventInfo } from '../../../src/lib/naverApi';
 import * as dotenv from 'dotenv';
 
 dotenv.config();

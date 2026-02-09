@@ -4,7 +4,7 @@
  * total 값이 실제 검색 결과와 일치하는지 확인
  */
 
-import { searchNaverBlog } from './src/lib/naverApi';
+import { searchNaverBlog } from '../../../src/lib/naverApi';
 
 async function testTotalAccuracy() {
   console.log('========================================');
