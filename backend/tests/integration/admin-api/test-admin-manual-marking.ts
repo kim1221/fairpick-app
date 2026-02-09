@@ -1,10 +1,10 @@
 /**
  * Admin PATCH endpoint 수동 편집 마킹 테스트
  * 
- * 실행: ts-node -r dotenv/config src/scripts/test-admin-manual-marking.ts
+ * 실행: ts-node -r dotenv/config tests/integration/admin-api/test-admin-manual-marking.ts
  */
 
-import { pool } from '../db';
+import { pool } from '../../../src/db';
 import axios from 'axios';
 
 async function testAdminManualMarking() {

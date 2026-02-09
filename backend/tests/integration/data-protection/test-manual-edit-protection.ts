@@ -1,11 +1,11 @@
 /**
  * 수동 편집 보호 테스트
  * 
- * 실행: ts-node -r dotenv/config src/scripts/test-manual-edit-protection.ts
+ * 실행: ts-node -r dotenv/config tests/integration/data-protection/test-manual-edit-protection.ts
  */
 
-import { pool } from '../db';
-import { aiEnrichmentBackfill } from '../jobs/aiEnrichmentBackfill';
+import { pool } from '../../../src/db';
+import { aiEnrichmentBackfill } from '../../../src/jobs/aiEnrichmentBackfill';
 
 async function testManualEditProtection() {
   try {

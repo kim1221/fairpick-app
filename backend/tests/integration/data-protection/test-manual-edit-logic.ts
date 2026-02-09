@@ -1,7 +1,7 @@
 /**
  * 수동 편집 로직 단위 테스트 (빠른 테스트)
  * 
- * 실행: ts-node -r dotenv/config src/scripts/test-manual-edit-logic.ts
+ * 실행: ts-node -r dotenv/config tests/integration/data-protection/test-manual-edit-logic.ts
  */
 
 // isManuallyEdited 함수 복사 (테스트용)
