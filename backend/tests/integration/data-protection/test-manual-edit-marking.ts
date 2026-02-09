@@ -1,10 +1,10 @@
 /**
  * 수동 편집 마킹 테스트 (DB 테스트)
  * 
- * 실행: ts-node -r dotenv/config src/scripts/test-manual-edit-marking.ts
+ * 실행: ts-node -r dotenv/config tests/integration/data-protection/test-manual-edit-marking.ts
  */
 
-import { pool } from '../db';
+import { pool } from '../../../src/db';
 
 async function testManualEditMarking() {
   try {

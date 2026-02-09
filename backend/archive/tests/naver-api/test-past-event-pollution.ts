@@ -4,7 +4,7 @@
  * "라흐마니노프의 위로" 검색 시 과거 공연이 포함되는지 확인
  */
 
-import { searchNaverBlog } from './src/lib/naverApi';
+import { searchNaverBlog } from '../../../src/lib/naverApi';
 
 async function testPastEventPollution() {
   console.log('========================================');

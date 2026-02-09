@@ -4,7 +4,7 @@
  * DB에 저장된 실제 venue를 사용하여 테스트
  */
 
-import { searchNaverBlog } from './src/lib/naverApi';
+import { searchNaverBlog } from '../../../src/lib/naverApi';
 
 async function testActualQuery() {
   console.log('========================================');
