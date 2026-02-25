@@ -30,6 +30,7 @@ import dayjs from 'dayjs';
 import recommendationsRouter from './routes/recommendations';
 import userEventsRouter from './routes/userEvents';
 import authRouter from './routes/auth';
+import userSyncRouter from './routes/userSync';
 import * as recommender from './lib/recommender';
 import { calculateConsensusLight, calculateStructuralScore } from './lib/hotScoreCalculator';
 import { calculateDataCompleteness, DataCompletenessScore } from './lib/dataQuality';
@@ -379,6 +380,7 @@ app.get('/health', (_, res) => {
 
 // Phase 2: Recommendations API
 app.use('/auth', authRouter);
+app.use('/users', userSyncRouter);
 app.use('/recommendations', recommendationsRouter);
 
 // Phase 2.5: User Events API (사용자 행동 로그)
