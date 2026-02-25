@@ -308,6 +308,13 @@ function RecentPage() {
             <Text style={styles.emptyIcon}>👀</Text>
             <Text style={styles.emptyText}>최근 본 이벤트가 없어요.</Text>
             <Text style={styles.emptySubText}>축제를 둘러보고 기록을 남겨보세요!</Text>
+            <TouchableOpacity
+              style={styles.emptyCta}
+              onPress={() => navigation.navigate('/explore')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.emptyCtaText}>이벤트 둘러보기</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.cardList}>
@@ -450,6 +457,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#8B95A1',
     textAlign: 'center',
+    marginBottom: 24,
+  },
+  emptyCta: {
+    backgroundColor: '#0064FF',
+    paddingVertical: 13,
+    paddingHorizontal: 28,
+    borderRadius: 10,
+  },
+  emptyCtaText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   cardList: {
     paddingHorizontal: 20,

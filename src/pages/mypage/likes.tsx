@@ -279,6 +279,13 @@ function LikesPage() {
             <Text style={styles.emptyIcon}>❤️</Text>
             <Text style={styles.emptyText}>아직 찜한 행사가 없어요.</Text>
             <Text style={styles.emptySubText}>마음에 드는 축제를 찜해보세요!</Text>
+            <TouchableOpacity
+              style={styles.emptyCta}
+              onPress={() => navigation.navigate('/')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.emptyCtaText}>추천 이벤트 보러가기</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <>
@@ -329,6 +336,7 @@ function LikesPage() {
                   event={event}
                   onPress={() => handleEventPress(event)}
                   onDelete={() => handleUnlike(event.id)}
+                  deleteStyle="heart"
                 />
               ))}
             </View>
@@ -423,6 +431,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#8B95A1',
     textAlign: 'center',
+    marginBottom: 24,
+  },
+  emptyCta: {
+    backgroundColor: '#0064FF',
+    paddingVertical: 13,
+    paddingHorizontal: 28,
+    borderRadius: 10,
+  },
+  emptyCtaText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   cardList: {
     paddingHorizontal: 20,
