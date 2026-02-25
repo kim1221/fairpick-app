@@ -52,13 +52,15 @@ async function getFreshAccessToken(userId: string): Promise<string> {
 
   if (!isExpiringSoon) return user.toss_access_token;
 
-  // Toss access token 재발급
+  // Toss access token 재발급 (refreshToken도 새로 받아요)
   const refreshed = await refreshTossToken(user.toss_refresh_token);
   const newExpiresAt = new Date(Date.now() + refreshed.expiresIn * 1000);
 
   await pool.query(
-    'UPDATE users SET toss_access_token = $1, token_expires_at = $2 WHERE id = $3',
-    [refreshed.accessToken, newExpiresAt, userId]
+    `UPDATE users
+     SET toss_access_token = $1, toss_refresh_token = $2, token_expires_at = $3
+     WHERE id = $4`,
+    [refreshed.accessToken, refreshed.refreshToken, newExpiresAt, userId]
   );
 
   return refreshed.accessToken;
@@ -177,6 +179,48 @@ router.post('/logout', requireAuth, async (req, res) => {
     console.error('[auth/logout]', err);
     res.status(500).json({ error: 'LogoutFailed', message: '로그아웃 처리 중 오류가 발생했어요.' });
   }
+});
+
+// ─── POST /auth/callback/unlink ─────────────────────────────────────────────
+
+/**
+ * 토스 앱에서 연결 끊기 시 토스 서버가 호출하는 콜백
+ *
+ * 인증: Basic Auth (TOSS_CALLBACK_SECRET)
+ *   - Authorization: Basic base64(callbackSecret)
+ *
+ * body: { userKey: number, referrer: 'UNLINK' | 'WITHDRAWAL_TERMS' | 'WITHDRAWAL_TOSS' }
+ *
+ * referrer 의미:
+ *   UNLINK           — 앱 연결끊기
+ *   WITHDRAWAL_TERMS — 서비스 약관 탈퇴
+ *   WITHDRAWAL_TOSS  — 토스 탈퇴
+ */
+router.post('/callback/unlink', (req, res) => {
+  // Basic Auth 검증
+  const authHeader = req.headers.authorization ?? '';
+  const expectedCreds = Buffer.from(config.toss.callbackSecret).toString('base64');
+  if (!config.toss.callbackSecret || authHeader !== `Basic ${expectedCreds}`) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const { userKey, referrer } = req.body as { userKey?: number; referrer?: string };
+  if (!userKey) {
+    res.status(400).json({ error: 'BadRequest', message: 'userKey가 필요해요.' });
+    return;
+  }
+
+  // 비동기로 처리 (토스 서버에는 즉시 200 응답)
+  pool.query(
+    `UPDATE users
+     SET toss_access_token = NULL, toss_refresh_token = NULL, token_expires_at = NULL
+     WHERE toss_user_key = $1`,
+    [userKey]
+  ).catch((err) => console.error('[auth/callback/unlink] DB 오류:', err));
+
+  console.log(`[auth/callback/unlink] userKey=${userKey} referrer=${referrer}`);
+  res.json({ ok: true });
 });
 
 export default router;

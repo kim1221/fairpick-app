@@ -9,6 +9,7 @@
 
 import axios from 'axios';
 import { config } from '../config';
+import { decryptTossValue } from './tossDecrypt';
 
 const BASE = config.toss.apiBaseUrl;
 
@@ -24,17 +25,31 @@ type TossResultType =
   | 'FAIL';
 
 interface TossResponse<T> {
-  resultType: TossResultType;
+  resultType?: TossResultType;
   success?: T;
-  error?: { code: string; message: string };
+  error?: { code: string; message: string } | string;
+  error_description?: string;
 }
 
-// Toss API 응답에서 success 페이로드를 꺼내고, 실패 시 에러를 던져요.
+/**
+ * Toss API 응답에서 success 페이로드를 꺼내요.
+ * 두 가지 오류 포맷을 모두 처리해요:
+ *   1. { resultType: 'FAIL', error: { code, message } }  — 파트너 API 공통 포맷
+ *   2. { error: 'invalid_grant', error_description: '...' } — OAuth2 표준 오류 포맷
+ */
 function unwrap<T>(res: TossResponse<T>, label: string): T {
+  // OAuth2 표준 오류 포맷 (error가 문자열)
+  if (typeof res.error === 'string') {
+    const desc = res.error_description ?? res.error;
+    throw new Error(`[tossAuth][${label}] ${desc}`);
+  }
+
+  // 파트너 API 공통 포맷
   if (res.resultType !== 'SUCCESS' || !res.success) {
-    const msg = res.error?.message ?? res.resultType;
+    const msg = (res.error as { message?: string } | undefined)?.message ?? res.resultType ?? 'unknown error';
     throw new Error(`[tossAuth][${label}] ${msg}`);
   }
+
   return res.success;
 }
 
@@ -84,11 +99,14 @@ export async function generateTossToken(
 }
 
 /**
- * Refresh Token → 새 Access Token 재발급
+ * Refresh Token → 새 Access Token + Refresh Token 재발급
  * POST /api-partner/v1/apps-in-toss/user/oauth2/refresh-token
+ *
+ * Toss는 refresh 시 refreshToken도 새로 발급해요.
+ * 기존 refreshToken은 무효화되므로 반드시 DB에 저장해야 해요.
  */
-export async function refreshTossToken(refreshToken: string): Promise<Pick<TossTokens, 'accessToken' | 'expiresIn'>> {
-  const { data } = await axios.post<TossResponse<Pick<TossTokens, 'accessToken' | 'expiresIn'>>>(
+export async function refreshTossToken(refreshToken: string): Promise<TossTokens> {
+  const { data } = await axios.post<TossResponse<TossTokens>>(
     `${BASE}/api-partner/v1/apps-in-toss/user/oauth2/refresh-token`,
     { refreshToken },
     { headers: { 'Content-Type': 'application/json', ...partnerAuthHeader() } }
@@ -99,6 +117,9 @@ export async function refreshTossToken(refreshToken: string): Promise<Pick<TossT
 /**
  * Access Token으로 사용자 정보 조회
  * GET /api-partner/v1/apps-in-toss/user/oauth2/login-me
+ *
+ * name, phoneNumber, email은 AES-256-GCM으로 암호화되어 있어요.
+ * TOSS_DECRYPT_KEY / TOSS_DECRYPT_AAD가 없으면 해당 필드는 null로 반환돼요.
  */
 export async function getTossUser(accessToken: string): Promise<TossUserInfo> {
   const { data } = await axios.get<TossResponse<TossUserInfo>>(
@@ -110,7 +131,14 @@ export async function getTossUser(accessToken: string): Promise<TossUserInfo> {
       },
     }
   );
-  return unwrap(data, 'getTossUser');
+  const raw = unwrap(data, 'getTossUser');
+
+  return {
+    userKey: raw.userKey,
+    name: decryptTossValue(raw.name),
+    phoneNumber: decryptTossValue(raw.phoneNumber),
+    email: decryptTossValue(raw.email),
+  };
 }
 
 /**
@@ -130,6 +158,7 @@ export async function revokeTossToken(accessToken: string): Promise<void> {
   );
   // 연결 해제는 SUCCESS가 아니어도 무시 (이미 해제된 경우 등)
   if (data.resultType !== 'SUCCESS') {
-    console.warn('[tossAuth][revokeTossToken]', data.resultType, data.error?.message);
+    const errMsg = typeof data.error === 'string' ? data.error : data.error?.message;
+    console.warn('[tossAuth][revokeTossToken]', data.resultType, errMsg);
   }
 }

@@ -23,6 +23,11 @@ export const config = {
     // 앱인토스 개발자센터에서 발급받은 OAuth2 클라이언트 자격증명
     clientId: process.env.TOSS_CLIENT_ID ?? '',
     clientSecret: process.env.TOSS_CLIENT_SECRET ?? '',
+    // 개인정보 복호화 키 (콘솔 이메일로 받아요, AES-256-GCM, base64 인코딩)
+    decryptKey: process.env.TOSS_DECRYPT_KEY ?? '',
+    decryptAad: process.env.TOSS_DECRYPT_AAD ?? '',
+    // 연결끊기 콜백 검증용 시크릿 (콘솔 설정 > 연결끊기 콜백 URL 등록 시 발급)
+    callbackSecret: process.env.TOSS_CALLBACK_SECRET ?? '',
   },
 
   // ── JWT (우리 앱 자체 세션 토큰) ─────────────────────────────────
