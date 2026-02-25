@@ -28,6 +28,9 @@ export const config = {
     decryptAad: process.env.TOSS_DECRYPT_AAD ?? '',
     // 연결끊기 콜백 검증용 시크릿 (콘솔 설정 > 연결끊기 콜백 URL 등록 시 발급)
     callbackSecret: process.env.TOSS_CALLBACK_SECRET ?? '',
+    // mTLS 인증서 (콘솔 > mTLS 인증서 탭에서 발급)
+    certPath: process.env.TOSS_CERT_PATH ?? '',
+    keyPath: process.env.TOSS_KEY_PATH ?? '',
   },
 
   // ── JWT (우리 앱 자체 세션 토큰) ─────────────────────────────────

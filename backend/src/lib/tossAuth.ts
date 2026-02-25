@@ -7,11 +7,32 @@
  * 참고 문서: https://developers-apps-in-toss.toss.im/api/
  */
 
+import https from 'https';
+import fs from 'fs';
 import axios from 'axios';
 import { config } from '../config';
 import { decryptTossValue } from './tossDecrypt';
 
 const BASE = config.toss.apiBaseUrl;
+
+// ─── mTLS Agent ──────────────────────────────────────────────────────────────
+// 앱인토스 파트너 API는 mTLS(mutual TLS) 필수예요.
+// TOSS_CERT_PATH / TOSS_KEY_PATH 가 설정되지 않으면 agent 없이 요청해요 (로컬 개발용).
+
+function buildMtlsAgent(): https.Agent | undefined {
+  const { certPath, keyPath } = config.toss;
+  if (!certPath || !keyPath) {
+    if (__DEV__) console.warn('[tossAuth] mTLS 인증서 미설정 — TOSS_CERT_PATH / TOSS_KEY_PATH 확인');
+    return undefined;
+  }
+  return new https.Agent({
+    cert: fs.readFileSync(certPath),
+    key: fs.readFileSync(keyPath),
+  });
+}
+
+// 서버 시작 시 한 번만 생성해요.
+const mtlsAgent = buildMtlsAgent();
 
 // ─── Toss API 공통 응답 래퍼 ────────────────────────────────────────────────
 
@@ -93,7 +114,7 @@ export async function generateTossToken(
   const { data } = await axios.post<TossResponse<TossTokens>>(
     `${BASE}/api-partner/v1/apps-in-toss/user/oauth2/generate-token`,
     { authorizationCode, referrer },
-    { headers: { 'Content-Type': 'application/json', ...partnerAuthHeader() } }
+    { headers: { 'Content-Type': 'application/json', ...partnerAuthHeader() }, httpsAgent: mtlsAgent }
   );
   return unwrap(data, 'generateTossToken');
 }
@@ -109,7 +130,7 @@ export async function refreshTossToken(refreshToken: string): Promise<TossTokens
   const { data } = await axios.post<TossResponse<TossTokens>>(
     `${BASE}/api-partner/v1/apps-in-toss/user/oauth2/refresh-token`,
     { refreshToken },
-    { headers: { 'Content-Type': 'application/json', ...partnerAuthHeader() } }
+    { headers: { 'Content-Type': 'application/json', ...partnerAuthHeader() }, httpsAgent: mtlsAgent }
   );
   return unwrap(data, 'refreshTossToken');
 }
@@ -125,10 +146,8 @@ export async function getTossUser(accessToken: string): Promise<TossUserInfo> {
   const { data } = await axios.get<TossResponse<TossUserInfo>>(
     `${BASE}/api-partner/v1/apps-in-toss/user/oauth2/login-me`,
     {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      httpsAgent: mtlsAgent,
     }
   );
   const raw = unwrap(data, 'getTossUser');
@@ -150,10 +169,8 @@ export async function revokeTossToken(accessToken: string): Promise<void> {
     `${BASE}/api-partner/v1/apps-in-toss/user/oauth2/access/remove-by-access-token`,
     {},
     {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      httpsAgent: mtlsAgent,
     }
   );
   // 연결 해제는 SUCCESS가 아니어도 무시 (이미 해제된 경우 등)
