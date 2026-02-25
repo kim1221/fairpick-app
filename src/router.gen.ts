@@ -7,6 +7,10 @@ import { Route as _ExploreRoute } from '../pages/explore';
 import { Route as _NearbyRoute } from '../pages/nearby';
 import { Route as _HotRoute } from '../pages/hot';
 import { Route as _EndingRoute } from '../pages/ending';
+import { Route as _SearchRoute } from '../pages/search';
+import { Route as _MypageRoute } from '../pages/mypage';
+import { Route as _Mypage_LikesRoute } from '../pages/mypage/likes';
+import { Route as _Mypage_RecentRoute } from '../pages/mypage/recent';
 
 declare module '@granite-js/react-native' {
   interface RegisterScreenInput {
@@ -17,6 +21,10 @@ declare module '@granite-js/react-native' {
     '/nearby': (typeof _NearbyRoute)['_inputType'];
     '/hot': (typeof _HotRoute)['_inputType'];
     '/ending': (typeof _EndingRoute)['_inputType'];
+    '/search': (typeof _SearchRoute)['_inputType'];
+    '/mypage': (typeof _MypageRoute)['_inputType'];
+    '/mypage/likes': (typeof _Mypage_LikesRoute)['_inputType'];
+    '/mypage/recent': (typeof _Mypage_RecentRoute)['_inputType'];
   }
 
   interface RegisterScreen {
@@ -27,5 +35,9 @@ declare module '@granite-js/react-native' {
     '/nearby': (typeof _NearbyRoute)['_outputType'];
     '/hot': (typeof _HotRoute)['_outputType'];
     '/ending': (typeof _EndingRoute)['_outputType'];
+    '/search': (typeof _SearchRoute)['_outputType'];
+    '/mypage': (typeof _MypageRoute)['_outputType'];
+    '/mypage/likes': (typeof _Mypage_LikesRoute)['_outputType'];
+    '/mypage/recent': (typeof _Mypage_RecentRoute)['_outputType'];
   }
 }

@@ -3,27 +3,26 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useNavigation } from '@granite-js/react-native';
 
 interface BottomTabBarProps {
-  activeTab: 'home' | 'explore' | 'mypage';
+  currentTab: 'home' | 'explore' | 'mypage';
 }
 
-export const BottomTabBar: React.FC<BottomTabBarProps> = ({ activeTab }) => {
+export const BottomTabBar: React.FC<BottomTabBarProps> = ({ currentTab }) => {
   const navigation = useNavigation();
 
   const tabs = [
-    { key: 'home' as const, label: '추천', icon: '✨', route: '/home' },
-    { key: 'explore' as const, label: '발견', icon: '🔍', route: '/explore' },
-    { key: 'mypage' as const, label: 'MY', icon: '👤', route: '/mypage' },
+    { key: 'home' as const, label: '추천', icon: '✨', route: '/' as const },
+    { key: 'explore' as const, label: '발견', icon: '🔍', route: '/explore' as const },
+    { key: 'mypage' as const, label: 'MY', icon: '👤', route: '/mypage' as const },
   ];
 
   const handleTabPress = (tab: typeof tabs[number]) => {
-    console.log(`[BottomTabBar] Navigating to ${tab.route}`);
-    navigation.navigate(tab.route as any);
+    navigation.navigate(tab.route);
   };
 
   return (
     <View style={styles.container}>
       {tabs.map((tab) => {
-        const isActive = tab.key === activeTab;
+        const isActive = tab.key === currentTab;
         return (
           <TouchableOpacity
             key={tab.key}
