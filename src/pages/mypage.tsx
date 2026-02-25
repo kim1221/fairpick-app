@@ -1,6 +1,7 @@
 import { createRoute } from '@granite-js/react-native';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { ScrollView, StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import { ScrollView, StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import { useAuth } from '../hooks/useAuth';
 import { BottomTabBar } from '../components/BottomTabBar';
 import {
   getLikesV2,
@@ -54,6 +55,26 @@ function ThumbnailListItem({
 
 function MyPage() {
   const navigation = Route.useNavigation();
+  const { isLoggedIn, isLoading: authLoading, login, logout } = useAuth();
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  const handleLogin = async () => {
+    setLoginLoading(true);
+    try {
+      await login();
+    } catch {
+      Alert.alert('로그인 실패', '잠시 후 다시 시도해 주세요.');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    Alert.alert('로그아웃', '로그아웃 하시겠어요?', [
+      { text: '취소', style: 'cancel' },
+      { text: '로그아웃', style: 'destructive', onPress: logout },
+    ]);
+  };
 
   // 찜/최근 각각 독립적인 카운트 + 로딩 상태
   const [likesCount, setLikesCount] = useState(0);
@@ -217,10 +238,38 @@ function MyPage() {
           <View style={styles.avatarContainer}>
             <Text style={styles.avatarIcon}>👤</Text>
           </View>
-          <Text style={styles.welcomeText}>반가워요! 내 활동 기록을 확인해보세요.</Text>
-          <Text style={styles.infoText}>
-            찜한 목록과 최근 본 이벤트는 이 기기에 자동으로 저장됩니다.
-          </Text>
+
+          {authLoading ? (
+            <ActivityIndicator size="small" color="#8B95A1" style={{ marginTop: 8 }} />
+          ) : isLoggedIn ? (
+            <>
+              <Text style={styles.welcomeText}>반가워요!</Text>
+              <Text style={styles.infoText}>찜한 목록과 최근 본 이벤트를 확인해보세요.</Text>
+              <TouchableOpacity onPress={handleLogout} style={styles.logoutButton} activeOpacity={0.7}>
+                <Text style={styles.logoutButtonText}>로그아웃</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.welcomeText}>토스로 로그인하고{'\n'}활동을 저장해보세요</Text>
+              <Text style={styles.infoText}>
+                로그인하면 기기가 바뀌어도 찜 목록을 유지할 수 있어요.
+              </Text>
+              <TouchableOpacity
+                style={[styles.loginButton, loginLoading && styles.loginButtonDisabled]}
+                onPress={handleLogin}
+                activeOpacity={0.8}
+                disabled={loginLoading}
+              >
+                {loginLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.loginButtonText}>토스로 로그인</Text>
+                )}
+              </TouchableOpacity>
+              <Text style={styles.loginSubText}>로그인 없이도 이 기기에서 활동이 저장돼요.</Text>
+            </>
+          )}
         </View>
 
         {isEmpty && !likesLoading && !recentLoading ? (
@@ -427,6 +476,42 @@ const styles = StyleSheet.create({
     color: '#8B95A1',
     textAlign: 'center',
     lineHeight: 18,
+  },
+  loginButton: {
+    marginTop: 20,
+    backgroundColor: '#0064FF',
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    borderRadius: 10,
+    minWidth: 180,
+    alignItems: 'center',
+  },
+  loginButtonDisabled: {
+    opacity: 0.6,
+  },
+  loginButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  loginSubText: {
+    marginTop: 12,
+    fontSize: 12,
+    color: '#B0B8C1',
+    textAlign: 'center',
+  },
+  logoutButton: {
+    marginTop: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E8EB',
+  },
+  logoutButtonText: {
+    fontSize: 13,
+    color: '#8B95A1',
+    fontWeight: '500',
   },
   emptyStateContainer: {
     backgroundColor: '#FFFFFF',

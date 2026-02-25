@@ -80,6 +80,7 @@
     "express-rate-limit": "^8.2.1",
     "file-type": "^21.3.0",
     "he": "^1.2.0",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
     "openai": "^6.16.0",
@@ -92,6 +93,7 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.0.0",
     "@types/node": "^24.10.1",
     "@types/pg": "^8.15.6",

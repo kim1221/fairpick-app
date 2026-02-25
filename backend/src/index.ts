@@ -17,7 +17,7 @@ import {
 } from './utils/instrumentApi';
 import { uploadEventImage, deleteEventImage, ImageUploadError, validateS3Config } from './lib/imageUpload';
 import { searchEventInfo, mergeSearchResults, extractTicketLinks, searchEventInfoEnhanced } from './lib/naverApi';
-import { extractEventInfo, extractEventInfoEnhanced, AIExtractedInfo } from './lib/aiExtractor';
+import { extractEventInfoEnhanced, AIExtractedInfo } from './lib/aiExtractor';
 import { enrichSingleEvent } from './jobs/enrichInternalFields';
 import { 
   filterSearchResults, 
@@ -29,8 +29,11 @@ import {
 import dayjs from 'dayjs';
 import recommendationsRouter from './routes/recommendations';
 import userEventsRouter from './routes/userEvents';
+import authRouter from './routes/auth';
 import * as recommender from './lib/recommender';
 import { calculateConsensusLight, calculateStructuralScore } from './lib/hotScoreCalculator';
+import { calculateDataCompleteness, DataCompletenessScore } from './lib/dataQuality';
+import { embedQuery, toVectorLiteral } from './lib/embeddingService';
 
 /**
  * 카테고리별 기본 운영시간 반환
@@ -135,7 +138,7 @@ function validateExtractedData(
 }
 
 /**
- * 검색 결과를 섹션별 텍스트로 변환
+ * 검색 결과를 섹션별 텍스트로 변환 (레거시, 로컬 idx 기반)
  */
 function formatResultsForAI(results: ScoredSearchResult[]): string {
   return results.map((r, idx) => {
@@ -148,6 +151,86 @@ function formatResultsForAI(results: ScoredSearchResult[]): string {
     text += `   (점수: ${r.score}, 근거: ${r.scoreBreakdown.join(', ')})\n`;
     return text;
   }).join('\n---\n');
+}
+
+/**
+ * 검색 결과를 전역 index 기반 한 줄 형식으로 변환 (AI에 전달용)
+ * AI는 이 index를 사용해 URL 대신 번호만 반환한다.
+ */
+function formatResultForAIIndexed(r: ScoredSearchResult, globalIdx: number): string {
+  let text = `[${globalIdx}] (${r.source}) title="${r.title}"`;
+  if (r.description) text += ` snippet="${r.description.slice(0, 150).replace(/\n/g, ' ')}"`;
+  text += ` url="${r.link}"`;
+  if (r.roadAddress) text += ` address="${r.roadAddress}"`;
+  else if (r.address) text += ` address="${r.address}"`;
+  if (r.postdate) text += ` date="${r.postdate}"`;
+  return text;
+}
+
+/**
+ * AI 응답에서 http/https URL이 직접 출력됐을 경우 경고 + external_links 무효화
+ * (프롬프트로 금지해도 Gemini가 URL을 뱉을 수 있으므로 방어 처리)
+ */
+function warnAndStripAiUrls(extracted: AIExtractedInfo): void {
+  const links = (extracted as any).external_links;
+  if (!links) return;
+  for (const key of ['official', 'ticket', 'reservation']) {
+    const val = links[key];
+    if (typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://'))) {
+      console.warn(
+        `[AI][SAFETY] AI generated raw URL in external_links.${key}: "${val.slice(0, 120)}"` +
+        ` → nullified. Use index-based resolution only.`
+      );
+      links[key] = null;
+    }
+  }
+}
+
+/**
+ * AI 응답의 *_index 필드를 searchResults URL로 resolve.
+ * 범위 밖 index → null, 절대 URL을 새로 만들지 않는다.
+ */
+function resolveIndexes(extracted: AIExtractedInfo, searchResults: ScoredSearchResult[]): void {
+  const links = (extracted as any).external_links;
+  if (links) {
+    const resolveLink = (indexField: string, urlField: string) => {
+      const idx = links[indexField];
+      if (typeof idx !== 'number') return;
+      const r = searchResults[idx];
+      if (r) {
+        links[urlField] = r.link;
+        console.log(`[AI][RESOLVE] external_links.${urlField} ← searchResults[${idx}].link = ${r.link.slice(0, 80)}`);
+      } else {
+        console.warn(`[AI][RESOLVE] external_links.${urlField}: index ${idx} out of range (total=${searchResults.length}) → null`);
+        links[urlField] = null;
+      }
+    };
+    resolveLink('official_index', 'official');
+    resolveLink('ticket_index', 'ticket');
+    resolveLink('reservation_index', 'reservation');
+  }
+
+  // source_indexes → sources (Naver 검색결과 기반 출처 정보 생성)
+  const sourceIndexes = (extracted as any).source_indexes as Record<string, number[]> | undefined;
+  if (sourceIndexes && searchResults.length > 0) {
+    const resolvedSources: Record<string, any> = {};
+    for (const [field, indexes] of Object.entries(sourceIndexes)) {
+      if (!Array.isArray(indexes) || indexes.length === 0) continue;
+      const validResults = (indexes as number[]).map(i => searchResults[i]).filter(Boolean);
+      if (validResults.length > 0) {
+        resolvedSources[field] = {
+          source: validResults.map(r => r.source).join(', '),
+          evidence: validResults.map(r => r.description.slice(0, 100)).join(' / '),
+          url: validResults[0].link,
+          confidence: 8,
+        };
+      }
+    }
+    (extracted as any).sources = { ...((extracted as any).sources || {}), ...resolvedSources };
+    if (Object.keys(resolvedSources).length > 0) {
+      console.log(`[AI][RESOLVE] sources resolved from source_indexes: [${Object.keys(resolvedSources).join(', ')}]`);
+    }
+  }
 }
 
 // import { GoogleGenerativeAI } from '@google/generative-ai'; // 향후 임베딩/분석용
@@ -212,7 +295,7 @@ async function calculateLightBuzzScore(eventId: string): Promise<void> {
 
     // 이벤트 조회
     const eventResult = await pool.query(
-      `SELECT id, title, main_category, venue, region, start_at, end_at, source 
+      `SELECT id, title, main_category, venue, region, start_at, end_at, source, lat, lng, image_url, external_links, is_featured
        FROM canonical_events 
        WHERE id = $1`,
       [eventId]
@@ -245,6 +328,11 @@ async function calculateLightBuzzScore(eventId: string): Promise<void> {
       start_at: event.start_at,
       end_at: event.end_at,
       source: event.source || undefined,
+      lat: event.lat,
+      lng: event.lng,
+      image_url: event.image_url,
+      external_links: event.external_links,
+      is_featured: event.is_featured,
     });
 
     // 라이트 점수 계산 (50:50)
@@ -290,6 +378,7 @@ app.get('/health', (_, res) => {
 });
 
 // Phase 2: Recommendations API
+app.use('/auth', authRouter);
 app.use('/recommendations', recommendationsRouter);
 
 // Phase 2.5: User Events API (사용자 행동 로그)
@@ -306,6 +395,17 @@ app.use('/api/user-events', userEventsRouter);
 function mapEventForFrontend(event: any) {
   if (!event) return null;
   
+  // Phase 1: Type normalization for frontend safety
+  let normalizedOpeningHours = event.opening_hours;
+  if (typeof event.opening_hours === 'string' && event.opening_hours) {
+    try {
+      normalizedOpeningHours = JSON.parse(event.opening_hours);
+    } catch (e) {
+      console.warn('[mapEventForFrontend] Failed to parse opening_hours:', event.opening_hours);
+      normalizedOpeningHours = null;
+    }
+  }
+  
   return {
     ...event,
     // Frontend가 기대하는 필드명으로 매핑
@@ -313,6 +413,11 @@ function mapEventForFrontend(event: any) {
     category: event.main_category || event.category,
     start_date: event.start_at || event.start_date,
     end_date: event.end_at || event.end_date,
+    // Phase 1: Normalized fields for new UI features
+    price_min: event.price_min ? parseFloat(event.price_min) : null,
+    price_max: event.price_max ? parseFloat(event.price_max) : null,
+    opening_hours: normalizedOpeningHours,
+    buzz_score: event.buzz_score ? parseFloat(event.buzz_score) : 0,
   };
 }
 
@@ -572,6 +677,93 @@ app.get('/api/recommendations/v2/latest', async (req, res) => {
       success: false,
       error: error.message,
     });
+  }
+});
+
+/**
+ * GET /api/recommendations/v2/ending-soon
+ * 곧 끝나요 (7일 이내 마감, urgency_score 기반)
+ */
+app.get('/api/recommendations/v2/ending-soon', async (req, res) => {
+  try {
+    const { limit = '10', lat, lng } = req.query;
+
+    const location = lat && lng
+      ? { lat: parseFloat(lat as string), lng: parseFloat(lng as string) }
+      : undefined;
+
+    const events = await recommender.getEndingSoon(
+      pool,
+      location,
+      parseInt(limit as string, 10)
+    );
+
+    res.json({
+      success: true,
+      count: events.length,
+      data: events.map(mapEventForFrontend),
+    });
+  } catch (error: any) {
+    console.error('[Recommendations/EndingSoon] Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/recommendations/v2/exhibition
+ * 전시 큐레이션 (전시 카테고리, venue 다양성 캡)
+ */
+app.get('/api/recommendations/v2/exhibition', async (req, res) => {
+  try {
+    const { limit = '10', lat, lng } = req.query;
+
+    const location = lat && lng
+      ? { lat: parseFloat(lat as string), lng: parseFloat(lng as string) }
+      : undefined;
+
+    const events = await recommender.getExhibition(
+      pool,
+      location,
+      parseInt(limit as string, 10)
+    );
+
+    res.json({
+      success: true,
+      count: events.length,
+      data: events.map(mapEventForFrontend),
+    });
+  } catch (error: any) {
+    console.error('[Recommendations/Exhibition] Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/recommendations/v2/free
+ * 무료로 즐겨요 (price_min=0 또는 무료 키워드)
+ */
+app.get('/api/recommendations/v2/free', async (req, res) => {
+  try {
+    const { limit = '10', lat, lng } = req.query;
+
+    const location = lat && lng
+      ? { lat: parseFloat(lat as string), lng: parseFloat(lng as string) }
+      : undefined;
+
+    const events = await recommender.getFreeEvents(
+      pool,
+      location,
+      parseInt(limit as string, 10)
+    );
+
+    res.json({
+      success: true,
+      count: events.length,
+      data: events.map(mapEventForFrontend),
+    });
+  } catch (error: any) {
+    console.error('[Recommendations/Free] Error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -967,14 +1159,16 @@ app.get('/admin/events', requireAdminAuth, async (req, res) => {
     const page = parseInt(req.query.page as string) || 1;
     const size = parseInt(req.query.size as string) || 20;
     const offset = (page - 1) * size;
-    
+
     const q = req.query.q as string;
     const category = req.query.category as string;
     const isFeatured = req.query.isFeatured as string;
     const hasImage = req.query.hasImage as string;
     const isDeleted = req.query.isDeleted === 'true' ? true : req.query.isDeleted === 'false' ? false : null;
     const recentlyCollected = req.query.recentlyCollected as string; // 🆕 최근 수집 필터
-    
+    const completeness = req.query.completeness as string; // 🆕 데이터 완성도 필터
+    const sort = req.query.sort as string; // 🆕 정렬 기준 (예: 'start_at_desc', 'end_at_asc')
+
     console.log('[Admin] GET /admin/events - Filters:', {
       q,
       category,
@@ -982,6 +1176,8 @@ app.get('/admin/events', requireAdminAuth, async (req, res) => {
       hasImage,
       isDeleted,
       recentlyCollected,
+      completeness,
+      sort,
       page,
       size
     });
@@ -1037,32 +1233,119 @@ app.get('/admin/events', requireAdminAuth, async (req, res) => {
       whereConditions.push(`created_at >= NOW() - INTERVAL '30 days'`);
     }
     
+    // 데이터 완성도 필터 (dataQuality.ts computeOperationalScore와 동일 기준)
+    //
+    // 공통 필드 + 카테고리 핵심 필드 보너스 (totalWeight ≈ 33.5):
+    //   필수(weight=3)       : title, start_at, venue, main_category, image_url → max 15
+    //   중요(weight=2)       : end_at, region, address, overview                → max 8
+    //   중요(weight=1)       : sub_category, lat/lng, price_info, opening_hours,
+    //                          external_links                                   → max 5
+    //   선택(weight=0.5)     : price_min, price_max, parking_available,
+    //                          parking_info, derived_tags                       → max 2.5
+    //   선택(weight=1)       : metadata                                         → max 1
+    //   카테고리 핵심(×2 /  w=1): cast+genre, artists+genre 등                 → max 2
+    //
+    // 실제 DB 분포 (2270개 이벤트 기준, 2026-02):
+    //   min=19, p20=27, p50=27, p80=29, p95=29, max=32.5
+    //   empty(<22): 0.1% / poor(22-26): 9.8% / good(27-28): 47.5% / excellent(≥29): 42.6%
+    //
+    // 임계값 (dataQuality.ts / completenessConstants.ts와 동기화 — 변경 시 함께 변경):
+    //   empty     : score < 22
+    //   poor      : 22 ≤ score < 27
+    //   good      : 27 ≤ score < 29
+    //   excellent : score ≥ 29
+    if (completeness === 'empty' || completeness === 'poor' || completeness === 'good' || completeness === 'excellent') {
+      const scoreExpr = `(
+        -- 필수 (weight=3, max=15)
+        (CASE WHEN title IS NOT NULL AND title != '' THEN 3 ELSE 0 END) +
+        (CASE WHEN start_at IS NOT NULL THEN 3 ELSE 0 END) +
+        (CASE WHEN venue IS NOT NULL AND venue != '' THEN 3 ELSE 0 END) +
+        (CASE WHEN main_category IS NOT NULL AND main_category != '' THEN 3 ELSE 0 END) +
+        (CASE WHEN image_url IS NOT NULL AND image_url != '' AND image_url NOT LIKE '%placeholder%' AND image_url NOT LIKE '%/defaults/%' THEN 3 ELSE 0 END) +
+        -- 중요 weight=2 (max=8)
+        (CASE WHEN end_at IS NOT NULL THEN 2 ELSE 0 END) +
+        (CASE WHEN region IS NOT NULL AND region != '' THEN 2 ELSE 0 END) +
+        (CASE WHEN address IS NOT NULL AND address != '' THEN 2 ELSE 0 END) +
+        (CASE WHEN overview IS NOT NULL AND overview != '' THEN 2 ELSE 0 END) +
+        -- 중요 weight=1 (max=5)
+        (CASE WHEN sub_category IS NOT NULL AND sub_category != '' THEN 1 ELSE 0 END) +
+        (CASE WHEN lat IS NOT NULL AND lng IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN price_info IS NOT NULL AND price_info != '' THEN 1 ELSE 0 END) +
+        (CASE WHEN opening_hours IS NOT NULL AND opening_hours::text NOT IN ('{}','null') THEN 1 ELSE 0 END) +
+        (CASE WHEN external_links IS NOT NULL AND external_links::text NOT IN ('{}','null') THEN 1 ELSE 0 END) +
+        -- 선택 weight=0.5 (max=2.5)
+        (CASE WHEN price_min IS NOT NULL THEN 0.5 ELSE 0 END) +
+        (CASE WHEN price_max IS NOT NULL THEN 0.5 ELSE 0 END) +
+        (CASE WHEN parking_available IS NOT NULL THEN 0.5 ELSE 0 END) +
+        (CASE WHEN parking_info IS NOT NULL AND parking_info != '' THEN 0.5 ELSE 0 END) +
+        (CASE WHEN derived_tags IS NOT NULL AND jsonb_typeof(derived_tags) = 'array' AND jsonb_array_length(derived_tags) > 0 THEN 0.5 ELSE 0 END) +
+        -- 선택 weight=1 (max=1)
+        (CASE WHEN metadata IS NOT NULL AND metadata::text NOT IN ('{}','null') THEN 1 ELSE 0 END) +
+        -- 카테고리 핵심 필드 보너스 (max=2, 한 카테고리만 적용)
+        (CASE WHEN main_category='전시' AND metadata->'display'->'exhibition'->>'artists' IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN main_category='전시' AND metadata->'display'->'exhibition'->>'genre' IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN main_category='공연' AND metadata->'display'->'performance'->>'cast' IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN main_category='공연' AND metadata->'display'->'performance'->>'genre' IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN main_category='팝업' AND metadata->'display'->'popup'->>'type' IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN main_category='팝업' AND metadata->'display'->'popup'->>'brands' IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN main_category='축제' AND metadata->'display'->'festival'->>'organizer' IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN main_category='축제' AND metadata->'display'->'festival'->>'program_highlights' IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN main_category='행사' AND metadata->'display'->'event'->>'target_audience' IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN main_category='행사' AND metadata->'display'->'event'->>'capacity' IS NOT NULL THEN 1 ELSE 0 END)
+      )`;
+      if (completeness === 'empty') {
+        whereConditions.push(`${scoreExpr} < 22`);
+      } else if (completeness === 'poor') {
+        whereConditions.push(`${scoreExpr} >= 22 AND ${scoreExpr} < 27`);
+      } else if (completeness === 'good') {
+        whereConditions.push(`${scoreExpr} >= 27 AND ${scoreExpr} < 30`);
+      } else if (completeness === 'excellent') {
+        whereConditions.push(`${scoreExpr} >= 30`);
+      }
+    }
+    
     const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
-    
-    console.log('[Admin] SQL Query:', {
-      whereClause,
-      params,
-      whereConditions
-    });
-    
+
+    // 🆕 정렬 처리
+    const validSortFields = ['start_at', 'end_at', 'created_at', 'updated_at', 'buzz_score'];
+    let orderByClause = 'ORDER BY updated_at DESC'; // 기본값
+
+    if (sort) {
+      // sort 형식: "field_direction" (예: "start_at_desc", "end_at_asc")
+      const sortParts = sort.split('_');
+      if (sortParts.length >= 2) {
+        const direction = sortParts[sortParts.length - 1]; // 마지막 부분: asc/desc
+        const field = sortParts.slice(0, -1).join('_'); // 나머지: 필드명
+
+        if (validSortFields.includes(field) && (direction === 'asc' || direction === 'desc')) {
+          orderByClause = `ORDER BY ${field} ${direction.toUpperCase()}`;
+        }
+      }
+    }
+
     const countResult = await pool.query(
       `SELECT COUNT(*) as total FROM canonical_events ${whereClause}`,
       params
     );
-    
+
     params.push(size, offset);
     const eventsResult = await pool.query(
-      `SELECT *, 
+      `SELECT *,
               to_char(start_at, 'YYYY-MM-DD') as start_at_str,
               to_char(end_at, 'YYYY-MM-DD') as end_at_str
-       FROM canonical_events ${whereClause} ORDER BY updated_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex++}`,
+       FROM canonical_events ${whereClause} ${orderByClause} LIMIT $${paramIndex++} OFFSET $${paramIndex++}`,
       params
     );
     
     // 날짜 필드를 PostgreSQL에서 직접 포맷한 문자열로 대체 (타임존 문제 완전 방지)
+    // + 데이터 완성도 계산 추가
     const formattedEvents = eventsResult.rows.map(event => {
       event.start_at = event.start_at_str;
       event.end_at = event.end_at_str;
+      
+      // 🆕 각 이벤트의 데이터 완성도 계산
+      const completenessScore = calculateDataCompleteness(event);
+      event._completeness = completenessScore;
       delete event.start_at_str;
       delete event.end_at_str;
       return event;
@@ -1164,7 +1447,9 @@ app.patch('/admin/events/:id', requireAdminAuth, async (req, res) => {
       'image_url', 'is_free', 'price_info', 'popularity_score',
       'is_featured', 'featured_order', 'is_deleted', 'deleted_reason',
       // Phase 1 공통 필드
-      'price_min', 'price_max'
+      'price_min', 'price_max',
+      // 주차 정보
+      'parking_available', 'parking_info'
     ];
     
     // JSONB 필드는 별도 처리
@@ -1174,8 +1459,9 @@ app.patch('/admin/events/:id', requireAdminAuth, async (req, res) => {
     const params: any[] = [];
     let paramIndex = 1;
 
-    // 🔒 수동 편집 추적: AI가 생성하는 필드들 (manually_edited_fields 용)
-    const aiGeneratedFields = ['overview', 'derived_tags', 'opening_hours', 'external_links', 'metadata'];
+    // 🔒 수동 편집 추적: 스케줄러 job이 덮어쓰지 않아야 할 필드들
+    const aiGeneratedFields = ['overview', 'derived_tags', 'opening_hours', 'external_links', 'metadata',
+      'main_category', 'sub_category', 'is_free', 'display_title'];
     const manuallyEditedFields: string[] = [];
     const fieldSourcesMap: Record<string, any> = {}; // 🆕 개별 필드별 source 추적
     
@@ -1709,6 +1995,39 @@ app.patch('/admin/events/:id', requireAdminAuth, async (req, res) => {
       });
     }
 
+    // 백그라운드: 텍스트 관련 필드 변경 시 임베딩 자동 업데이트
+    const embeddingTriggerFields = ['title', 'display_title', 'venue', 'address', 'overview', 'derived_tags', 'main_category', 'sub_category', 'price_info', 'metadata'];
+    const hasEmbeddingTrigger = embeddingTriggerFields.some(f => req.body[f] !== undefined);
+    if (hasEmbeddingTrigger && process.env.GEMINI_API_KEY) {
+      const patchEventId = req.params.id;
+      const patchEventRow = updatedEvent;
+      setImmediate(async () => {
+        try {
+          const { buildEventText, embedDocument, toVectorLiteral: tvl } = await import('./lib/embeddingService');
+          const text = buildEventText({
+            title: patchEventRow.title,
+            displayTitle: patchEventRow.display_title,
+            venue: patchEventRow.venue,
+            address: patchEventRow.address,
+            // description field not in canonical_events schema
+            overview: patchEventRow.overview,
+            mainCategory: patchEventRow.main_category,
+            subCategory: patchEventRow.sub_category,
+            tags: patchEventRow.derived_tags,
+            region: patchEventRow.region,
+            priceInfo: patchEventRow.price_info,
+          });
+          const embedding = await embedDocument(text);
+          await pool.query(
+            `UPDATE canonical_events SET embedding = $1::vector WHERE id = $2`,
+            [tvl(embedding), patchEventId]
+          );
+        } catch (embErr) {
+          console.error('[PATCH] Auto-embedding update failed:', (embErr as Error).message);
+        }
+      });
+    }
+
     res.json({ success: true, item: updatedEvent });
   } catch (error) {
     console.error('[Admin] Event update failed:', error);
@@ -1725,18 +2044,91 @@ app.patch('/admin/events/:id', requireAdminAuth, async (req, res) => {
   }
 });
 
+// Admin: 이벤트 삭제 (soft delete)
+app.delete('/admin/events/:id', requireAdminAuth, async (req, res) => {
+  try {
+    const eventId = req.params.id;
+    const { reason } = req.body; // 삭제 사유 (선택)
+
+    // 이벤트 존재 확인
+    const checkResult = await pool.query(
+      'SELECT id, title, is_deleted FROM canonical_events WHERE id = $1',
+      [eventId]
+    );
+
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Event not found' });
+    }
+
+    const event = checkResult.rows[0];
+
+    if (event.is_deleted) {
+      return res.status(400).json({ message: 'Event is already deleted' });
+    }
+
+    // Soft delete 수행
+    const result = await pool.query(
+      `UPDATE canonical_events
+       SET is_deleted = true,
+           deleted_reason = $2,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [eventId, reason || 'Admin deleted']
+    );
+
+    const deletedEvent = formatEventDates(result.rows[0]);
+
+    console.log('[Admin] ✅ Event soft deleted:', {
+      id: eventId,
+      title: event.title,
+      reason: reason || 'Admin deleted'
+    });
+
+    res.json({
+      success: true,
+      message: 'Event deleted successfully',
+      item: deletedEvent
+    });
+  } catch (error) {
+    console.error('[Admin] Delete event failed:', error);
+    res.status(500).json({
+      message: 'Failed to delete event',
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
 // Admin: 범용 이벤트 생성
 app.post('/admin/events', requireAdminAuth, async (req, res) => {
   try {
-    const { 
-      main_category, title, display_title, start_at, end_at, venue, address, 
+    const {
+      main_category, title, display_title, start_at, end_at, venue, address,
       image_url, overview, is_free, price_info,
       // 이미지 출처 정보
       image_storage, image_origin, image_source_page_url, image_key, image_metadata,
       // Phase 1 공통 필드
-      external_links, price_min, price_max, source_tags, derived_tags, opening_hours
+      external_links, price_min, price_max, source_tags, derived_tags, opening_hours,
+      // 주차 정보
+      parking_available, parking_info,
+      // 🆕 Phase 3: 카테고리별 특화 필드
+      metadata
     } = req.body;
-    
+
+    // 🔍 디버깅: 받은 데이터 로그
+    console.log('[Admin] POST /admin/events - Received data:', {
+      title,
+      external_links,
+      opening_hours,
+      derived_tags,
+      parking_available,
+      parking_info,
+      metadata,
+      price_min,
+      price_max,
+      price_info,
+    });
+
     // 필수 필드 검증
     if (!main_category) {
       return res.status(400).json({ message: 'Missing required field: main_category' });
@@ -1860,12 +2252,18 @@ app.post('/admin/events', requireAdminAuth, async (req, res) => {
     }];
 
     // 6. 기본값 설정
+    const { deriveIsFree } = await import('./utils/priceUtils');
+
+    // is_free 계산: 명시적으로 전달되었으면 사용, 아니면 price_info 기반으로 판정
+    const computedIsFree = deriveIsFree(price_info);
+    const finalIsFree = is_free !== undefined ? is_free : computedIsFree;
+
     const defaultValues = {
       display_title: display_title || null,
       sub_category: null,
       image_url: image_url || PLACEHOLDER_IMAGE,
-      is_free: is_free !== undefined ? is_free : true,
-      price_info: price_info || '입장 무료',
+      is_free: finalIsFree,
+      price_info: price_info || null,
       overview: overview || null,
       popularity_score: 500,
       buzz_score: 0,
@@ -1888,6 +2286,8 @@ app.post('/admin/events', requireAdminAuth, async (req, res) => {
       source_tags: source_tags || [],
       derived_tags: derived_tags || [],
       opening_hours: opening_hours || null,
+      parking_available: parking_available ?? null,
+      parking_info: parking_info || null,
       quality_flags: {
         has_real_image: image_url && image_url !== PLACEHOLDER_IMAGE && !image_url.includes('/defaults/'),
         has_exact_address: !!address,
@@ -1908,14 +2308,16 @@ app.post('/admin/events', requireAdminAuth, async (req, res) => {
         featured_at, sources, source_priority_winner, is_deleted, deleted_reason,
         image_storage, image_origin, image_source_page_url, image_key, image_metadata,
         geo_source, geo_confidence, geo_reason, geo_updated_at,
-        external_links, status, price_min, price_max, source_tags, derived_tags, opening_hours, quality_flags,
+        external_links, status, price_min, price_max, source_tags, derived_tags, opening_hours, parking_available, parking_info, quality_flags,
+        metadata,
         created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
         $19, $20, $21, $22, $23, $24::jsonb, $25, $26, $27,
         $28, $29, $30, $31, $32::jsonb,
         $33, $34, $35, $36,
-        $37::jsonb, $38, $39, $40, $41::jsonb, $42::jsonb, $43::jsonb, $44::jsonb,
+        $37::jsonb, $38, $39, $40, $41::jsonb, $42::jsonb, $43::jsonb, $44, $45, $46::jsonb,
+        $47::jsonb,
         NOW(), NOW()
       ) RETURNING *`,
       [
@@ -1962,7 +2364,10 @@ app.post('/admin/events', requireAdminAuth, async (req, res) => {
         JSON.stringify(defaultValues.source_tags),
         JSON.stringify(defaultValues.derived_tags),
         defaultValues.opening_hours ? JSON.stringify(defaultValues.opening_hours) : null,
+        defaultValues.parking_available ?? null,
+        defaultValues.parking_info,
         JSON.stringify(defaultValues.quality_flags),
+        metadata ? JSON.stringify(metadata) : null,
       ]
     );
     
@@ -1992,11 +2397,29 @@ app.post('/admin/events', requireAdminAuth, async (req, res) => {
 // Admin: 팝업 이벤트 생성
 app.post('/admin/events/popup', requireAdminAuth, async (req, res) => {
   try {
-    const { 
+    const {
       title, displayTitle, startAt, endAt, venue, address, imageUrl, overview, instagramUrl,
-      imageStorage, imageOrigin, imageSourcePageUrl, imageKey, imageMetadata 
+      imageStorage, imageOrigin, imageSourcePageUrl, imageKey, imageMetadata,
+      // Phase 1 공통 필드
+      external_links, price_min, price_max, source_tags, derived_tags, opening_hours,
+      parking_available, parking_info, is_free, price_info,
+      // 🆕 Phase 3: 카테고리별 특화 필드
+      metadata
     } = req.body;
-    
+
+    // 🔍 디버깅: 수신 데이터 확인
+    console.log('[Admin] POST /admin/events/popup - Received data:', {
+      title,
+      external_links,
+      opening_hours,
+      derived_tags,
+      parking_available,
+      parking_info,
+      metadata,
+      price_min,
+      price_max,
+    });
+
     // 필수 필드 검증
     if (!title || !startAt || !endAt || !venue) {
       return res.status(400).json({ message: 'Missing required fields: title, startAt, endAt, venue' });
@@ -2165,13 +2588,20 @@ app.post('/admin/events/popup', requireAdminAuth, async (req, res) => {
     }];
 
     // 7. 기본값 설정
+    const { deriveIsFree } = await import('./utils/priceUtils');
+
+    // 팝업의 기본 price_info (사용자 입력이 없을 경우만)
+    const fallbackPriceInfo = '입장 무료 (굿즈 별도)';
+    const finalPriceInfo = price_info || fallbackPriceInfo;
+    const finalIsFree = is_free !== undefined ? is_free : deriveIsFree(finalPriceInfo);
+
     const defaultValues = {
       display_title: displayTitle || null,
       main_category: '팝업',
       sub_category: null, // 향후 AI로 추론 가능
       image_url: imageUrl || null,
-      is_free: true,
-      price_info: '입장 무료 (굿즈 별도)',
+      is_free: finalIsFree,
+      price_info: finalPriceInfo,
       overview: overview || null,
       popularity_score: 500,
       buzz_score: 0,
@@ -2181,6 +2611,23 @@ app.post('/admin/events/popup', requireAdminAuth, async (req, res) => {
       source_priority_winner: 'manual',
       is_deleted: false,
       deleted_reason: null,
+      // Phase 1 공통 필드
+      external_links: external_links || {},
+      status: 'active',
+      price_min: price_min || null,
+      price_max: price_max || null,
+      source_tags: source_tags || [],
+      derived_tags: derived_tags || [],
+      opening_hours: opening_hours || null,
+      parking_available: parking_available ?? null,
+      parking_info: parking_info || null,
+      quality_flags: {
+        has_real_image: imageUrl && !imageUrl.includes('/defaults/'),
+        has_exact_address: !!address,
+        geo_ok: !!(lat && lng),
+        has_overview: !!overview,
+        has_price_info: !!finalPriceInfo
+      }
     };
     
     // 8. DB 삽입
@@ -2194,12 +2641,16 @@ app.post('/admin/events/popup', requireAdminAuth, async (req, res) => {
         featured_at, sources, source_priority_winner, is_deleted, deleted_reason,
         image_storage, image_origin, image_source_page_url, image_key, image_metadata,
         geo_source, geo_confidence, geo_reason, geo_updated_at,
+        external_links, status, price_min, price_max, source_tags, derived_tags, opening_hours, parking_available, parking_info, quality_flags,
+        metadata,
         created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
         $19, $20, $21, $22, $23, $24::jsonb, $25, $26, $27,
         $28, $29, $30, $31, $32::jsonb,
         $33, $34, $35, $36,
+        $37::jsonb, $38, $39, $40, $41::jsonb, $42::jsonb, $43::jsonb, $44, $45, $46::jsonb,
+        $47::jsonb,
         NOW(), NOW()
       ) RETURNING *`,
       [
@@ -2239,6 +2690,17 @@ app.post('/admin/events/popup', requireAdminAuth, async (req, res) => {
         geoConfidence,
         geoReason,
         geoUpdatedAtValue,
+        JSON.stringify(defaultValues.external_links),
+        defaultValues.status,
+        defaultValues.price_min,
+        defaultValues.price_max,
+        JSON.stringify(defaultValues.source_tags),
+        JSON.stringify(defaultValues.derived_tags),
+        defaultValues.opening_hours ? JSON.stringify(defaultValues.opening_hours) : null,
+        defaultValues.parking_available ?? null,
+        defaultValues.parking_info,
+        JSON.stringify(defaultValues.quality_flags),
+        metadata ? JSON.stringify(metadata) : null,
       ]
     );
     
@@ -2508,16 +2970,14 @@ app.get('/events', async (req, res) => {
     const filters: string[] = [];
     const params: unknown[] = [];
 
-    // Always filter out ended events
+    // Always filter deleted and ended events
+    filters.push(`is_deleted = false`);
     filters.push(`end_at >= CURRENT_DATE`);
 
     // 공연 카테고리는 KOPIS만 노출
     filters.push(`(main_category != '공연' OR source_priority_winner = 'kopis')`);
 
-    if (mainCategory && mainCategory !== '전체') {
-      params.push(mainCategory);
-      filters.push(`main_category = $${params.length}`);
-    }
+    // mainCategory 필터는 스마트 파싱 후 derivedCategory로 적용 (아래 참조)
     if (subCategory && subCategory !== '전체') {
       params.push(subCategory);
       filters.push(`sub_category = $${params.length}`);
@@ -2527,9 +2987,40 @@ app.get('/events', async (req, res) => {
       filters.push(`region = $${params.length}`);
     }
     
-    // 검색어 필터 (display_title, title, venue, address에서 검색)
-    if (query && query.trim()) {
-      const searchPattern = `%${query.trim()}%`;
+    // 검색어 스마트 파싱
+    // 1) "무료" 포함 → is_free=true 자동 추가 + "무료" 제거
+    // 2) 남은 단어가 카테고리명(전시/공연/팝업/축제/행사)이면 category 필터로 전환
+    const SEARCH_CATEGORY_MAP: Record<string, string> = {
+      '전시': '전시', '공연': '공연', '팝업': '팝업', '축제': '축제', '행사': '행사',
+    };
+
+    let effectiveQuery = query ? query.trim() : '';
+    let derivedIsFree = req.query.is_free === 'true';
+    let derivedCategory = mainCategory; // 기존 category param 유지
+
+    if (effectiveQuery.includes('무료')) {
+      derivedIsFree = true;
+      effectiveQuery = effectiveQuery.replace(/\s*무료\s*/g, ' ').trim();
+    }
+
+    // 남은 쿼리가 정확히 카테고리명이면 category 필터로 전환 (텍스트 검색 대신)
+    if (effectiveQuery && SEARCH_CATEGORY_MAP[effectiveQuery] && !derivedCategory) {
+      derivedCategory = SEARCH_CATEGORY_MAP[effectiveQuery];
+      effectiveQuery = '';
+    }
+
+    // category 필터 적용 (스마트 파싱 결과 반영)
+    if (derivedCategory && derivedCategory !== '전체') {
+      params.push(derivedCategory);
+      filters.push(`main_category = $${params.length}`);
+    }
+
+    // 벡터 검색 폴백을 위해 텍스트 필터 추가 전 상태 저장
+    const preTextParams = [...params];
+    const preTextFilters = [...filters];
+
+    if (effectiveQuery) {
+      const searchPattern = `%${effectiveQuery}%`;
       params.push(searchPattern);
       filters.push(`(
         display_title ILIKE $${params.length} OR
@@ -2539,10 +3030,39 @@ app.get('/events', async (req, res) => {
       )`);
     }
 
+    // 신규 필터: 최근 N일 이내 등록
+    const createdAfter = req.query.created_after as string;
+    if (createdAfter === '7d') {
+      filters.push(`created_at >= NOW() - INTERVAL '7 days'`);
+    } else if (createdAfter === '3d') {
+      filters.push(`created_at >= NOW() - INTERVAL '3 days'`);
+    }
+
+    // 인기 필터: buzz_score 최소값
+    const buzzMin = parseInt(req.query.buzz_min as string);
+    if (!isNaN(buzzMin) && buzzMin > 0) {
+      filters.push(`COALESCE(buzz_score, 0) >= ${buzzMin}`);
+    }
+
+    // Featured 필터: 에디터 추천
+    if (req.query.is_featured === 'true') {
+      filters.push(`is_featured = true`);
+    }
+
+    // 무료 필터 (검색어에서 "무료" 감지 시 자동 적용 포함)
+    if (derivedIsFree) {
+      filters.push(`is_free = true`);
+    }
+
+    // 마감임박 필터 (7일 이내)
+    if (req.query.is_ending_soon === 'true') {
+      filters.push(`end_at <= NOW() + INTERVAL '7 days'`);
+    }
+
     const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
     // 정렬 필드 검증
-    const validSortFields = ['start_at', 'created_at', 'updated_at'];
+    const validSortFields = ['start_at', 'created_at', 'updated_at', 'buzz_score', 'end_at'];
     const sortField = validSortFields.includes(sortBy) ? sortBy : 'start_at';
     const sortOrder = order.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
@@ -2572,6 +3092,11 @@ app.get('/events', async (req, res) => {
           start_at,
           created_at,
           updated_at,
+          end_at,
+          COALESCE(buzz_score, 0) AS buzz_score,
+          COALESCE(popularity_score, 0) AS popularity_score,
+          COALESCE(is_ending_soon, false) AS is_ending_soon,
+          COALESCE(is_free, false) AS is_free,
           CASE
             WHEN image_url IS NOT NULL
               AND image_url != ''
@@ -2609,7 +3134,12 @@ app.get('/events', async (req, res) => {
         "sourcePriorityWinner",
         address,
         lat,
-        lng
+        lng,
+        buzz_score AS "buzzScore",
+        created_at AS "createdAt",
+        popularity_score AS "popularityScore",
+        is_ending_soon AS "isEndingSoon",
+        is_free AS "isFree"
       FROM ranked
       WHERE rn = 1
       ORDER BY ${sortField} ${sortOrder}, id ASC
@@ -2632,22 +3162,112 @@ app.get('/events', async (req, res) => {
 
     const totalCount = countResult.rows[0]?.total ?? 0;
 
+    // ── 벡터 검색 폴백 ──────────────────────────────────────────────────────
+    // 텍스트 검색 결과가 부족할 때(< 5) Gemini 임베딩 기반 의미 검색으로 보완
+    const VECTOR_FALLBACK_THRESHOLD = 5;
+    let finalItems = itemsResult.rows;
+    let finalTotal = totalCount;
+    let searchMode: 'text' | 'vector' = 'text';
+
+    if (effectiveQuery && totalCount < VECTOR_FALLBACK_THRESHOLD && process.env.GEMINI_API_KEY) {
+      try {
+        const queryEmbedding = await embedQuery(effectiveQuery);
+        const vectorLiteral = toVectorLiteral(queryEmbedding);
+
+        // 텍스트 필터 없이 나머지 필터만 적용
+        const vectorParams: unknown[] = [...preTextParams];
+        const vectorWhere = preTextFilters.length
+          ? `WHERE ${preTextFilters.join(' AND ')} AND embedding IS NOT NULL`
+          : 'WHERE embedding IS NOT NULL AND is_deleted = false';
+
+        vectorParams.push(size); // $LIMIT
+        const vectorLimitIdx = vectorParams.length;
+        vectorParams.push(vectorLiteral); // $EMBEDDING
+        const vectorEmbeddingIdx = vectorParams.length;
+
+        const vectorQuery = `
+          WITH ranked AS (
+            SELECT
+              id,
+              title,
+              display_title AS "displayTitle",
+              content_key AS "contentKey",
+              COALESCE(venue, '') AS venue,
+              start_at AS "startAt",
+              end_at AS "endAt",
+              region,
+              main_category AS "mainCategory",
+              sub_category AS "subCategory",
+              COALESCE(image_url, '${PLACEHOLDER_IMAGE}') AS "imageUrl",
+              source_priority_winner AS "sourcePriorityWinner",
+              address,
+              lat,
+              lng,
+              COALESCE(buzz_score, 0) AS buzz_score,
+              COALESCE(popularity_score, 0) AS popularity_score,
+              COALESCE(is_ending_soon, false) AS is_ending_soon,
+              COALESCE(is_free, false) AS is_free,
+              embedding <=> $${vectorEmbeddingIdx}::vector AS vector_dist,
+              ROW_NUMBER() OVER (
+                PARTITION BY COALESCE(content_key, canonical_key, id::text)
+                ORDER BY
+                  CASE
+                    WHEN image_url IS NOT NULL
+                      AND image_url != ''
+                      AND image_url NOT LIKE '%placeholder%'
+                    THEN 1 ELSE 0
+                  END DESC,
+                  updated_at DESC
+              ) AS rn
+            FROM canonical_events
+            ${vectorWhere}
+            ORDER BY embedding <=> $${vectorEmbeddingIdx}::vector
+            LIMIT $${vectorLimitIdx}
+          )
+          SELECT
+            id, title, "displayTitle", "contentKey", venue, "startAt", "endAt",
+            region, "mainCategory", "subCategory", "imageUrl", "sourcePriorityWinner",
+            address, lat, lng,
+            buzz_score AS "buzzScore",
+            popularity_score AS "popularityScore",
+            is_ending_soon AS "isEndingSoon",
+            is_free AS "isFree"
+          FROM ranked
+          WHERE rn = 1
+          ORDER BY vector_dist ASC;
+        `;
+
+        const vectorResult = await pool.query(vectorQuery, vectorParams);
+        if (vectorResult.rows.length > 0) {
+          finalItems = vectorResult.rows;
+          finalTotal = vectorResult.rows.length;
+          searchMode = 'vector';
+        }
+      } catch (vecErr) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[API][/events][vector-fallback] Error:', vecErr);
+        }
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     const responsePayload = {
-      items: itemsResult.rows,
+      items: finalItems,
       pageInfo: {
         page,
         size,
-        totalCount,
+        totalCount: finalTotal,
+        ...(searchMode === 'vector' ? { searchMode: 'vector' } : {}),
       },
     };
 
     const payloadStr = JSON.stringify(responsePayload);
     const payloadKB = (Buffer.byteLength(payloadStr, 'utf8') / 1024).toFixed(2);
 
-    logApiMetric('/events', req.query as Record<string, unknown>, itemsResult.rows.length, responsePayload);
+    logApiMetric('/events', req.query as Record<string, unknown>, finalItems.length, responsePayload);
 
     if (process.env.NODE_ENV === 'development') {
-      console.log('[API][/events] page:', page, 'size:', size, 'totalCount:', totalCount, 'returned items:', itemsResult.rows.length, 'filters:', { mainCategory, subCategory, region, query });
+      console.log('[API][/events] page:', page, 'size:', size, 'totalCount:', finalTotal, 'returned items:', finalItems.length, 'searchMode:', searchMode, 'filters:', { mainCategory, subCategory, region, query });
     }
 
     // 계측 로그
@@ -2656,7 +3276,7 @@ app.get('/events', async (req, res) => {
       ts: requestTs,
       query: req.query as Record<string, unknown>,
       status: 200,
-      count: itemsResult.rows.length,
+      count: finalItems.length,
       payloadKB: safeJsonSizeKB(responsePayload),
       elapsedMs: getElapsedMs(startTime),
     });
@@ -2731,7 +3351,8 @@ app.get('/events/hot', async (req, res) => {
               updated_at DESC
           ) AS rn
         FROM canonical_events
-        WHERE end_at >= CURRENT_DATE
+        WHERE is_deleted = false
+          AND end_at >= CURRENT_DATE
           AND (main_category != '공연' OR source_priority_winner = 'kopis')
           AND image_url IS NOT NULL
           AND image_url != ''
@@ -2773,7 +3394,8 @@ app.get('/events/hot', async (req, res) => {
       FROM (
         SELECT DISTINCT COALESCE(content_key, canonical_key, id::text) AS dedupe_key
         FROM canonical_events
-        WHERE end_at >= CURRENT_DATE
+        WHERE is_deleted = false
+          AND end_at >= CURRENT_DATE
           AND (main_category != '공연' OR source_priority_winner = 'kopis')
           AND image_url IS NOT NULL
           AND image_url != ''
@@ -2834,8 +3456,38 @@ app.get('/events/free', async (req, res) => {
   try {
     const page = Math.max(parseInt((req.query.page as string) ?? '1', 10) || 1, 1);
     const size = Math.min(Math.max(parseInt((req.query.size as string) ?? '20', 10) || 20, 1), 100);
+    const mainCategory = (req.query.category as string) || undefined;
+    const region = (req.query.region as string) || undefined;
+    const sortBy = (req.query.sortBy as string) || 'buzz_score'; // 기본: 인기순
+    const order = (req.query.order as string) || 'desc';
 
+    const filters: string[] = [];
     const params: unknown[] = [];
+
+    // 기본 필터
+    filters.push(`is_deleted = false`);
+    filters.push(`end_at >= CURRENT_DATE`);
+    filters.push(`(main_category != '공연' OR source_priority_winner = 'kopis')`);
+    filters.push(`is_free = true`);
+
+    // Category 필터 추가
+    if (mainCategory && mainCategory !== '전체') {
+      params.push(mainCategory);
+      filters.push(`main_category = $${params.length}`);
+    }
+
+    // Region 필터 추가
+    if (region && region !== '전국') {
+      params.push(region);
+      filters.push(`region = $${params.length}`);
+    }
+
+    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+
+    // 정렬 필드 검증
+    const validSortFields = ['start_at', 'created_at', 'buzz_score', 'end_at'];
+    const sortField = validSortFields.includes(sortBy) ? sortBy : 'buzz_score';
+    const sortOrder = order.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
     params.push(size);
     const limitIndex = params.length;
@@ -2861,6 +3513,9 @@ app.get('/events/free', async (req, res) => {
           is_ending_soon AS "isEndingSoon",
           is_free AS "isFree",
           start_at,
+          end_at,
+          created_at,
+          COALESCE(buzz_score, 0) AS buzz_score,
           updated_at,
           ROW_NUMBER() OVER (
             PARTITION BY COALESCE(content_key, canonical_key, id::text)
@@ -2875,9 +3530,7 @@ app.get('/events/free', async (req, res) => {
               updated_at DESC
           ) AS rn
         FROM canonical_events
-        WHERE end_at >= CURRENT_DATE
-          AND (main_category != '공연' OR source_priority_winner = 'kopis')
-          AND is_free = true
+        ${where}
       )
       SELECT
         id,
@@ -2894,10 +3547,11 @@ app.get('/events/free', async (req, res) => {
         "sourcePriorityWinner",
         "popularityScore",
         "isEndingSoon",
-        "isFree"
+        "isFree",
+        buzz_score
       FROM ranked
       WHERE rn = 1
-      ORDER BY start_at ASC, id ASC
+      ORDER BY ${sortField} ${sortOrder}, id ${sortOrder}
       LIMIT $${limitIndex} OFFSET $${offsetIndex};
     `;
 
@@ -2906,15 +3560,16 @@ app.get('/events/free', async (req, res) => {
       FROM (
         SELECT DISTINCT COALESCE(content_key, canonical_key, id::text) AS dedupe_key
         FROM canonical_events
-        WHERE end_at >= CURRENT_DATE
-          AND (main_category != '공연' OR source_priority_winner = 'kopis')
-          AND is_free = true
+        ${where}
       ) AS deduped;
     `;
 
+    // countQuery는 category/region 파라미터만 필요 (LIMIT/OFFSET 제외)
+    const countParams = params.slice(0, params.length - 2);
+    
     const [itemsResult, countResult] = await Promise.all([
       pool.query(listQuery, params),
-      pool.query(countQuery),
+      pool.query(countQuery, countParams),
     ]);
 
     const responsePayload = {
@@ -2963,8 +3618,38 @@ app.get('/events/ending', async (req, res) => {
   try {
     const page = Math.max(parseInt((req.query.page as string) ?? '1', 10) || 1, 1);
     const size = Math.min(Math.max(parseInt((req.query.size as string) ?? '20', 10) || 20, 1), 100);
+    const mainCategory = (req.query.category as string) || undefined;
+    const region = (req.query.region as string) || undefined;
+    const sortBy = (req.query.sortBy as string) || 'end_at'; // 기본: 종료일 빠른 순
+    const order = (req.query.order as string) || 'asc';
 
+    const filters: string[] = [];
     const params: unknown[] = [];
+
+    // 기본 필터
+    filters.push(`is_deleted = false`);
+    filters.push(`end_at >= CURRENT_DATE`);
+    filters.push(`(main_category != '공연' OR source_priority_winner = 'kopis')`);
+    filters.push(`is_ending_soon = true`);
+
+    // Category 필터 추가
+    if (mainCategory && mainCategory !== '전체') {
+      params.push(mainCategory);
+      filters.push(`main_category = $${params.length}`);
+    }
+
+    // Region 필터 추가
+    if (region && region !== '전국') {
+      params.push(region);
+      filters.push(`region = $${params.length}`);
+    }
+
+    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+
+    // 정렬 필드 검증
+    const validSortFields = ['start_at', 'created_at', 'buzz_score', 'end_at'];
+    const sortField = validSortFields.includes(sortBy) ? sortBy : 'end_at';
+    const sortOrder = order.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
     params.push(size);
     const limitIndex = params.length;
@@ -2989,7 +3674,10 @@ app.get('/events/ending', async (req, res) => {
           popularity_score AS "popularityScore",
           is_ending_soon AS "isEndingSoon",
           is_free AS "isFree",
+          start_at,
           end_at,
+          created_at,
+          COALESCE(buzz_score, 0) AS buzz_score,
           updated_at,
           ROW_NUMBER() OVER (
             PARTITION BY COALESCE(content_key, canonical_key, id::text)
@@ -3004,9 +3692,7 @@ app.get('/events/ending', async (req, res) => {
               updated_at DESC
           ) AS rn
         FROM canonical_events
-        WHERE end_at >= CURRENT_DATE
-          AND (main_category != '공연' OR source_priority_winner = 'kopis')
-          AND is_ending_soon = true
+        ${where}
       )
       SELECT
         id,
@@ -3023,10 +3709,11 @@ app.get('/events/ending', async (req, res) => {
         "sourcePriorityWinner",
         "popularityScore",
         "isEndingSoon",
-        "isFree"
+        "isFree",
+        buzz_score
       FROM ranked
       WHERE rn = 1
-      ORDER BY end_at ASC, id ASC
+      ORDER BY ${sortField} ${sortOrder}, id ${sortOrder}
       LIMIT $${limitIndex} OFFSET $${offsetIndex};
     `;
 
@@ -3035,15 +3722,16 @@ app.get('/events/ending', async (req, res) => {
       FROM (
         SELECT DISTINCT COALESCE(content_key, canonical_key, id::text) AS dedupe_key
         FROM canonical_events
-        WHERE end_at >= CURRENT_DATE
-          AND (main_category != '공연' OR source_priority_winner = 'kopis')
-          AND is_ending_soon = true
+        ${where}
       ) AS deduped;
     `;
 
+    // countQuery는 category/region 파라미터만 필요 (LIMIT/OFFSET 제외)
+    const countParams = params.slice(0, params.length - 2);
+    
     const [itemsResult, countResult] = await Promise.all([
       pool.query(listQuery, params),
-      pool.query(countQuery),
+      pool.query(countQuery, countParams),
     ]);
 
     const responsePayload = {
@@ -3133,7 +3821,8 @@ app.get('/events/new', async (req, res) => {
               updated_at DESC
           ) AS rn
         FROM canonical_events
-        WHERE end_at >= CURRENT_DATE
+        WHERE is_deleted = false
+          AND end_at >= CURRENT_DATE
           AND (main_category != '공연' OR source_priority_winner = 'kopis')
       )
       SELECT
@@ -3163,7 +3852,8 @@ app.get('/events/new', async (req, res) => {
       FROM (
         SELECT DISTINCT COALESCE(content_key, canonical_key, id::text) AS dedupe_key
         FROM canonical_events
-        WHERE end_at >= CURRENT_DATE
+        WHERE is_deleted = false
+          AND end_at >= CURRENT_DATE
           AND (main_category != '공연' OR source_priority_winner = 'kopis')
       ) AS deduped;
     `;
@@ -3261,7 +3951,8 @@ app.get('/events/recommend', async (req, res) => {
               updated_at DESC
           ) AS rn
         FROM canonical_events
-        WHERE end_at >= CURRENT_DATE
+        WHERE is_deleted = false
+          AND end_at >= CURRENT_DATE
           AND (main_category != '공연' OR source_priority_winner = 'kopis')
           AND image_url IS NOT NULL
           AND image_url != ''
@@ -3298,7 +3989,8 @@ app.get('/events/recommend', async (req, res) => {
       FROM (
         SELECT DISTINCT COALESCE(content_key, canonical_key, id::text) AS dedupe_key
         FROM canonical_events
-        WHERE end_at >= CURRENT_DATE
+        WHERE is_deleted = false
+          AND end_at >= CURRENT_DATE
           AND (main_category != '공연' OR source_priority_winner = 'kopis')
           AND image_url IS NOT NULL
           AND image_url != ''
@@ -3402,6 +4094,7 @@ app.get('/events/nearby', async (req, res) => {
     const params: unknown[] = [];
 
     // 필수 조건
+    filters.push(`is_deleted = false`);
     filters.push(`end_at >= CURRENT_DATE`);
     filters.push(`(main_category != '공연' OR source_priority_winner = 'kopis')`);
     filters.push(`lat IS NOT NULL`);
@@ -4250,9 +4943,24 @@ app.get('/events/:id', async (req, res) => {
           sources,
           address,
           lat,
-          lng
+          lng,
+          overview,
+          is_free AS "isFree",
+          price_min AS "priceMin",
+          price_max AS "priceMax",
+          price_info AS "priceInfo",
+          opening_hours AS "openingHours",
+          buzz_score AS "buzzScore",
+          is_ending_soon AS "isEndingSoon",
+          popularity_score AS "popularityScore",
+          external_links AS "externalLinks",
+          derived_tags AS "derivedTags",
+          metadata,
+          parking_available AS "parkingAvailable",
+          parking_info AS "parkingInfo",
+          public_transport_info AS "publicTransportInfo"
         FROM canonical_events
-        WHERE id = $1 AND end_at >= CURRENT_DATE
+        WHERE id = $1 AND is_deleted = false AND end_at >= CURRENT_DATE
         LIMIT 1;
       `,
       [req.params.id],
@@ -4506,7 +5214,7 @@ app.post('/events/:id/action', async (req, res) => {
  */
 app.post('/admin/events/enrich-preview', requireAdminAuth, async (req, res) => {
   try {
-    const { title, venue, main_category, overview, start_at, end_at, aiOnly, selectedFields } = req.body;
+    const { title, venue, address, main_category, overview, start_at, end_at, aiOnly, selectedFields } = req.body;
 
     if (!title) {
       return res.status(400).json({ error: 'Title is required' });
@@ -4527,7 +5235,9 @@ app.post('/admin/events/enrich-preview', requireAdminAuth, async (req, res) => {
         main_category || '행사',
         overview || null,
         yearTokens,
-        { ticket: [], official: [], place: [], blog: [] } // 빈 sections = Google Search 모드
+        { ticket: [], official: [], place: [], blog: [] }, // 빈 sections = Google Search 모드
+        address || undefined,  // 🆕 주소 전달 (주차장 검색용)
+        venue || undefined     // 🆕 장소명 전달 (주차장 검색용)
       );
 
       if (!extracted) {
@@ -4638,7 +5348,9 @@ app.post('/admin/events/enrich-preview', requireAdminAuth, async (req, res) => {
       main_category || '행사',
       overview || null,
       yearTokens,
-      aiContext
+      aiContext,
+      address || undefined,  // 🆕 주소 전달 (주차장 검색용)
+      venue || undefined     // 🆕 장소명 전달 (주차장 검색용)
     );
 
     if (!extracted) {
@@ -4778,17 +5490,20 @@ app.post('/admin/events/enrich-preview', requireAdminAuth, async (req, res) => {
  *   - ['*']: 모든 필드 강제 재생성
  */
 app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
+  const _rid = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const _t0 = Date.now();
   try {
     const { id } = req.params;
-    const { forceFields = [], aiOnly = false } = req.body; // 🆕 aiOnly 옵션 추가
+    const { forceFields = [], aiOnly = false } = req.body;
 
-    console.log('[Admin] [Enrich] forceFields:', forceFields, 'aiOnly:', aiOnly);
+    console.log(`[ENRICH][REQ] rid=${_rid} eventId=${id} aiOnly=${aiOnly} forceFields=${JSON.stringify(forceFields)}`);
 
-    // 이벤트 조회 (기존 데이터 포함)
+    // 이벤트 조회 (기존 데이터 포함) + region 추가 (masterKey 계산용)
     const eventResult = await pool.query(
-      `SELECT id, title, main_category, venue, address, overview, 
-              external_links, opening_hours, price_min, price_max, 
-              start_at, end_at, derived_tags, manually_edited_fields, metadata 
+      `SELECT id, title, main_category, venue, address, region, overview,
+              external_links, opening_hours, price_min, price_max,
+              start_at, end_at, derived_tags, manually_edited_fields, metadata,
+              parking_available, parking_info
        FROM canonical_events WHERE id = $1`,
       [id]
     );
@@ -4798,6 +5513,23 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
     }
 
     const event = eventResult.rows[0];
+
+    // 🆕 MASTER/VARIANT 스코프 시스템: masterKey 계산
+    const { calculateMasterKey } = await import('./lib/masterKey');
+    const { masterCache } = await import('./lib/masterCache');
+    const { classifyFieldsByScope } = await import('./lib/fieldScope');
+
+    const masterKey = calculateMasterKey({
+      title: event.title,
+      main_category: event.main_category,
+      start_at: event.start_at,
+      end_at: event.end_at,
+    });
+
+    const isDev = process.env.NODE_ENV === 'development';
+    if (isDev) {
+      console.log(`[ENRICH][MASTERKEY] rid=${_rid} masterKey=${masterKey} title="${event.title}"`);
+    }
     
     // 🆕 Helper: 필드가 강제 재생성 대상인지 확인
     const shouldForce = (fieldName: string): boolean => {
@@ -4805,6 +5537,26 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
       if (forceFields.includes(fieldName)) return true;
       return false;
     };
+
+    // 재생성 대상 필드 목록 계산
+    const _allFields = ['start_date', 'end_date', 'venue', 'address', 'overview', 'derived_tags', 'opening_hours', 'price_min', 'price_max', 'external_links', 'parking_available', 'parking_info'];
+    const _targetFields = forceFields.includes('*') ? _allFields : forceFields.length > 0 ? forceFields : _allFields.filter(f => {
+      if (f === 'start_date') return !event.start_at;
+      if (f === 'end_date') return !event.end_at;
+      if (f === 'venue') return !event.venue;
+      if (f === 'address') return !event.address;
+      if (f === 'overview') return !event.overview;
+      if (f === 'derived_tags') return !event.derived_tags || event.derived_tags.length === 0;
+      if (f === 'opening_hours') return !event.opening_hours || Object.keys(event.opening_hours).length === 0;
+      if (f === 'price_min') return event.price_min === null;
+      if (f === 'price_max') return event.price_max === null;
+      if (f === 'external_links') return !event.external_links || Object.keys(event.external_links).length === 0;
+      if (f === 'parking_available') return event.parking_available === null || event.parking_available === undefined;
+      if (f === 'parking_info') return !event.parking_info;
+      return false;
+    });
+    console.log(`[ENRICH][TARGET] rid=${_rid} fields=${JSON.stringify(_targetFields)} title="${event.title}"`);
+
     console.log('[Admin] [Phase A] AI enrich event:', { 
       id, 
       title: event.title,
@@ -4826,8 +5578,30 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
     let allResults: any[] = [];
     let sections: any = { ticket: [], official: [], place: [], blog: [] };
     let aiContext: any = { ticket: [], official: [], place: [], blog: [] };
-    
+    // 전역 인덱스 배열: AI가 반환하는 index를 URL로 resolve할 때 사용
+    let allIndexedResults: ScoredSearchResult[] = [];
+
+    // 🆕 MASTER/VARIANT 스코프 분류
+    const { masterFields, variantFields } = classifyFieldsByScope(forceFields);
+
+    if (isDev) {
+      console.log(`[ENRICH][SCOPE] rid=${_rid} masterFields=${masterFields.length} variantFields=${variantFields.length}`);
+      console.log(`[ENRICH][SCOPE] rid=${_rid} MASTER=[${masterFields.join(', ')}]`);
+      console.log(`[ENRICH][SCOPE] rid=${_rid} VARIANT=[${variantFields.join(', ')}]`);
+    }
+
+    // 🆕 forceFields에 venue-first 필드가 있는지 체크
+    const { getQueryStrategy } = await import('./lib/queryBuilder');
+    const hasVenueFirstFields = forceFields.some((f: string) => getQueryStrategy(f) === 'venue-first');
+
     if (!aiOnly) {
+      // Naver 자격증명 확인 (없으면 AI-only fallback)
+      const naverClientId = process.env.NAVER_CLIENT_ID;
+      const naverClientSecret = process.env.NAVER_CLIENT_SECRET;
+      if (!naverClientId || !naverClientSecret) {
+        console.warn('[Admin] [Enrich] ⚠️ NAVER_CLIENT_ID or NAVER_CLIENT_SECRET not set. Naver search will return empty results and fall back to Google Search Grounding.');
+      }
+
       allResults = await searchEventInfoEnhanced(
         event.title,
         event.venue || '',
@@ -4836,8 +5610,37 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
         event.main_category  // 🆕 카테고리 추가
       );
 
+      // 🆕 forceFields에 venue-first 필드가 있으면 추가 검색 수행
+      if (hasVenueFirstFields && forceFields.length > 0) {
+        console.log(`[ENRICH][FIELD_SEARCH] rid=${_rid} venue-first fields detected, performing field-specific searches`);
+        const { searchFieldSpecific } = await import('./lib/naverApi');
+
+        const fieldSearches = forceFields
+          .filter((f: string) => getQueryStrategy(f) === 'venue-first')
+          .map(async (fieldKey: string) => {
+            const _t = Date.now();
+            const results = await searchFieldSpecific(fieldKey, {
+              title: event.title,
+              venue: event.venue || undefined,
+              address: event.address || undefined,
+              region: event.region || undefined,
+            }, _rid);  // 🆕 rid 전달
+            console.log(`[ENRICH][QUERY] rid=${_rid} fieldKey=${fieldKey} strategy=venue-first query completed in ${Date.now() - _t}ms, count=${results.length}`);
+            return results;
+          });
+
+        const fieldResults = await Promise.all(fieldSearches);
+        const additionalResults = fieldResults.flat();
+
+        if (additionalResults.length > 0) {
+          allResults = [...allResults, ...additionalResults];
+          console.log(`[ENRICH][FIELD_SEARCH] rid=${_rid} added ${additionalResults.length} field-specific results, total now ${allResults.length}`);
+        }
+      }
+
       if (!allResults || allResults.length === 0) {
-        console.log('[Admin] [Phase A] No search results, continuing with AI-only mode');
+        console.log(`[ENRICH][NAVER] rid=${_rid} web=0 blog=0 place=0 total=0 (no results)`);
+        console.log('[Admin] [Phase A] No search results, continuing with AI-only mode (Naver credentials set:', !!(naverClientId && naverClientSecret), ')');
       } else {
         console.log(`[Admin] [Phase A] Total raw results: ${allResults.length}`);
 
@@ -4871,35 +5674,75 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
           blog: sections.blog.length,
         });
 
-        // AI용 컨텍스트 생성
+        // 전역 인덱스 배열: ticket → official → place → blog 순서로 합치고 URL 기준 중복 제거
+        const _seen = new Set<string>();
+        allIndexedResults = [
+          ...sections.ticket,
+          ...sections.official,
+          ...sections.place,
+          ...sections.blog,
+        ].filter((r: ScoredSearchResult) => {
+          if (_seen.has(r.link)) return false;
+          _seen.add(r.link);
+          return true;
+        });
+        console.log(`[AI][INDEX] allIndexedResults built: ${allIndexedResults.length} unique results`);
+
+        // AI용 컨텍스트 생성 (전역 index 기반 한 줄 포맷)
+        const getGlobalIdx = (r: ScoredSearchResult) => allIndexedResults.findIndex((x: ScoredSearchResult) => x.link === r.link);
         aiContext = {
-          ticket: sections.ticket.map((r: any) => formatResultsForAI([r])),
-          official: sections.official.map((r: any) => formatResultsForAI([r])),
-          place: sections.place.map((r: any) => formatResultsForAI([r])),
-          blog: sections.blog.map((r: any) => formatResultsForAI([r])),
+          ticket: sections.ticket.map((r: any) => formatResultForAIIndexed(r, getGlobalIdx(r))),
+          official: sections.official.map((r: any) => formatResultForAIIndexed(r, getGlobalIdx(r))),
+          place: sections.place.map((r: any) => formatResultForAIIndexed(r, getGlobalIdx(r))),
+          blog: sections.blog.map((r: any) => formatResultForAIIndexed(r, getGlobalIdx(r))),
         };
+
+        const _webCount = (sections.ticket?.length || 0) + (sections.official?.length || 0);
+        const _blogCount = sections.blog?.length || 0;
+        const _placeCount = sections.place?.length || 0;
+        console.log(`[ENRICH][NAVER] rid=${_rid} web=${_webCount} blog=${_blogCount} place=${_placeCount} total=${allResults.length}`);
       }
     } else {
+      console.log(`[ENRICH][NAVER] rid=${_rid} skipped=true (aiOnly mode)`);
       console.log('[Admin] [Phase A] AI-only mode: Skipping Naver API search');
     }
 
     // Gemini AI 분석
+    const _aiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
+    console.log(`[ENRICH][AI] rid=${_rid} model=${_aiModel} aiOnly=${aiOnly}`);
     let extracted = await extractEventInfoEnhanced(
       event.title,
       event.main_category,
       event.overview,
       yearTokens,
-      aiOnly ? { ticket: [], official: [], place: [], blog: [] } : aiContext // 🆕 aiOnly 모드에서는 빈 sections 전달
+      aiOnly ? { ticket: [], official: [], place: [], blog: [] } : aiContext, // 🆕 aiOnly 모드에서는 빈 sections 전달
+      event.address || undefined,  // 🆕 주소 전달 (주차장 검색용)
+      event.venue || undefined     // 🆕 장소명 전달 (주차장 검색용)
     );
 
     if (!extracted) {
+      const isGeminiConfigured = !!process.env.GEMINI_API_KEY;
+      const errorCode = isGeminiConfigured ? 'AI_PARSE_FAILED' : 'GEMINI_NOT_CONFIGURED';
+      const message = isGeminiConfigured
+        ? 'Gemini AI 분석 실패: AI 응답에서 JSON을 추출하지 못했습니다. 백엔드 콘솔 로그를 확인하세요.'
+        : 'GEMINI_API_KEY가 설정되지 않았습니다. 서버 환경변수를 확인하세요.';
+      console.error(`[Admin] [Enrich] AI extraction returned null. errorCode=${errorCode}, model=${_aiModel}, title="${event.title}"`);
+      console.log(`[ENRICH][DONE] rid=${_rid} success=false errorCode=${errorCode} durationMs=${Date.now() - _t0}`);
       return res.json({
         success: false,
-        message: 'AI 분석에 실패했습니다.',
+        message,
+        errorCode,
         enriched: null,
       });
     }
-    
+
+    // D안 안전장치: AI가 URL 문자열을 반환했으면 경고 + 무효화
+    warnAndStripAiUrls(extracted);
+    // D안 핵심: AI의 *_index 필드 → 네이버 검색결과 URL로 resolve
+    if (allIndexedResults.length > 0) {
+      resolveIndexes(extracted, allIndexedResults);
+    }
+
     // 🆕 디버깅: AI 추출 결과 확인
     console.log('[Admin] [Enrich] AI Extracted Data:', {
       category: event.main_category,
@@ -5039,18 +5882,47 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
       ? (extracted.address || event.address || null) 
       : event.address;
     
-    console.log('[Admin] [Enrich] 장소/주소 선택:', {
+    // 🚗 주차 정보: forceFields 또는 빈 값일 때만 AI 사용
+    const finalParkingAvailable = (shouldForce('parking_available') || event.parking_available === null || event.parking_available === undefined)
+      ? (extracted.parking_available ?? event.parking_available ?? null)
+      : event.parking_available;
+    
+    // parking_info 안전 처리: 객체로 들어오면 문자열로 변환
+    let extractedParkingInfo = extracted.parking_info;
+    if (extractedParkingInfo && typeof extractedParkingInfo === 'object') {
+      console.warn('[Admin] [Enrich] ⚠️ parking_info가 객체로 반환됨, 문자열로 변환:', extractedParkingInfo);
+      const obj = extractedParkingInfo as any;
+      if (obj.details) {
+        extractedParkingInfo = obj.details;
+      } else if (obj.charge !== undefined && obj.location) {
+        extractedParkingInfo = `${obj.location}${obj.charge ? ' (유료)' : ' (무료)'}`;
+      } else {
+        extractedParkingInfo = JSON.stringify(obj);
+      }
+    }
+    
+    const finalParkingInfo = (shouldForce('parking_info') || !event.parking_info)
+      ? (extractedParkingInfo || event.parking_info || null)
+      : event.parking_info;
+    
+    console.log('[Admin] [Enrich] 장소/주소/주차 선택:', {
       existingVenue: event.venue || 'none',
       aiVenue: extracted.venue || 'none',
       finalVenue: finalVenue || 'none',
       existingAddress: event.address || 'none',
       aiAddress: extracted.address || 'none',
-      finalAddress: finalAddress || 'none'
+      finalAddress: finalAddress || 'none',
+      existingParkingAvailable: event.parking_available,
+      aiParkingAvailable: extracted.parking_available,
+      finalParkingAvailable: finalParkingAvailable,
+      existingParkingInfo: event.parking_info || 'none',
+      aiParkingInfo: extractedParkingInfo || 'none',
+      finalParkingInfo: finalParkingInfo || 'none'
     });
 
     // 🆕 Phase 2: AI 제안 시스템 - 제안 생성
     const { buildSuggestionsFromAI, buildSuggestionsFromPlace } = await import('./lib/suggestionBuilder');
-    
+
     const aiSuggestions = buildSuggestionsFromAI(extracted, {
       hasSearchResults: allResults.length > 0,
       searchResultCount: allResults.length,
@@ -5065,6 +5937,67 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
       Object.assign(aiSuggestions, placeSuggestions);
     }
 
+    // 🆕 MASTER 필드 캐시 처리
+    let cacheHitCount = 0;
+    let cacheMissCount = 0;
+
+    for (const fieldKey of masterFields) {
+      // MASTER 필드는 캐시에서 먼저 조회
+      const cached = masterCache.get(masterKey, fieldKey);
+
+      if (cached) {
+        // 캐시 HIT: 기존 제안 재사용
+        aiSuggestions[fieldKey] = {
+          value: cached.value,
+          confidence: cached.confidence,
+          source: cached.source,
+          source_detail: cached.source_detail || `마스터 캐시에서 재사용 (${new Date(cached.cachedAt).toLocaleString('ko-KR')})`,
+          evidence: cached.evidence,
+          reason: cached.reason,
+          url: cached.url,
+          extracted_at: new Date().toISOString(),
+          // 추가 속성 (FieldSuggestion 타입에는 없지만 런타임에서 사용)
+          ...(cached.reasonCode && { reasonCode: cached.reasonCode }),
+          ...(cached.reasonMessage && { reasonMessage: cached.reasonMessage }),
+          ...(cached.naverSearchUrl && { naverSearchUrl: cached.naverSearchUrl }),
+        } as any;
+        cacheHitCount++;
+        if (isDev) {
+          console.log(`[ENRICH][CACHE] rid=${_rid} fieldKey=${fieldKey} status=HIT masterKey=${masterKey}`);
+        }
+      } else {
+        // 캐시 MISS: 새로 생성된 제안을 캐시에 저장
+        const newSuggestion = aiSuggestions[fieldKey];
+        if (newSuggestion) {
+          masterCache.set(masterKey, fieldKey, {
+            value: newSuggestion.value,
+            confidence: newSuggestion.confidence,
+            source: newSuggestion.source,
+            source_detail: newSuggestion.source_detail,
+            evidence: newSuggestion.evidence,
+            reason: newSuggestion.reason,
+            url: newSuggestion.url,
+            reasonCode: (newSuggestion as any).reasonCode,
+            reasonMessage: (newSuggestion as any).reasonMessage,
+            naverSearchUrl: (newSuggestion as any).naverSearchUrl,
+          });
+          cacheMissCount++;
+          if (isDev) {
+            console.log(`[ENRICH][CACHE] rid=${_rid} fieldKey=${fieldKey} status=MISS_STORED masterKey=${masterKey}`);
+          }
+        } else {
+          cacheMissCount++;
+          if (isDev) {
+            console.log(`[ENRICH][CACHE] rid=${_rid} fieldKey=${fieldKey} status=MISS_NO_SUGGESTION masterKey=${masterKey}`);
+          }
+        }
+      }
+    }
+
+    if (isDev && masterFields.length > 0) {
+      console.log(`[ENRICH][CACHE] rid=${_rid} masterKey=${masterKey} hits=${cacheHitCount} misses=${cacheMissCount} total=${masterFields.length}`);
+    }
+
     console.log('[Admin] [Enrich] Generated suggestions:', Object.keys(aiSuggestions).length);
 
     // DB에 ai_suggestions 저장
@@ -5077,14 +6010,18 @@ app.post('/admin/events/:id/enrich', requireAdminAuth, async (req, res) => {
 
     console.log('[Admin] [Enrich] ✅ AI suggestions saved to DB');
 
+    const _sugCount = Object.keys(aiSuggestions).length;
+    console.log(`[ENRICH][DONE] rid=${_rid} success=true suggestions=${_sugCount} durationMs=${Date.now() - _t0}`);
+
     res.json({
       success: true,
-      message: `${Object.keys(aiSuggestions).length}개의 AI 제안이 생성되었습니다. 적용할 제안을 선택하세요.`,
+      message: `${_sugCount}개의 AI 제안이 생성되었습니다. 적용할 제안을 선택하세요.`,
       suggestions: aiSuggestions,
     });
 
   } catch (error: any) {
     console.error('[Admin] AI enrich event failed:', error);
+    console.log(`[ENRICH][DONE] rid=${_rid} success=false errorCode=INTERNAL_ERROR durationMs=${Date.now() - _t0} stack=${error?.stack?.split('\n')[0]}`);
     res.status(500).json({
       success: false,
       error: 'AI 분석 중 오류가 발생했습니다.',
@@ -5329,9 +6266,9 @@ app.post('/admin/events/:id/apply-suggestion', requireAdminAuth, async (req, res
 
     console.log('[Admin] [Apply Suggestion]:', { eventId: id, fieldName });
 
-    // 이벤트 조회
+    // 이벤트 조회 (price_info 포함 - is_free 계산용)
     const eventResult = await pool.query(
-      `SELECT id, ai_suggestions, manually_edited_fields, field_sources, metadata, external_links
+      `SELECT id, ai_suggestions, manually_edited_fields, field_sources, metadata, external_links, price_info
        FROM canonical_events WHERE id = $1`,
       [id]
     );
@@ -5373,8 +6310,44 @@ app.post('/admin/events/:id/apply-suggestion', requireAdminAuth, async (req, res
       updates.push(`${fieldName} = $${paramIndex++}`);
       params.push(suggestion.value);
     } else if (fieldName === 'price_min' || fieldName === 'price_max') {
+      const rawPrice = suggestion.value;
+      let numericPrice: number | null = null;
+      if (typeof rawPrice === 'number' && !isNaN(rawPrice)) {
+        numericPrice = rawPrice;
+      } else if (typeof rawPrice === 'string') {
+        const parsed = parseFloat(rawPrice.replace(/[^\d.]/g, ''));
+        numericPrice = isNaN(parsed) ? null : parsed;
+      } else if (rawPrice !== null && rawPrice !== undefined) {
+        console.warn(`[Admin] [Apply Suggestion] ${fieldName} value is not a number, got:`, typeof rawPrice, JSON.stringify(rawPrice).slice(0, 100));
+        return res.status(400).json({
+          success: false,
+          error: `${fieldName === 'price_min' ? '최소' : '최대'} 가격 제안값이 숫자가 아닙니다. AI가 잘못된 형식으로 반환했습니다: ${JSON.stringify(rawPrice).slice(0, 80)}`,
+        });
+      }
       updates.push(`${fieldName} = $${paramIndex++}`);
-      params.push(suggestion.value);
+      params.push(numericPrice);
+
+      // is_free 자동 계산: 가격이 0보다 크면 무료 아님
+      const { deriveIsFree } = await import('./utils/priceUtils');
+      let computedIsFree: boolean;
+
+      if (numericPrice !== null && numericPrice > 0) {
+        // 가격이 있으면 무료 아님
+        computedIsFree = false;
+      } else {
+        // 가격이 0이거나 null이면 price_info 기반으로 판정
+        computedIsFree = deriveIsFree(event.price_info);
+      }
+
+      updates.push(`is_free = $${paramIndex++}`);
+      params.push(computedIsFree);
+
+      console.log('[Admin] [Apply Suggestion] 가격 업데이트 → is_free 자동 계산:', {
+        fieldName,
+        numericPrice,
+        priceInfo: event.price_info,
+        computedIsFree,
+      });
     } else if (fieldName === 'derived_tags') {
       updates.push(`derived_tags = $${paramIndex++}`);
       params.push(JSON.stringify(suggestion.value));
@@ -5468,6 +6441,42 @@ app.post('/admin/events/:id/apply-suggestion', requireAdminAuth, async (req, res
       currentMetadata.display.popup[subField] = suggestion.value;
       updates.push(`metadata = $${paramIndex++}`);
       params.push(JSON.stringify(currentMetadata));
+    } else if (fieldName === 'parking_available') {
+      // 주차 가능 여부
+      updates.push(`parking_available = $${paramIndex++}`);
+      params.push(suggestion.value);
+    } else if (fieldName === 'parking_info') {
+      // 주차 상세 정보
+      updates.push(`parking_info = $${paramIndex++}`);
+      params.push(suggestion.value);
+    } else if (fieldName === 'public_transport_info') {
+      // 대중교통 정보
+      updates.push(`public_transport_info = $${paramIndex++}`);
+      params.push(suggestion.value);
+    } else if (fieldName === 'accessibility_info') {
+      // 장애인 편의시설 정보
+      updates.push(`accessibility_info = $${paramIndex++}`);
+      params.push(suggestion.value);
+    } else if (fieldName === 'age_restriction') {
+      // 연령 제한
+      updates.push(`age_restriction = $${paramIndex++}`);
+      params.push(suggestion.value);
+    } else if (fieldName === 'price_info') {
+      // 가격 상세 정보 + is_free 자동 계산
+      const { deriveIsFree } = await import('./utils/priceUtils');
+      const newPriceInfo = suggestion.value;
+      const computedIsFree = deriveIsFree(newPriceInfo);
+
+      updates.push(`price_info = $${paramIndex++}`);
+      params.push(newPriceInfo);
+
+      updates.push(`is_free = $${paramIndex++}`);
+      params.push(computedIsFree);
+
+      console.log('[Admin] [Apply Suggestion] price_info 업데이트 → is_free 자동 계산:', {
+        newPriceInfo,
+        computedIsFree,
+      });
     } else {
       return res.status(400).json({ error: `Unsupported field: ${fieldName}` });
     }
@@ -5518,6 +6527,37 @@ app.post('/admin/events/:id/apply-suggestion', requireAdminAuth, async (req, res
     updatedEvent.end_at = updatedEvent.end_at_str;
     delete updatedEvent.start_at_str;
     delete updatedEvent.end_at_str;
+
+    // 백그라운드: 임베딩 자동 업데이트 (검색 관련 필드 변경 시)
+    const embeddingFields = ['overview', 'derived_tags', 'venue', 'address', 'price_info', 'metadata'];
+    if (embeddingFields.some(f => fieldName.startsWith(f)) && process.env.GEMINI_API_KEY) {
+      setImmediate(async () => {
+        try {
+          const { buildEventText, embedDocument, toVectorLiteral: tvl } = await import('./lib/embeddingService');
+          const row = updatedEvent;
+          const text = buildEventText({
+            title: row.title,
+            displayTitle: row.display_title,
+            venue: row.venue,
+            address: row.address,
+            // description field not in canonical_events schema
+            overview: row.overview,
+            mainCategory: row.main_category,
+            subCategory: row.sub_category,
+            tags: row.derived_tags,
+            region: row.region,
+            priceInfo: row.price_info,
+          });
+          const embedding = await embedDocument(text);
+          await pool.query(
+            `UPDATE canonical_events SET embedding = $1::vector WHERE id = $2`,
+            [tvl(embedding), id]
+          );
+        } catch (embErr) {
+          console.error('[apply-suggestion] Auto-embedding update failed:', (embErr as Error).message);
+        }
+      });
+    }
 
     res.json({
       success: true,
@@ -5777,7 +6817,7 @@ app.post('/admin/hot-suggestions/:id/approve', requireAdminAuth, async (req, res
         const { calculateConsensusLight, calculateStructuralScore } = await import('./lib/hotScoreCalculator');
         
         const eventResult = await pool.query(
-          `SELECT id, title, main_category, venue, region, start_at, end_at, (sources->0->>'source') as source FROM canonical_events WHERE id = $1`,
+          `SELECT id, title, main_category, venue, region, start_at, end_at, lat, lng, image_url, external_links, is_featured, (sources->0->>'source') as source FROM canonical_events WHERE id = $1`,
           [eventId]
         );
         const event = eventResult.rows[0];
@@ -5803,6 +6843,11 @@ app.post('/admin/hot-suggestions/:id/approve', requireAdminAuth, async (req, res
           start_at: event.start_at,
           end_at: event.end_at,
           source: event.source,
+          lat: event.lat,
+          lng: event.lng,
+          image_url: event.image_url,
+          external_links: event.external_links,
+          is_featured: event.is_featured,
         });
 
         const lightScore = 0.5 * consensus + 0.5 * structuralResult.total;

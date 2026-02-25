@@ -16,6 +16,19 @@ export const config = {
   kakaoRestApiKey: process.env.KAKAO_REST_API_KEY ?? '',
   geminiApiKey: process.env.GEMINI_API_KEY ?? '', // 향후 임베딩/분석용
   openaiApiKey: process.env.OPENAI_API_KEY ?? '', // GPT-4o-mini for banner copy
+
+  // ── 토스 로그인 (앱인토스 파트너 API) ──────────────────────────────
+  toss: {
+    apiBaseUrl: 'https://apps-in-toss-api.toss.im',
+    // 앱인토스 개발자센터에서 발급받은 OAuth2 클라이언트 자격증명
+    clientId: process.env.TOSS_CLIENT_ID ?? '',
+    clientSecret: process.env.TOSS_CLIENT_SECRET ?? '',
+  },
+
+  // ── JWT (우리 앱 자체 세션 토큰) ─────────────────────────────────
+  jwtSecret: process.env.JWT_SECRET ?? 'change-me-in-production',
+  jwtExpiresIn: '30d',
+
   db: {
     host: process.env.DB_HOST ?? 'localhost',
     port: Number(process.env.DB_PORT ?? '5432'),
