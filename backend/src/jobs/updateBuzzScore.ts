@@ -70,6 +70,12 @@ interface EventBuzzData {
   end_at: Date;
   source: string | null;
   kopis_id: string | null; // external_links.ticket URL에서 추출
+  lat: number | null;
+  lng: number | null;
+  image_url: string | null;
+  external_links: Record<string, unknown> | null;
+  is_featured: boolean | null;
+  created_at: Date;
 }
 
 interface BuzzComponents {
@@ -136,16 +142,21 @@ async function calculateConsensus(event: EventBuzzData): Promise<number> {
  * Structural 점수 계산 (모든 카테고리)
  */
 function calculateStructural(event: EventBuzzData): number {
-  const result = calculateStructuralScore({
-    id: event.event_id,
-    title: event.title,
-    main_category: event.main_category,
-    venue: event.venue || undefined,
-    region: event.region || undefined,
-    start_at: event.start_at,
-    end_at: event.end_at,
-    source: event.source || undefined,
-  });
+    const result = calculateStructuralScore({
+      id: event.event_id,
+      title: event.title,
+      main_category: event.main_category,
+      venue: event.venue || undefined,
+      region: event.region || undefined,
+      start_at: event.start_at,
+      end_at: event.end_at,
+      source: event.source || undefined,
+      lat: event.lat,
+      lng: event.lng,
+      image_url: event.image_url,
+      external_links: event.external_links,
+      is_featured: event.is_featured,
+    });
   return result.total;
 }
 
@@ -239,6 +250,11 @@ export async function updateBuzzScore(): Promise<void> {
         ce.region,
         ce.start_at,
         ce.end_at,
+        ce.lat,
+        ce.lng,
+        ce.image_url,
+        ce.external_links,
+        ce.is_featured,
         (ce.sources->0->>'source') as source,  -- JSONB 배열에서 첫 번째 source 추출
         -- KOPIS ID 추출: external_links.ticket URL에서 mt20Id 파라미터 추출
         (
@@ -248,7 +264,8 @@ export async function updateBuzzScore(): Promise<void> {
         COALESCE(action_stats.likes_7d, 0)::INTEGER as likes_7d,
         COALESCE(action_stats.shares_7d, 0)::INTEGER as shares_7d,
         COALESCE(action_stats.ticket_clicks_7d, 0)::INTEGER as ticket_clicks_7d,
-        COALESCE(ce.popularity_score, 0)::INTEGER as popularity_score
+        COALESCE(ce.popularity_score, 0)::INTEGER as popularity_score,
+        ce.created_at
       FROM canonical_events ce
 
       -- 7일간 조회수 집계
@@ -385,7 +402,19 @@ export async function updateBuzzScore(): Promise<void> {
       // 3-4. 0~1000 클램핑
       finalScore = Math.max(CONFIG.MIN_SCORE, Math.min(CONFIG.MAX_SCORE, Math.round(finalScore)));
 
-      // 3-5. DB 업데이트 (기존 컬럼 재활용)
+      // 3-5. 신규 이벤트 가산점 + 시간 감쇠
+      const daysInDb = (Date.now() - new Date(event.created_at).getTime()) / (1000 * 60 * 60 * 24);
+      // 신규 가산점: 등록 후 14일 이내 최대 +25% (선형 감소)
+      const freshnessMultiplier = daysInDb <= 14 ? 1 + (1 - daysInDb / 14) * 0.25 : 1.0;
+      // 시간 감쇠: 60일 초과 시 서서히 감소, 180일 시점 최대 -25% (이후 고정)
+      const staleMultiplier = daysInDb > 60 ? Math.max(0.75, 1 - (daysInDb - 60) / 480) : 1.0;
+      finalScore = Math.max(CONFIG.MIN_SCORE, Math.min(CONFIG.MAX_SCORE,
+        Math.round(finalScore * freshnessMultiplier * staleMultiplier)));
+      hotComponents.days_in_db = Math.round(daysInDb);
+      hotComponents.freshness_multiplier = parseFloat(freshnessMultiplier.toFixed(3));
+      hotComponents.stale_multiplier = parseFloat(staleMultiplier.toFixed(3));
+
+      // 3-6. DB 업데이트 (기존 컬럼 재활용)
       await pool.query(
         `
         UPDATE canonical_events

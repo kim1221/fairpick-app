@@ -37,6 +37,8 @@ interface RouteParams {
 // ==================== 메인 컴포넌트 ====================
 
 function EventDetailPage() {
+  console.log('❌ LEGACY event-detail.tsx HIT - 이 파일은 렌더링되면 안 됨!');
+
   const navigation = Route.useNavigation();
   const params = Route.useParams<RouteParams>();
   const eventId = params?.id;
@@ -152,6 +154,24 @@ function EventDetailPage() {
   // 메인 렌더링
   return (
     <View style={styles.container}>
+      {/* 🟡 Phase 2A 디버그 배너 (항상 표시) */}
+      <View style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 99999,
+        elevation: 99999,
+        backgroundColor: '#FFD400',
+        paddingTop: 44,
+        paddingBottom: 8,
+        alignItems: 'center',
+      }}>
+        <Text style={{ fontWeight: '900', color: '#000', fontSize: 14 }}>
+          ✅ Phase2A ACTIVE: event-detail.tsx
+        </Text>
+      </View>
+
       {/* 상단 헤더 */}
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={handleBack}>
@@ -181,12 +201,139 @@ function EventDetailPage() {
           <View style={styles.categoryBadge}>
             <Text style={styles.categoryBadgeText}>{event.category}</Text>
           </View>
+
+          {/* Phase 2A: 상태 배지 (우측 상단) */}
+          <View style={{
+            position: 'absolute',
+            top: 16,
+            right: 16,
+            flexDirection: 'column',
+            gap: 8,
+          }}>
+            {event.is_ending_soon && (
+              <View style={{
+                backgroundColor: '#FF3B30',
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 12,
+              }}>
+                <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+                  ⏰ 마감임박
+                </Text>
+              </View>
+            )}
+            {event.is_free && (
+              <View style={{
+                backgroundColor: '#34C759',
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 12,
+              }}>
+                <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+                  💰 무료
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
 
         {/* 이벤트 정보 */}
         <View style={styles.infoContainer}>
           {/* 제목 */}
           <Text style={styles.title}>{event.title}</Text>
+
+          {/* Phase 2A: 초록 디버그 박스 */}
+          <View style={{ backgroundColor: '#00FF00', padding: 8, marginVertical: 12, borderRadius: 8 }}>
+            <Text style={{ fontWeight: '900', color: '#000', fontSize: 16, textAlign: 'center' }}>
+              ✅ Phase2A: 핵심 정보 영역
+            </Text>
+          </View>
+
+          {/* Phase 2A: Key Info Grid (2x2) */}
+          <View style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            marginBottom: 16,
+            gap: 12,
+          }}>
+            {/* 기간 */}
+            {event.start_date && event.end_date && (
+              <View style={{
+                flex: 1,
+                minWidth: '45%',
+                backgroundColor: '#F9FAFB',
+                padding: 16,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: '#E5E7EB',
+              }}>
+                <Text style={{ fontSize: 24, marginBottom: 8 }}>📅</Text>
+                <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>기간</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
+                  {formatDate(event.start_date)}
+                </Text>
+                <Text style={{ fontSize: 12, color: '#6B7280' }}>~</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
+                  {formatDate(event.end_date)}
+                </Text>
+              </View>
+            )}
+
+            {/* 장소 */}
+            {event.venue && (
+              <View style={{
+                flex: 1,
+                minWidth: '45%',
+                backgroundColor: '#F9FAFB',
+                padding: 16,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: '#E5E7EB',
+              }}>
+                <Text style={{ fontSize: 24, marginBottom: 8 }}>📍</Text>
+                <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>장소</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827', numberOfLines: 2 }}>
+                  {event.venue}
+                </Text>
+              </View>
+            )}
+
+            {/* 가격 */}
+            <View style={{
+              flex: 1,
+              minWidth: '45%',
+              backgroundColor: '#F9FAFB',
+              padding: 16,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: '#E5E7EB',
+            }}>
+              <Text style={{ fontSize: 24, marginBottom: 8 }}>💰</Text>
+              <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>가격</Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
+                {event.is_free ? '무료' : '유료'}
+              </Text>
+            </View>
+
+            {/* 거리 */}
+            {event.distance_km !== undefined && (
+              <View style={{
+                flex: 1,
+                minWidth: '45%',
+                backgroundColor: '#F9FAFB',
+                padding: 16,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: '#E5E7EB',
+              }}>
+                <Text style={{ fontSize: 24, marginBottom: 8 }}>🚶</Text>
+                <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>거리</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
+                  {formatDistance(event.distance_km)}
+                </Text>
+              </View>
+            )}
+          </View>
 
           {/* 태그 */}
           {event.reason && event.reason.length > 0 && (
@@ -243,18 +390,26 @@ function EventDetailPage() {
               - 기타 메타데이터 */}
         </View>
 
-        <View style={{ height: 100 }} />
+        {/* Phase 2A: 하단 여백 증가 (Sticky Bar 가리지 않게) */}
+        <View style={{ height: 140 }} />
       </ScrollView>
 
-      {/* 하단 액션 버튼 */}
+      {/* Phase 2A: Sticky Bar (강화) */}
       <View style={styles.bottomActions}>
         <Pressable 
           style={[styles.saveButton, saved && styles.saveButtonActive]}
           onPress={handleSave}
         >
           <Text style={[styles.saveButtonText, saved && styles.saveButtonTextActive]}>
-            {saved ? '💙 저장됨' : '🤍 저장'}
+            {saved ? '💙' : '🤍'}
           </Text>
+        </Pressable>
+
+        <Pressable 
+          style={styles.shareButton2}
+          onPress={handleShare}
+        >
+          <Text style={styles.shareButtonText2}>🔗</Text>
         </Pressable>
         
         <Pressable 
@@ -266,7 +421,7 @@ function EventDetailPage() {
             }
           }}
         >
-          <Text style={styles.primaryButtonText}>자세히 보기</Text>
+          <Text style={styles.primaryButtonText}>[CTA] 예매하기</Text>
         </Pressable>
       </View>
     </View>
@@ -482,6 +637,10 @@ const styles = StyleSheet.create({
 
   // 하단 액션
   bottomActions: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     padding: 16,
     paddingBottom: 24,
@@ -489,6 +648,8 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
     gap: 12,
+    zIndex: 99999, // Phase 2A: 절대 안 가려지게
+    elevation: 99999, // Android
   },
   saveButton: {
     flex: 1,
@@ -509,8 +670,20 @@ const styles = StyleSheet.create({
   saveButtonTextActive: {
     color: '#3182F6',
   },
+  shareButton2: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shareButtonText2: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
   primaryButton: {
-    flex: 2,
+    flex: 3,
     backgroundColor: '#3182F6',
     paddingVertical: 16,
     borderRadius: 12,

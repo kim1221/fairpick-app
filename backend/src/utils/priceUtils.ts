@@ -151,22 +151,39 @@ export function normalizePriceText(raw: string | null | undefined): string | nul
 
 /**
  * 가격 텍스트로부터 무료 여부 판정 (공개 API)
- * 
+ *
  * @param priceText 정제된 가격 텍스트 (normalizePriceText 결과)
  * @returns true = 명확히 무료, false = 유료이거나 불확실
  */
 export function deriveIsFree(priceText: string | null | undefined): boolean {
   if (!priceText) return false;
-  
+
   const normalized = priceText.toLowerCase().trim();
-  
-  // 명확한 무료 키워드가 있는지 확인
+
+  // 숫자가 포함되어 있으면 상세 체크
+  if (/\d/.test(normalized)) {
+    // "0원": lookaround로 앞뒤 숫자 없는 경우만 매칭 (\b는 한글 경계 미지원)
+    // "10,000원" 내 "0원" 오매칭 방지
+    if (/(?<!\d)0원(?!\d)/.test(normalized)) {
+      return true;
+    }
+    // 다른 숫자가 있으면 유료로 판정 (10,000원, 5000원 등)
+    if (/\d{1,}[,\d]*원/.test(normalized)) {
+      return false;
+    }
+  }
+
+  // 명확한 무료 키워드 확인 ("무료", "free" 등)
   for (const keyword of CONFIG.FREE_KEYWORDS) {
-    if (normalized.includes(keyword.toLowerCase())) {
+    const lowerKeyword = keyword.toLowerCase();
+    // "0원"은 이미 위에서 처리했으므로 제외
+    if (lowerKeyword === '0원') continue;
+
+    if (normalized.includes(lowerKeyword)) {
       return true;
     }
   }
-  
+
   return false;
 }
 

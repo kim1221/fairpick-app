@@ -58,14 +58,18 @@ const eventService: EventService = {
     }
     return mapped;
   },
-  async getEventList({ category, region, query, page = 1, size = 10 }: EventListParams) {
+  async getEventList({ category, region, query, page = 1, size = 10, sortBy, order, isFree, isEndingSoon }: EventListParams) {
     // [FIX B] 파라미터 로깅 - 실제 axios 요청 전
-    const params: Record<string, string | number | undefined> = {
+    const params: Record<string, string | number | boolean | undefined> = {
       category: category && category !== '전체' ? category : undefined,
       region: region && region !== '전국' ? region : undefined,
       q: query && query.trim() ? query.trim() : undefined, // 검색어 (서버사이드)
       page,
       size,
+      sortBy: sortBy ?? undefined,
+      order: order ?? undefined,
+      is_free: isFree ? true : undefined,
+      is_ending_soon: isEndingSoon ? true : undefined,
     };
 
     console.log('[EventService][getEventList][Params]', {
@@ -256,7 +260,7 @@ const eventService: EventService = {
           ...mapped,
           distanceMeters: item.distanceMeters,
           traits, // Traits 추가
-        };
+        } as NearbyEventItem;
       }).filter((event): event is NearbyEventItem => Boolean(event));
 
       if (__DEV__) {
@@ -305,6 +309,10 @@ export interface EventListParams {
   query?: string; // 검색어
   page?: number;
   size?: number;
+  sortBy?: string;       // 정렬 기준 (created_at, end_at, buzz_score 등)
+  order?: 'asc' | 'desc';
+  isFree?: boolean;      // 무료 필터
+  isEndingSoon?: boolean; // 마감임박 필터
 }
 
 interface EventListResponse {
@@ -362,6 +370,67 @@ interface EventResponse {
   // Traits 필드 (백엔드에서 계산된 값)
   daysLeft?: number | null;
   hasImage?: boolean;
+  // 상세 정보 필드
+  overview?: string;
+  priceInfo?: string;
+  priceMin?: number;
+  priceMax?: number;
+  openingHours?: any; // JSON 또는 문자열
+  // Phase 1 추가 필드
+  buzzScore?: number;
+  externalLinks?: {
+    ticket?: string;
+    official?: string;
+    reservation?: string;
+    instagram?: string;
+    [key: string]: string | undefined;
+  };
+  derivedTags?: string[];
+  metadata?: {
+    display?: {
+      performance?: {
+        cast?: string;
+        genre?: string;
+        duration_minutes?: number | string;
+        last_admission?: string;
+        crew?: { director?: string; writer?: string; composer?: string; [key: string]: any };
+        [key: string]: any;
+      };
+      exhibition?: {
+        artists?: string;
+        genre?: string;
+        duration_minutes?: number | string;
+        last_admission?: string;
+        photography_allowed?: boolean;
+        facilities?: { photo_zone?: boolean; [key: string]: any };
+        [key: string]: any;
+      };
+      popup?: {
+        type?: string;
+        brands?: string | string[];
+        is_fnb?: boolean;
+        collab_description?: string;
+        fnb_items?: { signature_menu?: string[]; best_items?: string | string[]; [key: string]: any };
+        photo_zone?: boolean;
+        photo_zone_desc?: string;
+        goods_items?: string | string[];
+        waiting_hint?: { level?: string; text?: string; [key: string]: any };
+        [key: string]: any;
+      };
+      festival?: { organizer?: string; program_highlights?: string; [key: string]: any };
+      event?: {
+        target_audience?: string;
+        capacity?: string | number;
+        registration?: { required?: boolean; url?: string; deadline?: string; [key: string]: any };
+        [key: string]: any;
+      };
+      [key: string]: any;
+    };
+    [key: string]: any;
+  };
+  parkingAvailable?: boolean;
+  parkingInfo?: string;
+  publicTransportInfo?: string;
 }
 
 function formatPeriodText(startAt: string, endAt: string): string {
@@ -408,6 +477,14 @@ function resolveCategory(rawMainCategory: string | null | undefined, rawSubCateg
   return { category: '행사', fallback: true };
 }
 
+/** JSONB metadata 값을 string | undefined 로 안전하게 변환 */
+function safeMetaStr(val: unknown): string | undefined {
+  if (val == null) return undefined;
+  if (typeof val === 'string') return val.trim() || undefined;
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  return undefined; // object/array는 무시
+}
+
 function mapEventResponse(event: EventResponse | undefined): EventCardData | undefined {
   if (!event) {
     return undefined;
@@ -443,31 +520,156 @@ function mapEventResponse(event: EventResponse | undefined): EventCardData | und
   const displayTitle = event.displayTitle?.trim() || '';
   const effectiveTitle = displayTitle || event.title;
 
+  // isFree 보정: DB is_free=false인데 price_info가 무료임을 나타내는 경우 방어
+  // - "무료" 포함 여부: partial match (백엔드 deriveIsFree와 동일 기준)
+  // - "0원": 앞뒤 숫자 lookaround로 "10,000원" 오판 방지 (\b는 한글 경계 미지원)
+  // - 단, 다른 금액(숫자+원)이 함께 있으면 유료 우선 (혼합 가격)
+  const priceInfoLower = event.priceInfo?.trim().toLowerCase() ?? '';
+  const isZeroWon = /(?<!\d)0원(?!\d)/.test(priceInfoLower);
+  const hasOtherPrice = /\d{1,}[,\d]*원/.test(priceInfoLower) && !isZeroWon;
+  const effectiveIsFree = event.isFree ||
+    (!hasOtherPrice && priceInfoLower.includes('무료')) ||
+    (!hasOtherPrice && isZeroWon) ||
+    (event.priceMin === 0 && event.priceMax === 0 && !event.priceInfo);
+
+  // priceText 생성
+  let priceText = '';
+  if (effectiveIsFree) {
+    priceText = '무료';
+  } else if (event.priceInfo) {
+    priceText = event.priceInfo;
+  } else if (event.priceMin != null && event.priceMax != null && event.priceMin > 0) {
+    if (event.priceMin === event.priceMax) {
+      priceText = `${event.priceMin.toLocaleString()}원`;
+    } else {
+      priceText = `${event.priceMin.toLocaleString()}원 ~ ${event.priceMax.toLocaleString()}원`;
+    }
+  }
+
+  // openingHours 정규화 - object로 유지 (UI에서 포맷팅)
+  let openingHoursData: any = undefined;
+  if (event.openingHours) {
+    if (typeof event.openingHours === 'string') {
+      // 문자열이면 JSON 파싱 시도
+      try {
+        openingHoursData = JSON.parse(event.openingHours);
+      } catch {
+        // 파싱 실패하면 notes로 간주
+        openingHoursData = { notes: event.openingHours };
+      }
+    } else if (typeof event.openingHours === 'object') {
+      // 이미 object면 그대로 사용
+      openingHoursData = event.openingHours;
+    }
+  }
+
+  // detailLink: externalLinks에서 우선순위별 추출
+  const externalLinks = event.externalLinks ?? {};
+  const detailLink =
+    externalLinks.ticket ||
+    externalLinks.reservation ||
+    externalLinks.official ||
+    externalLinks.instagram ||
+    '';
+
+  // tags: derived_tags 우선, 없으면 subCategory 폴백
+  // 배열 방어: ["", " "] 같은 빈 문자열 포함 배열을 유효하지 않음으로 처리
+  const validDerivedTags = Array.isArray(event.derivedTags)
+    ? event.derivedTags.filter((t: string) => t?.trim().length > 0)
+    : [];
+  const tags: string[] =
+    validDerivedTags.length > 0
+      ? validDerivedTags
+      : ([event.subCategory].filter(Boolean) as string[]);
+
+  // 카테고리별 메타데이터 추출 (metadata.display.*)
+  const display = event.metadata?.display ?? {};
+  const perfMeta = display.performance ?? {};
+  const exhMeta = display.exhibition ?? {};
+  const popupMeta = display.popup ?? {};
+  const festMeta = display.festival ?? {};
+  const eventMeta = display.event ?? {};
+  const eventReg = (eventMeta.registration as any) ?? {};
+
   return {
     id: event.id,
     title: effectiveTitle,
     displayTitle: displayTitle || event.title,
     contentKey: event.contentKey,
     description: event.subCategory || category,
-    overview: '',
+    overview: event.overview || '',
     mainCategory: event.mainCategory,
     subCategory: event.subCategory,
     venue: event.venue ?? '',
     periodText: formatPeriodText(event.startAt, event.endAt),
     startAt: event.startAt,
     endAt: event.endAt,
-    tags: [event.subCategory].filter(Boolean),
+    tags,
     thumbnailUrl: event.imageUrl,
     detailImageUrl: event.imageUrl,
-    detailLink: '',
+    detailLink,
     region,
     category,
+    buzzScore: event.buzzScore,
     popularityScore: event.popularityScore,
     isEndingSoon: event.isEndingSoon,
-    isFree: event.isFree,
+    isFree: effectiveIsFree,
+    priceText,
+    priceInfo: event.priceInfo,
+    priceMin: event.priceMin,
+    priceMax: event.priceMax,
+    openingHours: openingHoursData,
     address: event.address,
     lat: event.lat,
     lng: event.lng,
+    externalLinks: Object.keys(externalLinks).length > 0 ? externalLinks : undefined,
+    parkingAvailable: event.parkingAvailable,
+    parkingInfo: event.parkingInfo,
+    publicTransportInfo: event.publicTransportInfo,
+    // ── 공연/전시 공용 ──────────────────────────────────────────
+    durationMinutes: (() => {
+      const raw = perfMeta.duration_minutes ?? exhMeta.duration_minutes;
+      if (raw == null) return undefined;
+      const n = typeof raw === 'number' ? raw : parseInt(String(raw));
+      return isNaN(n) ? undefined : n;
+    })(),
+    lastAdmission: safeMetaStr(perfMeta.last_admission) || safeMetaStr(exhMeta.last_admission) || undefined,
+    // ── 공연 ────────────────────────────────────────────────────
+    cast: safeMetaStr(perfMeta.cast),
+    genre: safeMetaStr(perfMeta.genre) || safeMetaStr(exhMeta.genre),
+    crewDirector: safeMetaStr(perfMeta.crew?.director),
+    crewWriter: safeMetaStr(perfMeta.crew?.writer),
+    crewComposer: safeMetaStr(perfMeta.crew?.composer),
+    // ── 전시 ────────────────────────────────────────────────────
+    artists: safeMetaStr(exhMeta.artists),
+    photographyAllowed: exhMeta.photography_allowed != null ? exhMeta.photography_allowed === true : undefined,
+    photoZone: (popupMeta.photo_zone === true || exhMeta.facilities?.photo_zone === true) || undefined,
+    photoZoneDesc: safeMetaStr(popupMeta.photo_zone_desc),
+    // ── 축제 ────────────────────────────────────────────────────
+    organizer: safeMetaStr(festMeta.organizer),
+    programHighlights: safeMetaStr(festMeta.program_highlights),
+    // ── 팝업 ────────────────────────────────────────────────────
+    popupType: safeMetaStr(popupMeta.type),
+    brands: Array.isArray(popupMeta.brands)
+      ? popupMeta.brands.filter((b: unknown) => typeof b === 'string' && b.trim()).join(', ') || undefined
+      : safeMetaStr(popupMeta.brands),
+    bestItems: (() => {
+      const fnbItems = popupMeta.fnb_items ?? {};
+      const menu = Array.isArray(fnbItems.signature_menu)
+        ? fnbItems.signature_menu.filter((s: unknown) => typeof s === 'string' && (s as string).trim()).join(', ')
+        : safeMetaStr(fnbItems.signature_menu);
+      return menu || undefined;
+    })(),
+    collabDescription: safeMetaStr(popupMeta.collab_description),
+    waitingHint: safeMetaStr(popupMeta.waiting_hint?.text),
+    goodsItems: Array.isArray(popupMeta.goods_items)
+      ? (popupMeta.goods_items as string[]).filter((s) => typeof s === 'string' && s.trim()).join(', ') || undefined
+      : safeMetaStr(popupMeta.goods_items),
+    // ── 행사 ────────────────────────────────────────────────────
+    registrationRequired: eventReg.required === true ? true : undefined,
+    registrationDeadline: safeMetaStr(eventReg.deadline),
+    targetAudience: safeMetaStr(eventMeta.target_audience),
+    eventCapacity: safeMetaStr(eventMeta.capacity),
   };
 }
 

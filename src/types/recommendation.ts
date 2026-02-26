@@ -52,6 +52,12 @@ export type NearbyResponse = ApiResponse<ScoredEvent[]>;
 export type PersonalizedResponse = ApiResponse<ScoredEvent[]>;
 export type WeekendResponse = ApiResponse<ScoredEvent[]>;
 export type LatestResponse = ApiResponse<ScoredEvent[]>;
+export type EndingSoonResponse = ApiResponse<ScoredEvent[]>;
+export type ExhibitionResponse = ApiResponse<ScoredEvent[]>;
+export type FreeEventsResponse = ApiResponse<ScoredEvent[]>;
+
+// 이벤트 상세 타입 (ScoredEvent와 동일 구조)
+export type EventDetail = ScoredEvent;
 
 // 사용자 행동 로그 타입
 export type ActionType = 'view' | 'save' | 'unsave' | 'share' | 'click';

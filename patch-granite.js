@@ -10,21 +10,21 @@ const targetFile = path.join(
 );
 
 if (fs.existsSync(targetFile)) {
+  const metroCacheKeyPath = path.join(__dirname, 'node_modules/metro-cache-key/src/index.js');
+  const absolutePath = path.resolve(metroCacheKeyPath);
+  
+  console.log(`[Patch] metro-cache-key absolute path: ${absolutePath}`);
+  
   let content = fs.readFileSync(targetFile, 'utf8');
   
-  // metro-cache-key 경로 패치
-  // @granite-js/mpack/node_modules에 복사했으므로 직접 참조
+  // metro-cache-key를 절대 경로로 변경
   content = content.replace(
-    /require\([\"']\.*(\/\.\.)*\/node_modules\/metro-cache-key[\"']\)/g,
-    'require("metro-cache-key")'
-  );
-  content = content.replace(
-    /require\([\"']\.\.\/\.\.\/\.\.\/\.\.\/\.\.\/node_modules\/metro-cache-key[\"']\)/g,
-    'require("metro-cache-key")'
+    /require\([\"'].*metro-cache-key.*[\"']\)/g,
+    `require("${absolutePath}")`
   );
   
   fs.writeFileSync(targetFile, content, 'utf8');
-  console.log('✅ Patched getTransformCacheKey.js');
+  console.log('✅ Patched getTransformCacheKey.js with absolute path');
 } else {
   console.log('⚠️  getTransformCacheKey.js not found, skipping patch');
 }

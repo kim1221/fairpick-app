@@ -46,6 +46,61 @@ export interface EventCardData {
   address?: string;
   lat?: number;
   lng?: number;
+  // Phase 1 UI fields (normalized by backend)
+  priceInfo?: string;
+  priceMin?: number;
+  priceMax?: number;
+  priceText?: string;
+  buzzScore?: number;
+  openingHours?: {
+    weekday?: string;
+    weekend?: string;
+    holiday?: string;
+    closedDays?: string;
+    notes?: string;
+    [key: string]: string | undefined;
+  };
+  bookingLink?: string;
+  externalLinks?: {
+    ticket?: string;
+    official?: string;
+    reservation?: string;
+    instagram?: string;
+    [key: string]: string | undefined;
+  };
+  // 교통/주차
+  parkingAvailable?: boolean;
+  parkingInfo?: string;
+  publicTransportInfo?: string;
+  // 공연/전시 공용
+  durationMinutes?: number;       // 관람/공연 소요 시간(분) [Tier 2]
+  lastAdmission?: string;         // 마지막 입장 시간 [Tier 1]
+  // 카테고리별 메타 (공연)
+  cast?: string;
+  genre?: string;
+  crewDirector?: string;          // 연출/감독 [Tier 3 — overview 시트]
+  crewWriter?: string;            // 작가/작사 [Tier 3]
+  crewComposer?: string;          // 작곡가 [Tier 3]
+  // 카테고리별 메타 (전시)
+  artists?: string;
+  photographyAllowed?: boolean;   // 촬영 허용 여부 [Tier 2]
+  photoZone?: boolean;            // 포토존 유무 (팝업/전시 공용) [Tier 2]
+  photoZoneDesc?: string;         // 포토존 상세 설명 [Tier 2]
+  // 카테고리별 메타 (축제)
+  organizer?: string;
+  programHighlights?: string;
+  // 카테고리별 메타 (팝업)
+  popupType?: string;             // 'fnb' | 'collab' | 'general'
+  brands?: string;
+  bestItems?: string;
+  collabDescription?: string;     // 콜라보 설명
+  goodsItems?: string;            // 굿즈 정보 [Tier 2]
+  waitingHint?: string;           // 대기 안내 텍스트 [Tier 1]
+  // 카테고리별 메타 (행사)
+  registrationRequired?: boolean; // 사전 등록 필수 [Tier 1]
+  registrationDeadline?: string;  // 등록 마감일 [Tier 1]
+  targetAudience?: string;        // 참가 대상 [Tier 2]
+  eventCapacity?: string;         // 정원 [Tier 2]
 }
 
 export const EVENT_CATEGORIES: EventCategory[] = ['전체', '축제', '공연', '행사', '전시'];

@@ -190,9 +190,9 @@ function HomePage() {
     } catch (error) {
       console.error('[Home] Failed to log event click:', error);
     }
-    
-    // 이벤트 상세 페이지로 이동
-    navigation.navigate('/event-detail', { id: eventId } as any);
+
+    // 이벤트 상세 페이지로 이동 (통일: /events/:id)
+    navigation.navigate('/events/:id', { id: eventId });
   };
 
   const handleRefresh = async () => {

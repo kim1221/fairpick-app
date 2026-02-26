@@ -523,11 +523,27 @@ export async function clearLikes(): Promise<void> {
 }
 
 /**
- * 최근 본 목록 초기화 (개발/디버깅용)
+ * 최근 본 목록 초기화
  */
 export async function clearRecent(): Promise<void> {
   await writeRecentV2({ version: 2, items: [], totalCount: 0 });
-  console.log('[Storage][clearRecent] cleared');
+  emitStorageChange({ type: 'recent', action: 'update', count: 0 });
+  if (__DEV__) console.log('[Storage][clearRecent] cleared');
+}
+
+/**
+ * 최근 본 이벤트 개별 삭제
+ * @param id 삭제할 이벤트 ID
+ */
+export async function removeRecentItem(id: string): Promise<void> {
+  const data = await readRecentV2();
+  const updated: RecentDataV2 = {
+    ...data,
+    items: data.items.filter((item) => item.id !== id),
+  };
+  await writeRecentV2(updated);
+  emitStorageChange({ type: 'recent', action: 'remove', id, count: updated.items.length });
+  if (__DEV__) console.log('[Storage][removeRecentItem] removed', id);
 }
 
 // ============================================================

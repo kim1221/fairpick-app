@@ -377,15 +377,39 @@ export async function upsertCanonicalEvent(event: CanonicalEvent) {
       )
       ON CONFLICT (canonical_key)
       DO UPDATE SET
-        title = EXCLUDED.title,
-        display_title = EXCLUDED.display_title,
+        title = CASE
+          WHEN (canonical_events.manually_edited_fields->>'title')::boolean = true
+          THEN canonical_events.title
+          ELSE EXCLUDED.title
+        END,
+        display_title = CASE
+          WHEN (canonical_events.manually_edited_fields->>'display_title')::boolean = true
+          THEN canonical_events.display_title
+          ELSE EXCLUDED.display_title
+        END,
         content_key = EXCLUDED.content_key,
         start_at = EXCLUDED.start_at,
         end_at = EXCLUDED.end_at,
-        venue = EXCLUDED.venue,
-        region = EXCLUDED.region,
-        main_category = EXCLUDED.main_category,
-        sub_category = EXCLUDED.sub_category,
+        venue = CASE
+          WHEN (canonical_events.manually_edited_fields->>'venue')::boolean = true
+          THEN canonical_events.venue
+          ELSE EXCLUDED.venue
+        END,
+        region = CASE
+          WHEN (canonical_events.manually_edited_fields->>'region')::boolean = true
+          THEN canonical_events.region
+          ELSE EXCLUDED.region
+        END,
+        main_category = CASE
+          WHEN (canonical_events.manually_edited_fields->>'main_category')::boolean = true
+          THEN canonical_events.main_category
+          ELSE EXCLUDED.main_category
+        END,
+        sub_category = CASE
+          WHEN (canonical_events.manually_edited_fields->>'sub_category')::boolean = true
+          THEN canonical_events.sub_category
+          ELSE EXCLUDED.sub_category
+        END,
         image_url = CASE
           WHEN canonical_events.image_url IS NOT NULL
             AND canonical_events.image_url != ''
@@ -393,18 +417,46 @@ export async function upsertCanonicalEvent(event: CanonicalEvent) {
           THEN canonical_events.image_url
           ELSE EXCLUDED.image_url
         END,
-        is_free = EXCLUDED.is_free,
-        address = EXCLUDED.address,
-        lat = EXCLUDED.lat,
-        lng = EXCLUDED.lng,
+        is_free = CASE
+          WHEN (canonical_events.manually_edited_fields->>'is_free')::boolean = true
+          THEN canonical_events.is_free
+          ELSE EXCLUDED.is_free
+        END,
+        address = CASE
+          WHEN (canonical_events.manually_edited_fields->>'address')::boolean = true
+          THEN canonical_events.address
+          ELSE EXCLUDED.address
+        END,
+        lat = CASE
+          WHEN (canonical_events.manually_edited_fields->>'lat')::boolean = true
+          THEN canonical_events.lat
+          ELSE EXCLUDED.lat
+        END,
+        lng = CASE
+          WHEN (canonical_events.manually_edited_fields->>'lng')::boolean = true
+          THEN canonical_events.lng
+          ELSE EXCLUDED.lng
+        END,
         source_priority_winner = EXCLUDED.source_priority_winner,
         sources = EXCLUDED.sources,
         external_links = COALESCE(EXCLUDED.external_links, canonical_events.external_links),
         status = EXCLUDED.status,
-        price_min = COALESCE(EXCLUDED.price_min, canonical_events.price_min),
-        price_max = COALESCE(EXCLUDED.price_max, canonical_events.price_max),
+        price_min = CASE
+          WHEN (canonical_events.manually_edited_fields->>'price_min')::boolean = true
+          THEN canonical_events.price_min
+          ELSE COALESCE(EXCLUDED.price_min, canonical_events.price_min)
+        END,
+        price_max = CASE
+          WHEN (canonical_events.manually_edited_fields->>'price_max')::boolean = true
+          THEN canonical_events.price_max
+          ELSE COALESCE(EXCLUDED.price_max, canonical_events.price_max)
+        END,
         source_tags = COALESCE(EXCLUDED.source_tags, canonical_events.source_tags),
-        derived_tags = COALESCE(EXCLUDED.derived_tags, canonical_events.derived_tags),
+        derived_tags = CASE
+          WHEN EXCLUDED.derived_tags IS NOT NULL AND jsonb_array_length(EXCLUDED.derived_tags) > 0
+          THEN EXCLUDED.derived_tags
+          ELSE canonical_events.derived_tags
+        END,
         quality_flags = EXCLUDED.quality_flags,
         field_sources = COALESCE(EXCLUDED.field_sources, canonical_events.field_sources, '{}'::jsonb),
         updated_at = NOW()
@@ -432,7 +484,7 @@ export async function upsertCanonicalEvent(event: CanonicalEvent) {
       event.priceMin ?? null,
       event.priceMax ?? null,
       JSON.stringify(event.sourceTags || []),
-      JSON.stringify(event.derivedTags || []),
+      event.derivedTags && event.derivedTags.length > 0 ? JSON.stringify(event.derivedTags) : null,
       JSON.stringify(event.qualityFlags || {}),
       JSON.stringify(event.fieldSources || {}), // 🆕
     ],
@@ -569,6 +621,7 @@ export async function getAllCanonicalEventsForRemerge(): Promise<CanonicalEventF
       main_category, sub_category, image_url,
       source_priority_winner, sources, updated_at
     FROM canonical_events
+    WHERE is_deleted = false
     ORDER BY title, start_at, end_at, region
   `);
   return result.rows;
@@ -593,11 +646,13 @@ export async function updateCanonicalEventAfterRemerge(
   let paramIndex = 1;
 
   if (fields.venue !== undefined) {
-    updates.push(`venue = $${paramIndex++}`);
+    // manually_edited_fields->venue 보호: 수동 편집된 경우 덮어쓰지 않음
+    updates.push(`venue = CASE WHEN (manually_edited_fields->>'venue')::boolean = true THEN venue ELSE $${paramIndex++} END`);
     params.push(fields.venue);
   }
   if (fields.imageUrl !== undefined) {
-    updates.push(`image_url = $${paramIndex++}`);
+    // 기존에 실제 이미지가 있으면 유지
+    updates.push(`image_url = CASE WHEN image_url IS NOT NULL AND image_url != '' AND image_url NOT LIKE '%placeholder%' THEN image_url ELSE $${paramIndex++} END`);
     params.push(fields.imageUrl);
   }
   if (fields.sources !== undefined) {
@@ -609,7 +664,8 @@ export async function updateCanonicalEventAfterRemerge(
     params.push(fields.sourcePriorityWinner);
   }
   if (fields.displayTitle !== undefined) {
-    updates.push(`display_title = $${paramIndex++}`);
+    // manually_edited_fields->display_title 보호
+    updates.push(`display_title = CASE WHEN (manually_edited_fields->>'display_title')::boolean = true THEN display_title ELSE $${paramIndex++} END`);
     params.push(fields.displayTitle);
   }
   if (fields.contentKey !== undefined) {

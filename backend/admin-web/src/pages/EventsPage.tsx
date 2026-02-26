@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi } from '../services/api';
 import type { Event } from '../types';
+import CompletenessBar from '../components/CompletenessBar';
+import DeployChecklist from '../components/DeployChecklist';
+import FieldSelectorModal from '../components/FieldSelectorModal';
+import { getFieldDef } from '../lib/fieldRegistry';
 
 // 이미지가 없거나 placeholder인지 확인하는 헬퍼 함수
 const isPlaceholderImage = (imageUrl: string | null | undefined): boolean => {
@@ -18,24 +22,24 @@ export default function EventsPage() {
   const [isFeatured, setIsFeatured] = useState('');
   const [hasImage, setHasImage] = useState(''); // 이미지 필터 추가
   const [recentlyCollected, setRecentlyCollected] = useState(''); // 🆕 최근 수집 필터
+  const [completeness, setCompleteness] = useState(''); // 🆕 데이터 완성도 필터
+  const [sortBy, setSortBy] = useState('updated_at_desc'); // 정렬 기준
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [enriching, setEnriching] = useState(false);
 
-  // 🆕 AI 보완 옵션
-  const [selectedFields, setSelectedFields] = useState<string[]>([]);
-  const [showFieldSelector, setShowFieldSelector] = useState(false);
+  // AI 보완 — 필드 선택 모달
+  const [showFieldSelectorModal, setShowFieldSelectorModal] = useState(false);
+  // handleAIEnrichDirect 내부용 (UI 노출 안 함)
+  const [selectedFields] = useState<string[]>([]);
 
   // 🔍 [RUNTIME DEBUG] Component mount
   useEffect(() => {
-    console.log('[EventsPage] 🚀 MOUNTED', { time: new Date().toISOString() });
+    if (import.meta.env.DEV) {
+      console.log('[EventsPage] 🚀 MOUNTED', { time: new Date().toISOString() });
+    }
   }, []);
-
-  // 🔍 [RUNTIME DEBUG] showFieldSelector tracking
-  useEffect(() => {
-    console.log('[EventsPage] 📊 showFieldSelector changed =', showFieldSelector);
-  }, [showFieldSelector]);
 
   // Debounce search (500ms delay)
   useEffect(() => {
@@ -48,7 +52,7 @@ export default function EventsPage() {
   }, [search]);
 
   const { data: eventsData, isLoading, refetch } = useQuery({
-    queryKey: ['events', page, debouncedSearch, category, isFeatured, hasImage, recentlyCollected],
+    queryKey: ['events', page, debouncedSearch, category, isFeatured, hasImage, recentlyCollected, completeness, sortBy],
     queryFn: () =>
       adminApi.getEvents({
         page,
@@ -58,8 +62,9 @@ export default function EventsPage() {
         isFeatured: isFeatured || undefined,
         hasImage: hasImage || undefined,
         isDeleted: 'false',
-        sort: 'updated_at_desc',
+        sort: sortBy,
         recentlyCollected: recentlyCollected || undefined, // 🆕 추가
+        completeness: completeness || undefined, // 🆕 완성도 필터
       }),
   });
 
@@ -76,6 +81,27 @@ export default function EventsPage() {
       return;
     }
 
+    // ⚠️ AI 보완 전에 먼저 저장
+    const confirmSave = window.confirm(
+      '⚠️ AI 보완을 실행하기 전에 현재 입력한 내용을 저장합니다.\n계속하시겠습니까?'
+    );
+    
+    if (!confirmSave) {
+      return;
+    }
+
+    console.log('[AI-Direct] Saving current changes before enrichment...');
+    
+    try {
+      // 1️⃣ 먼저 저장 (silent mode)
+      await handleSaveEvent(true);
+      console.log('[AI-Direct] ✅ Saved successfully, now starting enrichment');
+    } catch (saveError: any) {
+      console.error('[AI-Direct] Save failed:', saveError);
+      alert('❌ 저장에 실패했습니다. AI 보완을 계속할 수 없습니다.');
+      return;
+    }
+
     console.log('[AI-Direct] Starting enrichment:', {
       eventId: selectedEvent.id,
       eventIdType: typeof selectedEvent.id,
@@ -86,18 +112,65 @@ export default function EventsPage() {
 
     setEnriching(true);
     try {
-      console.log('[AI-Direct] Calling enrich API with aiOnly=true, eventId:', selectedEvent.id);
-      
-      // 🆕 기존 enrich API를 aiOnly 모드로 호출
+      const _label = selectedFields.length > 0 ? 'AI만으로 선택한 필드 재생성' : 'AI만으로 빈 필드 보완';
+      const _forceFields = selectedFields.length > 0 ? selectedFields : [];
+      if (import.meta.env.DEV) {
+        console.log(
+          `[AI_BUTTON][CLICK] label="${_label}" eventId=${selectedEvent.id}` +
+          ` payload=${JSON.stringify({ aiOnly: true, forceFields: _forceFields })}`
+        );
+      }
+
+      // 2️⃣ AI 보완 실행
       const result = await adminApi.enrichEvent(selectedEvent.id, {
-        forceFields: selectedFields.length > 0 ? selectedFields : [], // 빈 배열 = 빈 필드만 채우기
-        aiOnly: true, // 네이버 API 단계 건너뛰기
+        forceFields: _forceFields,
+        aiOnly: true,
+        __buttonLabel: _label,
       });
 
       console.log('[AI-Direct] API response:', result);
 
       if (!result.success) {
-        alert(result.message || 'AI 분석에 실패했습니다.');
+        const errorCode = (result as any).errorCode;
+        const detail = errorCode ? `\n\n[에러 코드: ${errorCode}]` : '';
+        console.error('[AI-Enrich] Failed:', result);
+        alert((result.message || 'AI 분석에 실패했습니다.') + detail);
+        return;
+      }
+
+      // Phase 2: AI 제안 시스템 - suggestions가 있으면 제안으로 처리
+      if (result.suggestions) {
+        console.log('[AI Suggestions] Generated:', result.suggestions);
+        
+        // 제안 개수 및 출처 정보 수집
+        const suggestionCount = Object.keys(result.suggestions).length;
+        let sourcesText = '';
+        
+        // enriched가 있고 sources가 있으면 출처 정보 포함
+        if (result.enriched && (result.enriched as any).sources) {
+          const sources = (result.enriched as any).sources;
+          if (Object.keys(sources).length > 0) {
+            sourcesText = '\n\n📚 출처 정보:';
+            Object.entries(sources).slice(0, 5).forEach(([fieldName, sourceInfo]: [string, any]) => {
+              sourcesText += `\n  • ${fieldName}: ${sourceInfo.source}`;
+              if (sourceInfo.evidence) {
+                sourcesText += ` - "${sourceInfo.evidence}"`;
+              }
+              if (sourceInfo.confidence) {
+                sourcesText += ` (신뢰도: ${sourceInfo.confidence}/10)`;
+              }
+            });
+            if (Object.keys(sources).length > 5) {
+              sourcesText += `\n  ... 외 ${Object.keys(sources).length - 5}개`;
+            }
+          }
+        }
+        
+        alert(`✅ ${suggestionCount}개의 AI 제안이 생성되었습니다.${sourcesText}\n\n아래 "AI 제안" 섹션에서 확인하세요.`);
+        
+        // 이벤트 refetch하여 ai_suggestions 업데이트
+        const updatedEvent = await adminApi.getEvent(selectedEvent.id);
+        setSelectedEvent(updatedEvent.item);
         return;
       }
 
@@ -137,12 +210,50 @@ export default function EventsPage() {
   const handleAIEnrich = async (forceFields: string[] = []) => {
     if (!selectedEvent) return;
 
+    // ⚠️ AI 보완 전에 먼저 저장 (forceFields가 비어있거나 강제 재생성이 아닌 경우)
+    if (forceFields.length === 0 || !forceFields.includes('*')) {
+      const confirmSave = window.confirm(
+        '⚠️ AI 보완을 실행하기 전에 현재 입력한 내용을 저장합니다.\n계속하시겠습니까?'
+      );
+      
+      if (!confirmSave) {
+        return;
+      }
+
+      console.log('[AI-Enrich] Saving current changes before enrichment...');
+      
+      try {
+        await handleSaveEvent(true);
+        console.log('[AI-Enrich] ✅ Saved successfully, now starting enrichment');
+      } catch (saveError: any) {
+        console.error('[AI-Enrich] Save failed:', saveError);
+        alert('❌ 저장에 실패했습니다. AI 보완을 계속할 수 없습니다.');
+        return;
+      }
+    }
+
     setEnriching(true);
     try {
-      const result = await adminApi.enrichEvent(selectedEvent.id, { forceFields });
+      const _ff = forceFields;
+      const _label = _ff.includes('*')
+        ? '전체 재생성(네이버+AI)'
+        : _ff.length === 0
+        ? '추천 보완(네이버+AI)'
+        : `선택 필드 재생성(네이버+AI) [${_ff.join(',')}]`;
+      if (import.meta.env.DEV) {
+        console.log(
+          `[AI_BUTTON][CLICK] label="${_label}" eventId=${selectedEvent.id}` +
+          ` payload=${JSON.stringify({ aiOnly: false, forceFields: _ff })}`
+        );
+      }
+
+      const result = await adminApi.enrichEvent(selectedEvent.id, { forceFields, __buttonLabel: _label });
 
       if (!result.success) {
-        alert(result.message || 'AI 분석에 실패했습니다.');
+        const errorCode = (result as any).errorCode;
+        const detail = errorCode ? `\n\n[에러 코드: ${errorCode}]` : '';
+        console.error('[AI-Enrich] Failed:', result);
+        alert((result.message || 'AI 분석에 실패했습니다.') + detail);
         return;
       }
 
@@ -150,8 +261,31 @@ export default function EventsPage() {
       if (result.suggestions) {
         console.log('[AI Suggestions] Generated:', result.suggestions);
         
-        // 먼저 alert 표시
-        alert(`✅ ${Object.keys(result.suggestions).length}개의 AI 제안이 생성되었습니다.\n\n아래 "AI 제안" 섹션에서 확인하세요.`);
+        // 제안 개수 및 출처 정보 수집
+        const suggestionCount = Object.keys(result.suggestions).length;
+        let sourcesText = '';
+        
+        // enriched가 있고 sources가 있으면 출처 정보 포함
+        if (result.enriched && (result.enriched as any).sources) {
+          const sources = (result.enriched as any).sources;
+          if (Object.keys(sources).length > 0) {
+            sourcesText = '\n\n📚 출처 정보:';
+            Object.entries(sources).slice(0, 5).forEach(([fieldName, sourceInfo]: [string, any]) => {
+              sourcesText += `\n  • ${fieldName}: ${sourceInfo.source}`;
+              if (sourceInfo.evidence) {
+                sourcesText += ` - "${sourceInfo.evidence}"`;
+              }
+              if (sourceInfo.confidence) {
+                sourcesText += ` (신뢰도: ${sourceInfo.confidence}/10)`;
+              }
+            });
+            if (Object.keys(sources).length > 5) {
+              sourcesText += `\n  ... 외 ${Object.keys(sources).length - 5}개`;
+            }
+          }
+        }
+        
+        alert(`✅ ${suggestionCount}개의 AI 제안이 생성되었습니다.${sourcesText}\n\n아래 "AI 제안" 섹션에서 확인하세요.`);
         
         // 이벤트 refetch하여 ai_suggestions 업데이트
         const updatedEvent = await adminApi.getEvent(selectedEvent.id);
@@ -172,7 +306,8 @@ export default function EventsPage() {
 
       // Phase 1: 기존 enriched 로직 (호환성 유지)
       if (!result.enriched) {
-        alert(result.message || 'AI 분석에 실패했습니다.');
+        console.error('[AI-Enrich] No enriched data in response:', result);
+        alert(result.message || 'AI 분석에 실패했습니다. (enriched 데이터 없음)');
         return;
       }
 
@@ -247,8 +382,27 @@ export default function EventsPage() {
       const skippedFields = (result as any).skipped_fields || [];
       const skippedNoInfo = skippedFields.filter((f: any) => f.reason.includes('찾지 못함'));
 
+      // 🆕 출처 정보 포함
+      const sources = (enriched as any).sources || {};
+      let sourcesText = '';
+      if (Object.keys(sources).length > 0) {
+        sourcesText = '\n\n📚 출처 정보:';
+        Object.entries(sources).slice(0, 5).forEach(([fieldName, sourceInfo]: [string, any]) => {
+          sourcesText += `\n  • ${fieldName}: ${sourceInfo.source}`;
+          if (sourceInfo.evidence) {
+            sourcesText += ` - "${sourceInfo.evidence}"`;
+          }
+          if (sourceInfo.confidence) {
+            sourcesText += ` (신뢰도: ${sourceInfo.confidence}/10)`;
+          }
+        });
+        if (Object.keys(sources).length > 5) {
+          sourcesText += `\n  ... 외 ${Object.keys(sources).length - 5}개`;
+        }
+      }
+
       let message = filledFields.length > 0
-        ? `✅ AI 분석 완료!\n\n새로 채워진 항목: ${filledFields.join(', ')}`
+        ? `✅ AI 분석 완료!\n\n새로 채워진 항목: ${filledFields.join(', ')}${sourcesText}`
         : '⚠️ AI 분석 완료\n\n새로 채워진 항목이 없습니다.';
 
       if (skippedNoInfo.length > 0) {
@@ -266,8 +420,15 @@ export default function EventsPage() {
         alert(`✅ AI 분석 완료!\n\n모든 필드에 이미 값이 있어서 변경사항이 없습니다.`);
       }
     } catch (error: any) {
-      console.error('[AIEnrich] Error:', error);
-      alert('AI 분석 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
+      console.error('[AIEnrich] Error:', {
+        message: error.message,
+        status: error.response?.status,
+        responseData: error.response?.data,
+        url: error.config?.url,
+      });
+      const detail = error.response?.data?.message || error.response?.data?.error || error.message || '알 수 없는 오류';
+      const status = error.response?.status ? ` (HTTP ${error.response.status})` : '';
+      alert(`AI 분석 중 오류가 발생했습니다${status}:\n\n${detail}`);
     } finally {
       setEnriching(false);
     }
@@ -406,9 +567,34 @@ export default function EventsPage() {
     }
   };
 
-  const handleSaveEvent = async () => {
+  const handleDeleteEvent = async () => {
     if (!selectedEvent) return;
-    
+
+    const confirmed = window.confirm(
+      `정말로 "${selectedEvent.title}" 이벤트를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`
+    );
+
+    if (!confirmed) return;
+
+    // 삭제 사유 입력 (선택)
+    const reason = window.prompt('삭제 사유를 입력하세요 (선택):');
+
+    try {
+      await adminApi.deleteEvent(selectedEvent.id, reason || undefined);
+      alert('✅ 이벤트가 삭제되었습니다.');
+
+      // 목록 새로고침 및 모달 닫기
+      setSelectedEvent(null);
+      refetch(); // useQuery의 refetch 함수 사용
+    } catch (error: any) {
+      console.error('[Delete] Error:', error);
+      alert('❌ 삭제 실패: ' + (error.response?.data?.message || error.message));
+    }
+  };
+
+  const handleSaveEvent = async (silent: boolean = false) => {
+    if (!selectedEvent) return;
+
     try {
       // 날짜 형식 변환: ISO 8601 → YYYY-MM-DD
       const formatDate = (dateStr: string) => {
@@ -416,7 +602,8 @@ export default function EventsPage() {
         return dateStr.split('T')[0]; // "2026-06-05T15:00:00.000Z" → "2026-06-05"
       };
 
-      await adminApi.updateEvent(selectedEvent.id, {
+      // 업데이트 데이터 구성
+      const updateData: any = {
         title: selectedEvent.title,
         display_title: selectedEvent.display_title,
         main_category: selectedEvent.main_category,
@@ -425,9 +612,6 @@ export default function EventsPage() {
         end_at: selectedEvent.end_at ? formatDate(selectedEvent.end_at) : '',
         venue: selectedEvent.venue,
         address: selectedEvent.address,
-        lat: selectedEvent.lat,
-        lng: selectedEvent.lng,
-        region: selectedEvent.region,
         overview: selectedEvent.overview,
         image_url: selectedEvent.image_url,
         is_free: selectedEvent.is_free,
@@ -442,14 +626,35 @@ export default function EventsPage() {
         derived_tags: selectedEvent.derived_tags,
         opening_hours: selectedEvent.opening_hours,
         external_links: selectedEvent.external_links,
+        // 주차 정보
+        parking_available: selectedEvent.parking_available ?? null,
+        parking_info: selectedEvent.parking_info || null,
         // 🆕 Phase 3: metadata (카테고리별 특화 필드)
         metadata: selectedEvent.metadata,
-      });
-      alert('✅ 저장되었습니다!');
-      setSelectedEvent(null);
+      };
+
+      // 🆕 좌표가 null이 아닐 때만 포함 (null이면 백엔드가 자동 지오코딩)
+      if (selectedEvent.lat !== null && selectedEvent.lng !== null) {
+        updateData.lat = selectedEvent.lat;
+        updateData.lng = selectedEvent.lng;
+        updateData.region = selectedEvent.region;
+      }
+
+      await adminApi.updateEvent(selectedEvent.id, updateData);
+      if (!silent) {
+        alert('✅ 저장되었습니다!');
+      }
+      
+      // 저장 후 이벤트 다시 불러오기 (지오코딩 결과 반영)
+      const updatedEvent = await adminApi.getEvent(selectedEvent.id);
+      setSelectedEvent(updatedEvent.item);
+      
       refetch();
     } catch (error) {
-      alert('❌ 저장 실패: ' + (error as Error).message);
+      if (!silent) {
+        alert('❌ 저장 실패: ' + (error as Error).message);
+      }
+      throw error; // 호출하는 쪽에서 catch할 수 있도록 에러를 던짐
     }
   };
 
@@ -515,6 +720,35 @@ export default function EventsPage() {
             <option value="7d">📅 최근 7일</option>
             <option value="30d">📆 최근 30일</option>
           </select>
+          <select
+            value={completeness}
+            onChange={(e) => {
+              setCompleteness(e.target.value);
+              setPage(1); // Reset to page 1 when filter changes
+            }}
+            className="input"
+          >
+            <option value="">완성도: 전체</option>
+            <option value="empty">🔴 미완료 (필수 필드 누락)</option>
+            <option value="poor">🟠 부족 (AI 보강 미완료)</option>
+            <option value="good">🟡 양호 (공통 필드 완료)</option>
+            <option value="excellent">🟢 완벽 (카테고리 특화 포함)</option>
+          </select>
+          <select
+            value={sortBy}
+            onChange={(e) => {
+              setSortBy(e.target.value);
+              setPage(1); // Reset to page 1 when sort changes
+            }}
+            className="input"
+          >
+            <option value="updated_at_desc">최근 수정순</option>
+            <option value="created_at_desc">최근 생성순</option>
+            <option value="start_at_asc">시작일 빠른순</option>
+            <option value="start_at_desc">시작일 늦은순</option>
+            <option value="end_at_asc">종료일 빠른순</option>
+            <option value="end_at_desc">종료일 늦은순</option>
+          </select>
         </div>
       </div>
 
@@ -550,6 +784,9 @@ export default function EventsPage() {
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Buzz
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      완성도
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       상태
@@ -594,6 +831,23 @@ export default function EventsPage() {
                         <td className="px-4 py-4 text-sm text-gray-700 text-center">
                           {event.buzz_score || 0}
                         </td>
+                        <td className="px-4 py-4">
+                          {(event as any)._completeness ? (
+                            <div className="w-32">
+                              <CompletenessBar
+                                percentage={(event as any)._completeness.percentage}
+                                level={(event as any)._completeness.level}
+                                showLabel={false}
+                                size="sm"
+                              />
+                              <div className="text-xs text-gray-500 mt-1">
+                                {(event as any)._completeness.percentage}%
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </td>
                         <td className="px-4 py-4 text-sm">
                           <div className="flex flex-col gap-1">
                             {event.is_featured && (
@@ -611,7 +865,7 @@ export default function EventsPage() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                      <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                         이벤트가 없습니다
                       </td>
                     </tr>
@@ -667,375 +921,77 @@ export default function EventsPage() {
                   ✕
                 </button>
               </div>
-              {/* 🆕 AI 보완 버튼 4종 */}
-              <div className="flex flex-col gap-2">
-                <div className="flex gap-2 flex-wrap">
-                  <button
-                    onClick={() => handleAIEnrich([])}
-                    disabled={enriching}
-                    className="btn btn-secondary text-sm flex items-center gap-2"
-                  >
-                    {enriching ? '🔄 AI 분석 중...' : '🤖 빈 필드만 AI 보완'}
-                  </button>
-                  <button
-                    onClick={() => setShowFieldSelector(!showFieldSelector)}
-                    disabled={enriching}
-                    className="btn btn-outline text-sm flex items-center gap-2"
-                  >
-                    {showFieldSelector ? '✕ 선택 취소' : '🎯 선택한 필드만 재생성'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (confirm('⚠️ 경고: 모든 필드를 강제로 재생성합니다.\n수동으로 입력한 데이터도 덮어씌워집니다.\n\n계속하시겠습니까?')) {
-                        handleAIEnrich(['*']);
-                      }
-                    }}
-                    disabled={enriching}
-                    className="btn btn-danger text-sm flex items-center gap-2"
-                  >
-                    🚨 강제 재생성
-                  </button>
-                  <button
-                    onClick={handleAIEnrichDirect}
-                    disabled={enriching}
-                    className="btn btn-primary text-sm flex items-center gap-2"
-                  >
-                    {enriching ? '🔄 AI 검색 중...' : '🔍 AI만으로 빈 필드 보완'}
-                  </button>
+              
+              {/* 데이터 완성도 바 */}
+              {(selectedEvent as any)._completeness && (
+                <div className="mb-2">
+                  <CompletenessBar
+                    percentage={(selectedEvent as any)._completeness.percentage}
+                    level={(selectedEvent as any)._completeness.level}
+                    showLabel={true}
+                    size="md"
+                  />
                 </div>
+              )}
 
-                {/* 🆕 필드 선택 체크박스 */}
-                {(() => {
-                  console.log('[EventsPage] 🎨 Rendering button block, showFieldSelector =', showFieldSelector);
-                  return null;
-                })()}
-                {showFieldSelector && (
-                  <>
-                    {(() => {
-                      console.log('[EventsPage] ✅ RENDERING AI-only button (inside conditional)');
-                      return null;
-                    })()}
-                    <div className="flex gap-2 mb-2">
-                      <button
-                        onClick={handleAIEnrichDirect}
-                        disabled={enriching || selectedFields.length === 0}
-                        className="btn btn-success text-sm flex items-center gap-2"
-                        title={selectedFields.length === 0 ? '재생성할 필드를 선택하세요' : ''}
-                      >
-                        {enriching ? '🔄 AI 생성 중...' : '🤖 AI만으로 선택한 필드 재생성'}
-                      </button>
-                      <button
-                        onClick={async () => {
-                          if (!selectedEvent) return;
-                          if (selectedFields.length === 0) {
-                            alert('재생성할 필드를 선택하세요.');
-                            return;
-                          }
-                          if (confirm(`선택한 ${selectedFields.length}개 필드를 재생성합니다.\n(네이버 API 사용)\n\n계속하시겠습니까?`)) {
-                            handleAIEnrich(selectedFields);
-                          }
-                        }}
-                        disabled={enriching || selectedFields.length === 0}
-                        className="btn btn-outline text-sm flex items-center gap-2"
-                        title={selectedFields.length === 0 ? '재생성할 필드를 선택하세요' : ''}
-                      >
-                        🎯 선택한 필드만 재생성 (네이버 API)
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {showFieldSelector && (
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-2">
-                    <p className="text-sm font-semibold text-gray-700 mb-2">재생성할 필드 선택:</p>
-                    
-                    {/* 공통 필드 */}
-                    <div>
-                      <p className="text-xs font-medium text-gray-600 mb-1">📋 공통 필드</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          { id: 'overview', label: '개요 (Overview)' },
-                          { id: 'derived_tags', label: '태그 (Tags)' },
-                          { id: 'opening_hours', label: '운영시간 (Hours)' },
-                          { id: 'external_links', label: '외부 링크 (Links)' },
-                          { id: 'price_min', label: '최소 가격' },
-                          { id: 'price_max', label: '최대 가격' },
-                          { id: 'venue', label: '장소 (Venue)' },
-                          { id: 'address', label: '주소 (Address)' },
-                        ].map((field) => (
-                          <label key={field.id} className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={selectedFields.includes(field.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedFields([...selectedFields, field.id]);
-                                } else {
-                                  setSelectedFields(selectedFields.filter(f => f !== field.id));
-                                }
-                              }}
-                              className="rounded"
-                            />
-                            <span>{field.label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    
-                    {/* 🆕 카테고리별 특화 필드 */}
-                    {selectedEvent.main_category === '전시' && (
-                      <div>
-                        <p className="text-xs font-medium text-gray-600 mb-1 mt-3">🎨 전시 특화 필드</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { id: 'metadata.display.exhibition.artists', label: '작가/아티스트' },
-                            { id: 'metadata.display.exhibition.genre', label: '장르' },
-                            { id: 'metadata.display.exhibition.type', label: '전시 유형' },
-                            { id: 'metadata.display.exhibition.duration_minutes', label: '관람 시간' },
-                            { id: 'metadata.display.exhibition.facilities', label: '편의시설' },
-                            { id: 'metadata.display.exhibition.docent_tour', label: '도슨트 투어' },
-                          ].map((field) => (
-                            <label key={field.id} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={selectedFields.includes(field.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedFields([...selectedFields, field.id]);
-                                  } else {
-                                    setSelectedFields(selectedFields.filter(f => f !== field.id));
-                                  }
-                                }}
-                                className="rounded"
-                              />
-                              <span>{field.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {selectedEvent.main_category === '공연' && (
-                      <div>
-                        <p className="text-xs font-medium text-gray-600 mb-1 mt-3">🎭 공연 특화 필드</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { id: 'metadata.display.performance.cast', label: '출연진' },
-                            { id: 'metadata.display.performance.genre', label: '장르' },
-                            { id: 'metadata.display.performance.duration_minutes', label: '공연 시간' },
-                            { id: 'metadata.display.performance.intermission', label: '인터미션' },
-                            { id: 'metadata.display.performance.age_limit', label: '연령 제한' },
-                            { id: 'metadata.display.performance.discounts', label: '할인 정보' },
-                          ].map((field) => (
-                            <label key={field.id} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={selectedFields.includes(field.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedFields([...selectedFields, field.id]);
-                                  } else {
-                                    setSelectedFields(selectedFields.filter(f => f !== field.id));
-                                  }
-                                }}
-                                className="rounded"
-                              />
-                              <span>{field.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* 🎪 축제 특화 필드 */}
-                    {selectedEvent.main_category === '축제' && (
-                      <div>
-                        <p className="text-xs font-medium text-gray-600 mb-1 mt-3">🎪 축제 특화 필드</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { id: 'metadata.display.festival.organizer', label: '주최/주관' },
-                            { id: 'metadata.display.festival.program_highlights', label: '주요 프로그램' },
-                            { id: 'metadata.display.festival.food_and_booths', label: '먹거리/부스' },
-                            { id: 'metadata.display.festival.scale_text', label: '규모' },
-                            { id: 'metadata.display.festival.parking_tips', label: '주차 정보' },
-                          ].map((field) => (
-                            <label key={field.id} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={selectedFields.includes(field.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedFields([...selectedFields, field.id]);
-                                  } else {
-                                    setSelectedFields(selectedFields.filter(f => f !== field.id));
-                                  }
-                                }}
-                                className="rounded"
-                              />
-                              <span>{field.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* 📅 행사 특화 필드 */}
-                    {selectedEvent.main_category === '행사' && (
-                      <div>
-                        <p className="text-xs font-medium text-gray-600 mb-1 mt-3">📅 행사 특화 필드</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { id: 'metadata.display.event.target_audience', label: '참가 대상' },
-                            { id: 'metadata.display.event.capacity', label: '정원' },
-                            { id: 'metadata.display.event.registration', label: '사전 등록 정보' },
-                          ].map((field) => (
-                            <label key={field.id} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={selectedFields.includes(field.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedFields([...selectedFields, field.id]);
-                                  } else {
-                                    setSelectedFields(selectedFields.filter(f => f !== field.id));
-                                  }
-                                }}
-                                className="rounded"
-                              />
-                              <span>{field.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* 🏪 팝업 특화 필드 */}
-                    {selectedEvent.main_category === '팝업' && (
-                      <div>
-                        <p className="text-xs font-medium text-gray-600 mb-1 mt-3">🏪 팝업 특화 필드</p>
-                        
-                        {/* 공통 필드 */}
-                        <div className="grid grid-cols-2 gap-2 mb-3">
-                          {[
-                            { id: 'metadata.display.popup.type', label: '팝업 타입' },
-                            { id: 'metadata.display.popup.brands', label: '브랜드' },
-                          ].map((field) => (
-                            <label key={field.id} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={selectedFields.includes(field.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedFields([...selectedFields, field.id]);
-                                  } else {
-                                    setSelectedFields(selectedFields.filter(f => f !== field.id));
-                                  }
-                                }}
-                                className="rounded"
-                              />
-                              <span>{field.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                        
-                        {/* 🍔 F&B (디저트/카페) 특화 필드 */}
-                        <div className="bg-yellow-50 p-2 rounded mb-2">
-                          <p className="text-xs font-medium text-yellow-800 mb-2">🍔 F&B 메뉴 정보</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { id: 'metadata.display.popup.fnb_items.signature_menu', label: '시그니처 메뉴' },
-                              { id: 'metadata.display.popup.fnb_items.menu_categories', label: '메뉴 카테고리' },
-                              { id: 'metadata.display.popup.fnb_items.price_range', label: '가격대' },
-                            ].map((field) => (
-                              <label key={field.id} className="flex items-center gap-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedFields.includes(field.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedFields([...selectedFields, field.id]);
-                                    } else {
-                                      setSelectedFields(selectedFields.filter(f => f !== field.id));
-                                    }
-                                  }}
-                                  className="rounded"
-                                />
-                                <span>{field.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                        
-                        {/* 🤝 콜라보 (브랜드 협업) 특화 필드 */}
-                        <div className="bg-purple-50 p-2 rounded mb-2">
-                          <p className="text-xs font-medium text-purple-800 mb-2">🤝 콜라보 설명</p>
-                          <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={selectedFields.includes('metadata.display.popup.collab_description')}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedFields([...selectedFields, 'metadata.display.popup.collab_description']);
-                                } else {
-                                  setSelectedFields(selectedFields.filter(f => f !== 'metadata.display.popup.collab_description'));
-                                }
-                              }}
-                              className="rounded"
-                            />
-                            <span>콜라보 설명</span>
-                          </label>
-                        </div>
-                        
-                        {/* 일반 팝업 필드 */}
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { id: 'metadata.display.popup.goods_items', label: '굿즈' },
-                            { id: 'metadata.display.popup.photo_zone', label: '포토존 여부' },
-                            { id: 'metadata.display.popup.photo_zone_desc', label: '포토존 설명' },
-                            { id: 'metadata.display.popup.waiting_hint', label: '대기 시간' },
-                          ].map((field) => (
-                            <label key={field.id} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={selectedFields.includes(field.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedFields([...selectedFields, field.id]);
-                                  } else {
-                                    setSelectedFields(selectedFields.filter(f => f !== field.id));
-                                  }
-                                }}
-                                className="rounded"
-                              />
-                              <span>{field.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    <button
-                      onClick={() => {
-                        if (selectedFields.length === 0) {
-                          alert('최소 1개 이상의 필드를 선택하세요.');
-                          return;
-                        }
-                        
-                        // 선택한 필드를 그대로 전달 (개별 필드 단위로)
-                        if (confirm(`선택한 ${selectedFields.length}개 필드를 재생성합니다.\n계속하시겠습니까?`)) {
-                          handleAIEnrich(selectedFields);
-                          setShowFieldSelector(false);
-                          setSelectedFields([]);
-                        }
-                      }}
-                      disabled={enriching || selectedFields.length === 0}
-                      className="btn btn-primary text-sm w-full mt-2"
-                    >
-                      ✅ 선택한 필드 재생성 ({selectedFields.length}개)
-                    </button>
-                  </div>
-                )}
+              {/* 배포 우선순위 체크리스트 (Sticky) */}
+              <div className="mb-3">
+                <DeployChecklist event={selectedEvent} />
               </div>
+
+              {/* AI 보완 버튼 3종 */}
+              <div className="flex gap-2 flex-wrap">
+                {/* 1. 추천 보완 */}
+                <button
+                  onClick={() => handleAIEnrich([])}
+                  disabled={enriching}
+                  className="btn btn-secondary text-sm flex items-center gap-2"
+                >
+                  {enriching ? '🔄 AI 분석 중...' : '🤖 추천 보완(네이버+AI)'}
+                </button>
+
+                {/* 2. 선택 필드 재생성 → 모달 */}
+                <button
+                  onClick={() => setShowFieldSelectorModal(true)}
+                  disabled={enriching}
+                  className="btn btn-outline text-sm flex items-center gap-2"
+                >
+                  🎯 선택 필드 재생성(네이버+AI)
+                </button>
+
+                {/* 3. 전체 재생성 */}
+                <button
+                  onClick={() => {
+                    if (confirm(
+                      '⚠️ 전체 재생성을 실행할 거예요.\n\n수동으로 입력한 데이터를 포함해 모든 필드가 덮어씌워져요.\n정말 계속할까요?'
+                    )) {
+                      handleAIEnrich(['*']);
+                    }
+                  }}
+                  disabled={enriching}
+                  className="btn btn-danger text-sm flex items-center gap-2"
+                >
+                  🚨 전체 재생성(네이버+AI)
+                </button>
+              </div>
+
+              {/* 선택 필드 재생성 모달 */}
+              {showFieldSelectorModal && (
+                <FieldSelectorModal
+                  mainCategory={selectedEvent.main_category || ''}
+                  onConfirm={(forceFields) => {
+                    setShowFieldSelectorModal(false);
+                    if (import.meta.env.DEV) {
+                      console.log(
+                        `[AI_BUTTON][CLICK] label="선택 필드 재생성" eventId=${selectedEvent.id}` +
+                        ` payload=${JSON.stringify({ aiOnly: false, forceFields })}`
+                      );
+                    }
+                    handleAIEnrich(forceFields);
+                  }}
+                  onCancel={() => setShowFieldSelectorModal(false)}
+                />
+              )}
               
               {/* 🆕 Phase 3: AI 제안 섹션 */}
               {selectedEvent.ai_suggestions && Object.keys(selectedEvent.ai_suggestions).length > 0 && (
@@ -1094,10 +1050,12 @@ export default function EventsPage() {
                       const fieldLabel = fieldLabels[fieldName] || fieldName;
                       
                       // 값 미리보기
-                      let valuePreview = suggestion.value;
-                      if (typeof valuePreview === 'string') {
-                        valuePreview = valuePreview.length > 100 
-                          ? valuePreview.substring(0, 100) + '...' 
+                      let valuePreview: any = suggestion.value;
+                      if (valuePreview === null || valuePreview === undefined) {
+                        valuePreview = null; // warning으로 대체 표시
+                      } else if (typeof valuePreview === 'string') {
+                        valuePreview = valuePreview.length > 100
+                          ? valuePreview.substring(0, 100) + '...'
                           : valuePreview;
                       } else if (Array.isArray(valuePreview)) {
                         valuePreview = valuePreview.join(', ');
@@ -1125,6 +1083,31 @@ export default function EventsPage() {
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-1">
                                 <span className="font-semibold text-sm text-gray-900">{fieldLabel}</span>
+                                {(() => {
+                                  const fieldDef = getFieldDef(fieldName);
+                                  if (fieldDef) {
+                                    if (fieldDef.scope === 'MASTER') {
+                                      return (
+                                        <span
+                                          className="text-[10px] px-1 py-0.5 bg-purple-100 text-purple-700 rounded font-medium"
+                                          title="일관성 우선: 같은 이벤트 변형들 간 동일한 값 유지"
+                                        >
+                                          M
+                                        </span>
+                                      );
+                                    } else {
+                                      return (
+                                        <span
+                                          className="text-[10px] px-1 py-0.5 bg-green-100 text-green-700 rounded font-medium"
+                                          title="지역/지점/회차별: 각 이벤트마다 다른 값 가능"
+                                        >
+                                          V
+                                        </span>
+                                      );
+                                    }
+                                  }
+                                  return null;
+                                })()}
                                 <span className="text-xs">
                                   {emoji} {conf}%
                                 </span>
@@ -1138,29 +1121,108 @@ export default function EventsPage() {
                                   <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">🟡 AI</span>
                                 )}
                               </div>
-                              <p className="text-xs text-gray-500 mb-2">{suggestion.source_detail}</p>
-                              <div className="bg-gray-50 p-2 rounded text-xs text-gray-700 overflow-x-auto">
-                                <pre className="whitespace-pre-wrap font-mono">{valuePreview}</pre>
+                              <div className="flex items-center gap-2 mb-2">
+                                <p className="text-xs text-gray-600">
+                                  📚 출처: {suggestion.source_detail || suggestion.source || 'AI 추론'}
+                                </p>
+                                {(suggestion as any).url && (
+                                  <a 
+                                    href={(suggestion as any).url} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1"
+                                  >
+                                    🔗 확인하기
+                                  </a>
+                                )}
                               </div>
-                              {suggestion.warning && (
+                              {suggestion.evidence && (
+                                <p className="text-xs text-gray-500 mb-2 italic">
+                                  💡 근거: "{suggestion.evidence}"
+                                </p>
+                              )}
+                              {suggestion.reason && (
+                                <p className="text-xs text-blue-600 mb-2 italic">
+                                  🧠 AI 판단: "{suggestion.reason}"
+                                </p>
+                              )}
+                              {(suggestion as any).confidence > 0 && (
+                                <p className="text-xs text-gray-600 mb-2">
+                                  ⭐ 신뢰도: {(suggestion as any).confidence}/10
+                                </p>
+                              )}
+                              {/* 제안 실패: reasonMessage + 네이버 검색 버튼 */}
+                              {suggestion.value === null && (suggestion as any).reasonMessage ? (
+                                <div className="bg-orange-50 border border-orange-200 rounded p-2 mt-1">
+                                  <p className="text-xs text-orange-700">
+                                    ⚠️ {(suggestion as any).reasonMessage}
+                                  </p>
+                                  {(suggestion as any).naverSearchUrl && (() => {
+                                    const url = (suggestion as any).naverSearchUrl;
+                                    // 🆕 DEV 로깅: UI 링크 렌더링 시
+                                    if (import.meta.env.DEV) {
+                                      const queryMatch = url.match(/query=([^&]+)/);
+                                      const derivedQuery = queryMatch ? decodeURIComponent(queryMatch[1]) : 'n/a';
+                                      console.log(`[NAVER_LINK][RENDER] fieldKey=${fieldName} displayedUrl=${url.substring(0, 80)}... derivedQuery="${derivedQuery}"`);
+                                    }
+
+                                    return (
+                                      <a
+                                        href={url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="mt-1 inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 underline"
+                                        onClick={() => {
+                                          // 🆕 DEV 로깅: UI 링크 클릭 시
+                                          if (import.meta.env.DEV) {
+                                            const queryMatch = url.match(/query=([^&]+)/);
+                                            const derivedQuery = queryMatch ? decodeURIComponent(queryMatch[1]) : 'n/a';
+                                            console.log(`[NAVER_LINK][CLICK] fieldKey=${fieldName} displayedUrl=${url.substring(0, 80)}... derivedQuery="${derivedQuery}"`);
+                                          }
+                                        }}
+                                      >
+                                        🔍 네이버에서 직접 검색
+                                      </a>
+                                    );
+                                  })()}
+                                </div>
+                              ) : valuePreview !== null ? (
+                                <div className="bg-gray-50 p-2 rounded text-xs text-gray-700 overflow-x-auto">
+                                  <pre className="whitespace-pre-wrap font-mono">{valuePreview}</pre>
+                                </div>
+                              ) : null}
+                              {suggestion.warning && suggestion.value !== null && (
                                 <p className="text-xs text-orange-600 mt-2">⚠️ {suggestion.warning}</p>
                               )}
                             </div>
                           </div>
-                          <div className="flex gap-2 mt-2">
-                            <button
-                              onClick={() => handleApplySuggestion(fieldName)}
-                              className="btn btn-primary text-xs px-3 py-1 flex-1"
-                            >
-                              ✅ 적용
-                            </button>
-                            <button
-                              onClick={() => handleDismissSuggestion(fieldName)}
-                              className="btn btn-outline text-xs px-3 py-1 flex-1"
-                            >
-                              ❌ 무시
-                            </button>
-                          </div>
+                          {/* 적용/무시 버튼: 값이 있을 때만 표시 */}
+                          {suggestion.value !== null && (
+                            <div className="flex gap-2 mt-2">
+                              <button
+                                onClick={() => handleApplySuggestion(fieldName)}
+                                className="btn btn-primary text-xs px-3 py-1 flex-1"
+                              >
+                                ✅ 적용
+                              </button>
+                              <button
+                                onClick={() => handleDismissSuggestion(fieldName)}
+                                className="btn btn-outline text-xs px-3 py-1 flex-1"
+                              >
+                                ❌ 무시
+                              </button>
+                            </div>
+                          )}
+                          {suggestion.value === null && (
+                            <div className="flex gap-2 mt-2">
+                              <button
+                                onClick={() => handleDismissSuggestion(fieldName)}
+                                className="btn btn-outline text-xs px-3 py-1"
+                              >
+                                ✕ 닫기
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -2594,7 +2656,16 @@ export default function EventsPage() {
                     <input
                       type="text"
                       value={selectedEvent.venue || ''}
-                      onChange={(e) => setSelectedEvent({ ...selectedEvent, venue: e.target.value })}
+                      onChange={(e) => {
+                        setSelectedEvent({ 
+                          ...selectedEvent, 
+                          venue: e.target.value,
+                          // 장소가 변경되면 좌표를 초기화하여 백엔드가 다시 지오코딩하도록 함
+                          lat: null,
+                          lng: null,
+                          region: null,
+                        });
+                      }}
                       className="input"
                       placeholder="예: 잠실 롯데월드타워"
                     />
@@ -2607,38 +2678,50 @@ export default function EventsPage() {
                     <input
                       type="text"
                       value={selectedEvent.address || ''}
-                      onChange={(e) => setSelectedEvent({ ...selectedEvent, address: e.target.value })}
+                      onChange={(e) => {
+                        setSelectedEvent({ 
+                          ...selectedEvent, 
+                          address: e.target.value,
+                          // 주소가 변경되면 좌표를 초기화하여 백엔드가 다시 지오코딩하도록 함
+                          lat: null,
+                          lng: null,
+                          region: null,
+                        });
+                      }}
                       className="input"
-                      placeholder="서울 송파구 올림픽로 300"
+                      placeholder="예: 서울 강남구 테헤란로 521"
                     />
+                    <p className="mt-1 text-xs text-gray-500">
+                      💡 주소나 장소를 변경하면 저장 시 자동으로 위도/경도/지역이 채워집니다
+                    </p>
                   </div>
                   <div className="grid grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-500 mb-1 flex items-center gap-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
                         지역 (자동)
                         {getFieldSourceBadge('region')}
                       </label>
                       <input
                         type="text"
-                        value={selectedEvent.region || '-'}
+                        value={selectedEvent.region || (selectedEvent.lat ? '-' : '저장 시 자동 채워짐')}
                         className="input bg-gray-50"
                         disabled
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-500 mb-1">위도 (자동)</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">위도 (자동)</label>
                       <input
                         type="text"
-                        value={selectedEvent.lat || '-'}
+                        value={selectedEvent.lat || (selectedEvent.address || selectedEvent.venue ? '저장 시 자동 채워짐' : '-')}
                         className="input bg-gray-50"
                         disabled
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-500 mb-1">경도 (자동)</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">경도 (자동)</label>
                       <input
                         type="text"
-                        value={selectedEvent.lng || '-'}
+                        value={selectedEvent.lng || (selectedEvent.address || selectedEvent.venue ? '저장 시 자동 채워짐' : '-')}
                         className="input bg-gray-50"
                         disabled
                       />
@@ -3037,6 +3120,57 @@ export default function EventsPage() {
                     </p>
                   </div>
 
+                  {/* 🚗 주차 정보 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      🚗 주차 정보 (Parking) {getFieldSourceBadge('parking_available')}
+                    </label>
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">주차 가능 여부</label>
+                        <select
+                          value={
+                            selectedEvent.parking_available === null || selectedEvent.parking_available === undefined
+                              ? 'null'
+                              : selectedEvent.parking_available
+                              ? 'true'
+                              : 'false'
+                          }
+                          onChange={(e) => {
+                            const value = e.target.value === 'null' ? null : e.target.value === 'true';
+                            setSelectedEvent({
+                              ...selectedEvent,
+                              parking_available: value,
+                            });
+                          }}
+                          className="input text-sm"
+                        >
+                          <option value="null">정보 없음</option>
+                          <option value="true">주차 가능</option>
+                          <option value="false">주차 불가</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">주차 상세 정보 {getFieldSourceBadge('parking_info')}</label>
+                        <textarea
+                          value={selectedEvent.parking_info || ''}
+                          onChange={(e) =>
+                            setSelectedEvent({
+                              ...selectedEvent,
+                              parking_info: e.target.value,
+                            })
+                          }
+                          className="input text-sm"
+                          placeholder="예: 건물 지하 주차장 이용 가능, 1시간 무료"
+                          rows={2}
+                        />
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">
+                      AI가 분석한 주차 정보를 수동으로 수정할 수 있습니다
+                    </p>
+                  </div>
+
                   {selectedEvent.quality_flags && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">데이터 품질</label>
@@ -3195,10 +3329,21 @@ export default function EventsPage() {
                 </div>
               </section>
 
-              {/* 저장 버튼 */}
-              <button onClick={handleSaveEvent} className="btn-primary w-full sticky bottom-0">
-                💾 변경사항 저장
-              </button>
+              {/* 버튼 그룹 */}
+              <div className="space-y-2">
+                {/* 저장 버튼 */}
+                <button onClick={() => handleSaveEvent(false)} className="btn-primary w-full sticky bottom-0">
+                  💾 변경사항 저장
+                </button>
+
+                {/* 삭제 버튼 */}
+                <button
+                  onClick={handleDeleteEvent}
+                  className="w-full px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                >
+                  🗑️ 이벤트 삭제
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -1,20 +1,13 @@
 // src/_app.tsx
+// TDSProvider는 @apps-in-toss/framework의 registerApp 내부에서 이미 제공됩니다.
+// 중복으로 감싸면 "property is not configurable" 에러가 발생합니다.
 import React, { PropsWithChildren } from 'react';
 import { AppsInToss } from '@apps-in-toss/framework';
 import { InitialProps } from '@granite-js/react-native';
 import { context } from '../require.context';
-import { TDSProvider } from '@toss/tds-react-native';
-// (선택) 안전한 노치/홈인디케이터 처리를 원하면 SafeAreaProvider도 같이 사용
-// import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 function AppContainer({ children }: PropsWithChildren<InitialProps>) {
-  return (
-    <TDSProvider>
-      {/* <SafeAreaProvider> */}
-        {children}
-      {/* </SafeAreaProvider> */}
-    </TDSProvider>
-  );
+  return <>{children}</>;
 }
 
 export default AppsInToss.registerApp(AppContainer, { context });

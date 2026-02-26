@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { Event, DashboardStats, PaginatedResponse, PopupFormData, UploadImageResponse } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const isDev = import.meta.env.DEV;
 
 // Axios 인스턴스 생성
 const api = axios.create({
@@ -11,19 +12,55 @@ const api = axios.create({
   },
 });
 
-// Admin Key 인터셉터
+/** AI 관련 URL 여부 판단 */
+const isAiUrl = (url: string) =>
+  url.includes('/enrich') ||
+  url.includes('/apply-suggestion') ||
+  url.includes('/dismiss-suggestion');
+
+// Admin Key + AI 요청 로깅 인터셉터
 api.interceptors.request.use((config) => {
   const adminKey = localStorage.getItem('adminKey');
   if (adminKey) {
     config.headers['x-admin-key'] = adminKey;
   }
+
+  if (isDev && isAiUrl(config.url || '')) {
+    const label = (config as any).__buttonLabel || '(unknown)';
+    (config as any).__startTime = Date.now();
+    console.log(
+      `[AI_BUTTON][REQ] label="${label}" method=${config.method?.toUpperCase()}` +
+      ` url=${config.url} payload=${JSON.stringify(config.data)}`
+    );
+  }
   return config;
 });
 
-// 인증 실패 처리
+// 응답 + 에러 로깅 인터셉터
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (isDev && isAiUrl(response.config.url || '')) {
+      const label = (response.config as any).__buttonLabel || '(unknown)';
+      const ms = Date.now() - ((response.config as any).__startTime || Date.now());
+      const d = response.data;
+      console.log(
+        `[AI_BUTTON][RESP] label="${label}" status=${response.status} ${ms}ms` +
+        ` success=${d?.success} errorCode=${d?.errorCode ?? 'null'}` +
+        ` suggestions=${d?.suggestions ? Object.keys(d.suggestions).length : 0}개` +
+        ` message="${d?.message ?? ''}"`
+      );
+    }
+    return response;
+  },
   (error) => {
+    if (isDev && isAiUrl(error.config?.url || '')) {
+      const label = (error.config as any)?.__buttonLabel || '(unknown)';
+      const ms = Date.now() - ((error.config as any)?.__startTime || Date.now());
+      console.error(
+        `[AI_BUTTON][ERR] label="${label}" status=${error.response?.status} ${ms}ms` +
+        ` body=${JSON.stringify(error.response?.data)}`
+      );
+    }
     if (error.response?.status === 401) {
       localStorage.removeItem('adminKey');
       window.location.href = '/login';
@@ -63,6 +100,7 @@ export const adminApi = {
     isDeleted?: string;
     sort?: string;
     recentlyCollected?: string; // 🆕 추가
+    completeness?: string; // 🆕 데이터 완성도 필터
   }): Promise<PaginatedResponse<Event>> => {
     const { data } = await api.get('/admin/events', { params });
     return data;
@@ -77,6 +115,13 @@ export const adminApi = {
   // 이벤트 수정
   updateEvent: async (id: string, updates: Partial<Event>): Promise<void> => {
     await api.patch(`/admin/events/${id}`, updates);
+  },
+
+  // 이벤트 삭제
+  deleteEvent: async (id: string, reason?: string): Promise<void> => {
+    await api.delete(`/admin/events/${id}`, {
+      data: { reason }
+    });
   },
 
   // 팝업 생성
@@ -209,6 +254,7 @@ export const adminApi = {
     options?: {
       forceFields?: string[]; // 강제 재생성할 필드 목록
       aiOnly?: boolean; // 🆕 네이버 API 건너뛰고 AI만 사용
+      __buttonLabel?: string; // [DEBUG] 어떤 버튼에서 호출됐는지
     }
   ): Promise<{
     success: boolean;
@@ -243,10 +289,11 @@ export const adminApi = {
     // Phase 2: AI 제안 시스템
     suggestions?: any;
   }> => {
+    const reqConfig: any = { __buttonLabel: options?.__buttonLabel || '빈필드AI보완' };
     const { data } = await api.post(`/admin/events/${eventId}/enrich`, {
       forceFields: options?.forceFields || [],
-      aiOnly: options?.aiOnly || false, // 🆕 aiOnly 옵션 전달
-    });
+      aiOnly: options?.aiOnly || false,
+    }, reqConfig);
     return data;
   },
 

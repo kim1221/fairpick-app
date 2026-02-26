@@ -12,6 +12,9 @@ export interface FieldSuggestion {
   source_detail: string;
   warning?: string;
   extracted_at: string;
+  evidence?: string; // 🆕 근거/증거 텍스트
+  reason?: string; // 🆕 추출 이유/설명
+  url?: string; // 🆕 출처 URL (관리자가 직접 확인 가능)
 }
 
 export interface FieldSource {
@@ -186,6 +189,9 @@ export function createSuggestion(
     hasMultipleSources?: boolean;
     isPartialMatch?: boolean;
     hasContextualData?: boolean;
+    evidence?: string; // 🆕 근거/증거
+    reason?: string; // 🆕 추출 이유
+    url?: string; // 🆕 출처 URL
   }
 ): FieldSuggestion {
   const confidence = calculateConfidence(source, fieldName, value, context);
@@ -197,6 +203,9 @@ export function createSuggestion(
     source,
     source_detail: sourceDetail,
     ...(warning && { warning }),
+    ...(context?.evidence && { evidence: context.evidence }), // 🆕
+    ...(context?.reason && { reason: context.reason }), // 🆕
+    ...(context?.url && { url: context.url }), // 🆕
     extracted_at: new Date().toISOString(),
   };
 }

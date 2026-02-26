@@ -2,6 +2,7 @@ import { v5 as uuidv5 } from 'uuid';
 import { parseStringPromise } from 'xml2js';
 import { pool, upsertEvent, upsertRawKopisEvent } from '../db';
 import http from '../lib/http';
+import { deriveIsFree, normalizePriceText } from '../utils/priceUtils';
 
 // KOPIS API 설정
 const KOPIS_API_BASE = 'http://www.kopis.or.kr/openApi/restful';
@@ -137,19 +138,6 @@ function mapGenreToCategory(genrenm: string): string {
   return '공연'; // KOPIS는 공연 전문이므로 기본값도 '공연'
 }
 
-/**
- * 무료 이벤트 여부 판별
- */
-function parseIsFree(pcseguidance?: string): boolean {
-  if (!pcseguidance) return false;
-
-  const priceText = pcseguidance.toLowerCase();
-  return (
-    priceText.includes('무료') ||
-    priceText.includes('0원') ||
-    priceText.includes('free')
-  );
-}
 
 /**
  * 가격 범위 추출 (price_min, price_max)
@@ -494,7 +482,7 @@ async function collectKopisEvents() {
       // Raw 테이블에는 항상 UPSERT (exists 여부와 무관)
       try {
         const detailItem = finalItem as KopisDetailItem;
-        const isFree = parseIsFree(detailItem.pcseguidance);
+        const isFree = deriveIsFree(normalizePriceText(detailItem.pcseguidance));
         const location = parseLocation(detailItem);
 
         await upsertRawKopisEvent({

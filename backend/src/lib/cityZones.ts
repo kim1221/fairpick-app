@@ -53,18 +53,23 @@ export function getCityZone(address: string): string[] {
 /**
  * 도시권 필터 SQL WHERE 절 생성
  *
+ * address + region 컬럼을 모두 체크:
+ * - address가 NULL인 이벤트(277개)는 region 컬럼으로 커버
+ * - 두 컬럼 모두 없으면 해당 이벤트 제외 (도시권 외 이벤트)
+ *
  * @param regions - 도시권 지역 배열 (예: ['서울', '인천', '경기'])
  * @returns SQL WHERE 절 문자열
  *
  * @example
  * buildCityZoneFilter(['서울', '인천', '경기'])
- * // Returns: "AND (address LIKE '%서울%' OR address LIKE '%인천%' OR address LIKE '%경기%')"
+ * // Returns: "AND (address LIKE '%서울%' OR ... OR region LIKE '%서울%' OR ...)"
  */
 export function buildCityZoneFilter(regions: string[]): string {
   if (regions.length === 0) {
     return ''; // 빈 배열이면 필터 없음 (전국 조회)
   }
 
-  const conditions = regions.map(region => `address LIKE '%${region}%'`).join(' OR ');
-  return `AND (${conditions})`;
+  const addressConditions = regions.map(region => `address LIKE '%${region}%'`).join(' OR ');
+  const regionConditions = regions.map(region => `region LIKE '%${region}%'`).join(' OR ');
+  return `AND (${addressConditions} OR ${regionConditions})`;
 }

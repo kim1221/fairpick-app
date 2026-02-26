@@ -1,760 +1,562 @@
 import { createRoute } from '@granite-js/react-native';
-import React, { useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, View, Text, Pressable, ActivityIndicator, Image, TextInput } from 'react-native';
-import eventService from '../services/eventService';
-import { EventCardData, EVENT_CATEGORIES, REGIONS, EventCategory, Region } from '../data/events';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Animated,
+  ScrollView,
+  View,
+  Text,
+  Pressable,
+  FlatList,
+  ActivityIndicator,
+  StyleSheet,
+} from 'react-native';
+import { BottomSheet } from '@toss/tds-react-native';
+import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
-import { getImageSource } from '../utils/imageHelpers';
-import { parseDate, formatShortDate } from '../lib/dateUtils';
-import { normalizeTitle, titleSimilarity, isPlaceholderImage } from '../utils/normalizeTitle';
+import { EventCardData } from '../data/events';
+import { EventImage } from '../components/EventImage';
+import { API_BASE_URL } from '../config/api';
 
-
-interface DuplicateInfo {
-  id: string;
-  title: string;
-  normalizedTitle: string;
-  reason: string;
-  kept: 'existing' | 'new';
-  existingHasImage: boolean;
-  newHasImage: boolean;
-  similarity?: number;
-}
-
-interface DupCandidateGroup {
-  key: string;
+// ─────────────────────────────────────────────────
+// API 응답 타입
+// ─────────────────────────────────────────────────
+interface EventsApiResponse {
   items: Array<{
     id: string;
     title: string;
-    normalizedTitle: string;
-    imageUrl: string | null;
-    isPlaceholder: boolean;
-    startAt: string | undefined;
-    endAt: string | undefined;
-    venue: string | undefined;
+    displayTitle?: string;
+    contentKey?: string;
+    venue: string;
+    startAt: string;
+    endAt: string;
     region: string;
-    category: string;
+    mainCategory: string;
+    subCategory: string;
+    imageUrl: string;
+    sourcePriorityWinner: string;
+    address?: string;
+    lat?: number;
+    lng?: number;
+    popularityScore?: number;
+    buzzScore?: number;
+    isEndingSoon?: boolean;
+    isFree?: boolean;
   }>;
-}
-
-/**
- * 중복 후보 그룹 생성 (디버깅용)
- * 같은 날짜+장소+지역+카테고리 기준으로 그룹화
- */
-function buildDupCandidateGroups(events: EventCardData[]): DupCandidateGroup[] {
-  const groups = new Map<string, DupCandidateGroup['items']>();
-
-  for (const event of events) {
-    // 그룹 키: startAt + endAt + venue + region + category
-    const groupKey = event.contentKey
-      ? `contentKey:${event.contentKey}`
-      : `${event.startAt || ''}|${event.endAt || ''}|${event.venue || ''}|${event.region}|${event.category}`;
-    
-    if (!groups.has(groupKey)) {
-      groups.set(groupKey, []);
-    }
-
-    const normalized = normalizeTitle(event.title, event.region);
-    groups.get(groupKey)!.push({
-      id: event.id,
-      title: event.title,
-      normalizedTitle: normalized,
-      imageUrl: event.thumbnailUrl || null,
-      isPlaceholder: isPlaceholderImage(event.thumbnailUrl),
-      startAt: event.startAt,
-      endAt: event.endAt,
-      venue: event.venue,
-      region: event.region,
-      category: event.category,
-    });
-  }
-
-  // 2개 이상인 그룹만 반환
-  return Array.from(groups.entries())
-    .filter(([_, items]) => items.length > 1)
-    .map(([key, items]) => ({ key, items }));
-}
-
-/**
- * 이미지 우선순위 점수 계산
- * 높을수록 우선
- */
-function getImagePriorityScore(event: EventCardData): number {
-  const url = event.thumbnailUrl;
-  if (!url) return 0;
-  if (isPlaceholderImage(url)) return 1;
-  // 실제 이미지 URL 길이가 길수록 우선 (CDN URL 등)
-  return 100 + Math.min(url.length, 100);
-}
-
-/**
- * 중복 그룹 내에서 우선 노출할 이벤트 선택
- * 1. 실제 이미지가 있는 항목 우선
- * 2. 이미지 URL이 더 긴 쪽 우선
- * 3. 제목이 더 짧은 쪽 우선
- */
-function selectBestEvent(events: EventCardData[]): EventCardData {
-  return events.sort((a, b) => {
-    // 1. 이미지 우선순위
-    const imgScoreA = getImagePriorityScore(a);
-    const imgScoreB = getImagePriorityScore(b);
-    if (imgScoreB !== imgScoreA) return imgScoreB - imgScoreA;
-
-    // 2. 제목 길이 (짧은 쪽 우선 - 정규화된 제목)
-    const normA = normalizeTitle(a.title);
-    const normB = normalizeTitle(b.title);
-    return normA.length - normB.length;
-  })[0];
-}
-
-/**
- * [FIX A] 개선된 중복 이벤트 제거 함수
- * - 1차: 동일 ID 제거
- * - 2차: normalizedTitle + startAt + endAt + venue + region 기반 정확 매칭
- * - 3차: 유사도 기반 퍼지 매칭 (같은 startAt + endAt + venue + region 그룹 내에서)
- * - 이미지가 있는 항목 우선 선택
- */
-function deduplicateEvents(events: EventCardData[]): { deduplicated: EventCardData[], duplicateInfo: DuplicateInfo[] } {
-  const duplicateInfo: DuplicateInfo[] = [];
-  const SIMILARITY_THRESHOLD = 0.8;
-
-  // [디버깅] 중복 후보 그룹 로그
-  if (__DEV__) {
-    const dupGroups = buildDupCandidateGroups(events);
-    if (dupGroups.length > 0) {
-      console.log('[Explore][DupCandidateGroups] Found', dupGroups.length, 'potential duplicate groups');
-      dupGroups.slice(0, 10).forEach((group, idx) => {
-        console.log(`[Explore][DupCandidateGroup ${idx + 1}]`, {
-          key: group.key.substring(0, 50) + '...',
-          items: group.items.map(item => ({
-            id: item.id.substring(0, 8),
-            title: item.title.substring(0, 30),
-            normalizedTitle: item.normalizedTitle.substring(0, 30),
-            isPlaceholder: item.isPlaceholder,
-          })),
-        });
-      });
-    }
-  }
-
-  // 1차: ID 기반 dedupe (이미지 우선)
-  const byId = new Map<string, EventCardData>();
-  events.forEach((event) => {
-    const existing = byId.get(event.id);
-    if (!existing) {
-      byId.set(event.id, event);
-    } else {
-      const hasExistingImage = !isPlaceholderImage(existing.thumbnailUrl);
-      const hasNewImage = !isPlaceholderImage(event.thumbnailUrl);
-
-      if (!hasExistingImage && hasNewImage) {
-        byId.set(event.id, event);
-        duplicateInfo.push({
-          id: event.id,
-          title: event.title,
-          normalizedTitle: normalizeTitle(event.title),
-          reason: 'id_dup_replaced_with_image',
-          kept: 'new',
-          existingHasImage: hasExistingImage,
-          newHasImage: hasNewImage,
-        });
-      } else {
-        duplicateInfo.push({
-          id: event.id,
-          title: event.title,
-          normalizedTitle: normalizeTitle(event.title),
-          reason: 'id_dup_kept_existing',
-          kept: 'existing',
-          existingHasImage: hasExistingImage,
-          newHasImage: hasNewImage,
-        });
-      }
-    }
-  });
-
-  // 2차: 정규화된 제목 기반 정확 매칭
-  const byNormalizedContent = new Map<string, EventCardData>();
-  Array.from(byId.values()).forEach((event) => {
-    const normalized = normalizeTitle(event.title, event.region);
-    // 콘텐츠 키: normalizedTitle + startAt + endAt + venue + region
-    const contentKey = event.contentKey
-      ? `contentKey:${event.contentKey}`
-      : `${normalized}|${event.startAt || ''}|${event.endAt || ''}|${event.venue || ''}|${event.region}`;
-    const existing = byNormalizedContent.get(contentKey);
-
-    if (!existing) {
-      byNormalizedContent.set(contentKey, event);
-    } else {
-      const bestEvent = selectBestEvent([existing, event]);
-      const removedEvent = bestEvent.id === event.id ? existing : event;
-
-      byNormalizedContent.set(contentKey, bestEvent);
-
-      const hasExistingImage = !isPlaceholderImage(existing.thumbnailUrl);
-      const hasNewImage = !isPlaceholderImage(event.thumbnailUrl);
-
-      console.log('[Explore][Dedupe][EXACT]', {
-        keptId: bestEvent.id.substring(0, 8),
-        removedId: removedEvent.id.substring(0, 8),
-        normalizedTitle: normalized.substring(0, 30),
-        reason: bestEvent.id === event.id ? 'new has better image' : 'existing has better image or first',
-      });
-
-      duplicateInfo.push({
-        id: removedEvent.id,
-        title: removedEvent.title,
-        normalizedTitle: normalized,
-        reason: 'exact_match_removed',
-        kept: bestEvent.id === event.id ? 'new' : 'existing',
-        existingHasImage: hasExistingImage,
-        newHasImage: hasNewImage,
-      });
-    }
-  });
-
-  // 3차: 유사도 기반 퍼지 매칭 (같은 startAt + endAt + region 그룹 내에서만)
-  // venueName이 없거나 다를 수 있으므로 완화된 그룹
-  const softGroups = new Map<string, EventCardData[]>();
-  Array.from(byNormalizedContent.values()).forEach((event) => {
-    // 소프트 그룹 키: startAt + endAt + region + category (venue 제외)
-    const softKey = `${event.startAt || ''}|${event.endAt || ''}|${event.region}|${event.category}`;
-    if (!softGroups.has(softKey)) {
-      softGroups.set(softKey, []);
-    }
-    softGroups.get(softKey)!.push(event);
-  });
-
-  const finalEvents: EventCardData[] = [];
-  const processedIds = new Set<string>();
-
-  for (const [softKey, groupEvents] of softGroups.entries()) {
-    if (groupEvents.length === 1) {
-      // 단일 이벤트 그룹
-      if (!processedIds.has(groupEvents[0].id)) {
-        finalEvents.push(groupEvents[0]);
-        processedIds.add(groupEvents[0].id);
-      }
-      continue;
-    }
-
-    // startAt, endAt 유효성 검사 (빈값이면 퍼지 dedupe 스킵)
-    const hasValidDates = groupEvents[0].startAt && groupEvents[0].endAt;
-    if (!hasValidDates) {
-      // 날짜 정보 없으면 퍼지 dedupe 하지 않음
-      if (__DEV__) {
-        console.log('[Explore][Dedupe][SKIP_FUZZY] No valid dates for soft group', softKey.substring(0, 30));
-      }
-      for (const event of groupEvents) {
-        if (!processedIds.has(event.id)) {
-          finalEvents.push(event);
-          processedIds.add(event.id);
-        }
-      }
-      continue;
-    }
-
-    // 유사도 기반 그룹핑
-    const clusters: EventCardData[][] = [];
-
-    for (const event of groupEvents) {
-      if (processedIds.has(event.id)) continue;
-
-      let addedToCluster = false;
-      const normTitle = normalizeTitle(event.title);
-
-      for (const cluster of clusters) {
-        // 클러스터의 첫 번째 이벤트와 유사도 비교
-        const clusterNormTitle = normalizeTitle(cluster[0].title);
-        const similarity = titleSimilarity(normTitle, clusterNormTitle);
-
-        if (similarity >= SIMILARITY_THRESHOLD) {
-          cluster.push(event);
-          addedToCluster = true;
-
-          if (__DEV__) {
-            console.log('[Explore][Dedupe][FUZZY_MATCH]', {
-              title1: cluster[0].title.substring(0, 25),
-              title2: event.title.substring(0, 25),
-              similarity: similarity.toFixed(2),
-            });
-          }
-
-          duplicateInfo.push({
-            id: event.id,
-            title: event.title,
-            normalizedTitle: normTitle,
-            reason: 'fuzzy_match_clustered',
-            kept: 'existing', // 나중에 best 선택 시 업데이트
-            existingHasImage: !isPlaceholderImage(cluster[0].thumbnailUrl),
-            newHasImage: !isPlaceholderImage(event.thumbnailUrl),
-            similarity,
-          });
-
-          break;
-        }
-      }
-
-      if (!addedToCluster) {
-        clusters.push([event]);
-      }
-    }
-
-    // 각 클러스터에서 best 이벤트 선택
-    for (const cluster of clusters) {
-      const bestEvent = selectBestEvent(cluster);
-      if (!processedIds.has(bestEvent.id)) {
-        finalEvents.push(bestEvent);
-        processedIds.add(bestEvent.id);
-
-        if (cluster.length > 1 && __DEV__) {
-          console.log('[Explore][Dedupe][KEEP]', {
-            keptId: bestEvent.id.substring(0, 8),
-            removedIds: cluster.filter(e => e.id !== bestEvent.id).map(e => e.id.substring(0, 8)),
-            reason: 'has_real_image',
-            normalizedTitle: normalizeTitle(bestEvent.title).substring(0, 30),
-          });
-        }
-      }
-
-      // 나머지는 processedIds에 추가하여 제외
-      for (const event of cluster) {
-        processedIds.add(event.id);
-      }
-    }
-  }
-
-  return { deduplicated: finalEvents, duplicateInfo };
+  pageInfo: {
+    page: number;
+    size: number;
+    totalCount: number;
+  };
 }
 
 export const Route = createRoute('/explore', {
   component: ExplorePage,
 });
 
-function ExplorePage() {
-  if (__DEV__) console.log('[RouteRender] ExplorePage rendered');
+// ─────────────────────────────────────────────────
+// 퀵 필터 프리셋
+// ─────────────────────────────────────────────────
+const QUICK_FILTERS = [
+  {
+    id: 'ending_soon',
+    label: '⏰ 마감임박',
+    preset: { sort: 'end_at', order: 'asc', filters: { is_ending_soon: true } },
+  },
+  {
+    id: 'new',
+    label: '🆕 신규',
+    preset: { sort: 'created_at', order: 'desc', filters: { created_after: '7d' } },
+  },
+  {
+    id: 'free',
+    label: '💰 무료',
+    preset: { sort: 'buzz_score', order: 'desc', filters: { is_free: true } },
+  },
+  {
+    id: 'hot',
+    label: '🔥 인기',
+    preset: { sort: 'buzz_score', order: 'desc', filters: { buzz_min: 30 } },
+  },
+] as const;
 
+// ─────────────────────────────────────────────────
+// 카테고리: 전체가 맨 앞
+// ─────────────────────────────────────────────────
+const CATEGORIES = [
+  { id: 'all', label: '전체', value: null },
+  { id: 'popup', label: '팝업', value: '팝업' },
+  { id: 'exhibition', label: '전시', value: '전시' },
+  { id: 'performance', label: '공연', value: '공연' },
+  { id: 'festival', label: '축제', value: '축제' },
+  { id: 'event', label: '행사', value: '행사' },
+] as const;
+
+// ─────────────────────────────────────────────────
+// 지역 목록 (DB 기준 활성 이벤트 수, 인기순 정렬)
+// ─────────────────────────────────────────────────
+const REGION_LIST = [
+  { value: '서울', count: 854 },
+  { value: '경기', count: 381 },
+  { value: '부산', count: 129 },
+  { value: '대구', count: 108 },
+  { value: '인천', count: 107 },
+  { value: '대전', count: 91 },
+  { value: '경남', count: 89 },
+  { value: '충남', count: 83 },
+  { value: '경북', count: 65 },
+  { value: '강원', count: 61 },
+  { value: '광주', count: 60 },
+  { value: '전북', count: 50 },
+  { value: '울산', count: 46 },
+  { value: '전남', count: 32 },
+  { value: '충북', count: 32 },
+  { value: '제주', count: 23 },
+  { value: '세종', count: 20 },
+];
+
+interface ActiveFilters {
+  quickFilter: string | null;
+  region: string | null;
+  category: string | null;
+}
+
+function ExplorePage() {
+  const adaptive = useAdaptive();
   const navigation = Route.useNavigation();
-  const params = Route.useParams<{ query?: string; region?: string; category?: string }>();
+
+  const [activeFilters, setActiveFilters] = useState<ActiveFilters>({
+    quickFilter: null,
+    region: null,
+    category: null,
+  });
 
   const [events, setEvents] = useState<EventCardData[]>([]);
-  const [allEvents, setAllEvents] = useState<EventCardData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [showRegionSheet, setShowRegionSheet] = useState(false);
 
-  // 필터 상태
-  const [searchQuery, setSearchQuery] = useState(params.query || '');
-  const [searchInput, setSearchInput] = useState(params.query || '');
-  const [selectedRegion, setSelectedRegion] = useState<Region>(params.region as Region || '전국');
-  const [selectedCategory, setSelectedCategory] = useState<EventCategory>(params.category as EventCategory || '전체');
+  // ── 스크롤 반응형 헤더 (translateY + useNativeDriver) ──────────────
+  const filterTranslateY = useRef(new Animated.Value(0)).current;
+  const filterHeightRef = useRef(108); // onLayout으로 실제 값 갱신
+  const [filterHeight, setFilterHeight] = useState(108);
+  const lastScrollY = useRef(0);
+  const filterVisible = useRef(true);
 
-  const pageSize = 20;
-  const regionOptions = REGIONS.filter((region) => region !== '기타');
-  const filtersKey = `${selectedRegion}|${selectedCategory}|${searchQuery}`;
-  const prevFiltersRef = useRef(filtersKey);
+  const handleFilterLayout = useCallback((e: any) => {
+    const h = e.nativeEvent.layout.height;
+    filterHeightRef.current = h;
+    setFilterHeight(h);
+  }, []);
 
-  // [FIX 5] race condition 방지용 requestId
-  const requestIdRef = useRef(0);
+  const showFilterHeader = useCallback(() => {
+    if (filterVisible.current) return;
+    filterVisible.current = true;
+    Animated.timing(filterTranslateY, {
+      toValue: 0,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [filterTranslateY]);
 
-  useEffect(() => {
-    if (filtersKey !== prevFiltersRef.current) {
-      if (currentPage !== 1) {
-        setCurrentPage(1);
-        if (__DEV__) {
-          console.log('[Explore][PageReset]', { reason: 'filter-change' });
-        }
-        return;
+  const hideFilterHeader = useCallback(() => {
+    if (!filterVisible.current) return;
+    filterVisible.current = false;
+    Animated.timing(filterTranslateY, {
+      toValue: -filterHeightRef.current,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [filterTranslateY]);
+
+  const handleScroll = useCallback((event: any) => {
+    const currentY = event.nativeEvent.contentOffset.y;
+    const diff = currentY - lastScrollY.current;
+    lastScrollY.current = currentY;
+
+    if (currentY <= 10) {
+      showFilterHeader();
+    } else if (diff > 5 && currentY > 30) {
+      hideFilterHeader();
+    } else if (diff < -3) {
+      showFilterHeader();
+    }
+  }, [showFilterHeader, hideFilterHeader]);
+
+  // ─── API URL 빌더 ───────────────────────────────
+  const buildApiUrl = () => {
+    let endpoint = '/events';
+    const params = new URLSearchParams();
+    let sortBy = 'created_at';
+    let order = 'desc';
+
+    if (activeFilters.quickFilter) {
+      const preset = QUICK_FILTERS.find(f => f.id === activeFilters.quickFilter);
+      if (preset) {
+        sortBy = preset.preset.sort;
+        order = preset.preset.order;
+        if (preset.id === 'free') endpoint = '/events/free';
+        else if (preset.id === 'ending_soon') endpoint = '/events/ending';
+        Object.entries(preset.preset.filters).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) params.append(key, String(value));
+        });
       }
-      prevFiltersRef.current = filtersKey;
     }
-    loadEvents();
-  }, [filtersKey, currentPage]);
 
-  useEffect(() => {
-    if (__DEV__) {
-      console.log('[Explore][TotalCount]', totalCount);
-    }
-  }, [totalCount]);
+    if (activeFilters.region) params.append('region', activeFilters.region);
+    if (activeFilters.category) params.append('category', activeFilters.category);
+    params.append('sortBy', sortBy);
+    params.append('order', order);
+    params.append('page', String(page + 1));
+    params.append('size', '20');
 
-  const loadEvents = async () => {
-    // [FIX 5] race condition 방지: 요청 시작 시 requestId 증가
-    const thisRequestId = ++requestIdRef.current;
+    return `${API_BASE_URL}${endpoint}?${params}`;
+  };
 
+  // ─── 백엔드 응답 → EventCardData ────────────────
+  const mapApiResponseToEventCard = (item: EventsApiResponse['items'][0]): EventCardData => {
+    const formatDate = (dateStr: string) => {
+      const date = new Date(dateStr);
+      const y = date.getFullYear().toString().slice(2);
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}.${m}.${d}`;
+    };
+
+    const category = (['축제', '공연', '행사', '전시'].includes(item.mainCategory)
+      ? item.mainCategory
+      : '행사') as EventCardData['category'];
+
+    return {
+      id: item.id,
+      title: item.displayTitle || item.title,
+      displayTitle: item.displayTitle,
+      contentKey: item.contentKey,
+      category,
+      region: item.region as EventCardData['region'],
+      periodText: `${formatDate(item.startAt)} ~ ${formatDate(item.endAt)}`,
+      startAt: item.startAt,
+      endAt: item.endAt,
+      mainCategory: item.mainCategory,
+      subCategory: item.subCategory,
+      venue: item.venue || '',
+      description: item.subCategory || category,
+      overview: '',
+      tags: item.subCategory ? [item.subCategory] : [],
+      thumbnailUrl: item.imageUrl,
+      detailImageUrl: item.imageUrl,
+      detailLink: '',
+      address: item.address,
+      lat: item.lat,
+      lng: item.lng,
+      popularityScore: item.popularityScore,
+      buzzScore: item.buzzScore,
+      isEndingSoon: item.isEndingSoon,
+      isFree: item.isFree,
+    };
+  };
+
+  // ─── 데이터 로딩 ────────────────────────────────
+  const loadEvents = async (targetPage: number, reset = false) => {
+    if (loading && !reset) return;
+    setLoading(true);
     try {
-      setLoading(true);
+      const url = buildApiUrl();
+      if (__DEV__) console.log('[Explore] Fetching:', url);
 
-      // 검색어가 있으면 서버사이드 검색으로 처리 (페이지네이션 가능)
-      if (searchQuery.trim()) {
-        console.log('[Explore] Search mode - using server-side search (q parameter)');
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-        // [FIX B] 요청 파라미터 로깅 (검색 모드)
-        const searchParams = {
-          category: selectedCategory === '전체' ? undefined : selectedCategory,
-          region: selectedRegion === '전국' ? undefined : selectedRegion,
-          query: searchQuery.trim(),
-        };
-        console.log('[Explore][SearchMode][Params]', {
-          selectedCategory,
-          selectedRegion,
-          searchQuery,
-          willSendCategory: searchParams.category,
-          willSendRegion: searchParams.region,
-          willSendQuery: searchParams.query,
-          categoryIsUndefined: searchParams.category === undefined,
-          regionIsUndefined: searchParams.region === undefined,
-          page: currentPage,
-          requestId: thisRequestId,
-        });
+      const data: EventsApiResponse = await response.json();
+      const newEvents = data.items.map(mapApiResponseToEventCard);
 
-        // 서버사이드 검색 (단일 페이지 요청)
-        const result = await eventService.getEventList({
-          category: searchParams.category,
-          region: searchParams.region,
-          query: searchParams.query,
-          page: currentPage,
-          size: pageSize,
-        });
-
-        const totalPages = Math.ceil(result.totalCount / pageSize);
-        console.log('[Explore][API][Search]', {
-          page: currentPage,
-          size: pageSize,
-          totalCount: result.totalCount,
-          totalPages,
-          returned: result.items.length,
-          requestId: thisRequestId,
-        });
-
-        // [FIX A] 중복 제거 적용
-        const { deduplicated, duplicateInfo } = deduplicateEvents(result.items);
-
-        console.log('[Explore][Deduplication]', {
-          beforeCount: result.items.length,
-          afterCount: deduplicated.length,
-          duplicatesRemoved: duplicateInfo.length,
-        });
-
-        // 중복 샘플 로그 (최대 10개)
-        if (duplicateInfo.length > 0) {
-          console.log('[Explore][Duplicates] Samples:', duplicateInfo.slice(0, 10));
-        }
-
-        // [FIX 5] race condition 방지: 이전 요청이면 무시
-        if (thisRequestId !== requestIdRef.current) {
-          console.log('[Explore][Race] Ignoring stale response (search)', { thisRequestId, currentId: requestIdRef.current });
-          return;
-        }
-
-        setEvents(deduplicated);
-        setTotalCount(result.totalCount);
+      if (reset) {
+        setEvents(newEvents);
+        setTotalCount(data.pageInfo.totalCount);
       } else {
-        // 검색어 없으면 서버 사이드 필터링
-        // [FIX B] 요청 파라미터 로깅 (일반 모드)
-        const filterParams = {
-          category: selectedCategory === '전체' ? undefined : selectedCategory,
-          region: selectedRegion === '전국' ? undefined : selectedRegion,
-        };
-        console.log('[Explore][NormalMode][Params]', {
-          selectedCategory,
-          selectedRegion,
-          willSendCategory: filterParams.category,
-          willSendRegion: filterParams.region,
-          categoryIsUndefined: filterParams.category === undefined,
-          regionIsUndefined: filterParams.region === undefined,
-        });
-
-        const result = await eventService.getEventList({
-          category: filterParams.category,
-          region: filterParams.region,
-          page: currentPage,
-          size: pageSize,
-        });
-
-        const totalPages = Math.ceil(result.totalCount / pageSize);
-        console.log('[Explore][API]', {
-          page: currentPage,
-          size: pageSize,
-          totalCount: result.totalCount,
-          totalPages,
-          returned: result.items.length,
-        });
-
-        console.log('[Explore] page:', currentPage, 'size:', pageSize, 'totalCount:', result.totalCount);
-        console.log('[Explore] filters:', {
-          category: selectedCategory,
-          region: selectedRegion,
-          query: searchQuery,
-        });
-
-        if (__DEV__) {
-          console.log('[Explore][DataCount] API totalCount:', result.totalCount, 'items length:', result.items.length);
-
-          // [FIX A] API 응답에서 중복 확인
-          const idCounts = new Map<string, number>();
-          result.items.forEach(item => {
-            idCounts.set(item.id, (idCounts.get(item.id) || 0) + 1);
-          });
-          const duplicates = Array.from(idCounts.entries()).filter(([_, count]) => count > 1);
-          if (duplicates.length > 0) {
-            console.warn('[Explore][API_DUPLICATES] Found duplicates in API response:', duplicates.slice(0, 10));
-          }
-        }
-
-        // [FIX A] 일반 모드에도 dedupe 적용
-        const { deduplicated, duplicateInfo } = deduplicateEvents(result.items);
-
-        if (duplicateInfo.length > 0) {
-          console.log('[Explore][NormalMode][Deduplication]', {
-            beforeCount: result.items.length,
-            afterCount: deduplicated.length,
-            duplicatesRemoved: duplicateInfo.length,
-            samples: duplicateInfo.slice(0, 5),
-          });
-        }
-
-        // [FIX 5] race condition 방지: 이전 요청이면 무시
-        if (thisRequestId !== requestIdRef.current) {
-          console.log('[Explore][Race] Ignoring stale response (normal)', { thisRequestId, currentId: requestIdRef.current });
-          return;
-        }
-
-        setEvents(deduplicated);
-        setTotalCount(result.totalCount);
+        setEvents(prev => [...prev, ...newEvents]);
       }
+      setHasMore(newEvents.length >= 20);
     } catch (error) {
-      console.error('Failed to load events:', error);
+      console.error('[Explore] Load error:', error);
+      if (reset) { setEvents([]); setHasMore(false); }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSearch = () => {
-    setSearchQuery(searchInput);
+  // ─── 필터 핸들러 ────────────────────────────────
+  const handleQuickFilterPress = (filterId: string) => {
+    setActiveFilters(prev => ({
+      ...prev,
+      quickFilter: prev.quickFilter === filterId ? null : filterId,
+    }));
+    setPage(0);
   };
 
-  const handleRegionSelect = (region: Region) => {
-    setSelectedRegion(region);
+  const handleCategoryPress = (categoryValue: string | null) => {
+    setActiveFilters(prev => ({ ...prev, category: categoryValue }));
+    setPage(0);
   };
 
-  const handleCategorySelect = (category: EventCategory) => {
-    setSelectedCategory(category);
+  const handleRegionSelect = (region: string | null) => {
+    setActiveFilters(prev => ({ ...prev, region }));
+    setPage(0);
+    setShowRegionSheet(false);
   };
 
-  const totalPages = Math.ceil(totalCount / pageSize);
-  const pageGroupSize = 5;
-  const currentGroupStart = Math.floor((currentPage - 1) / pageGroupSize) * pageGroupSize + 1;
-  const currentGroupEnd = Math.min(currentGroupStart + pageGroupSize - 1, totalPages);
+  // ─── 사이드 이펙트 ──────────────────────────────
+  useEffect(() => {
+    // 필터 변경 시 헤더 상태 초기화
+    filterVisible.current = true;
+    filterTranslateY.setValue(0);
+    lastScrollY.current = 0;
+    setPage(0);
+    loadEvents(0, true);
+  }, [activeFilters]);
 
-  // 검색/일반 모드 모두 서버에서 페이지네이션된 결과를 받음
-  const currentEvents = events;
+  useEffect(() => {
+    if (page > 0) loadEvents(page, false);
+  }, [page]);
 
-  // DEV 로그: 렌더링 직전 최종 데이터 개수 + ID 중복 체크
-  if (__DEV__) {
-    console.log('[Explore][RenderCount] Total events:', events.length, 'Current page events:', currentEvents.length, 'totalCount:', totalCount);
-
-    // ID 중복 체크
-    const idCounts = new Map<string, number>();
-    currentEvents.forEach(event => {
-      idCounts.set(event.id, (idCounts.get(event.id) || 0) + 1);
-    });
-    const duplicateIds = Array.from(idCounts.entries()).filter(([_, count]) => count > 1);
-
-    if (duplicateIds.length > 0) {
-      console.warn('[Explore][DUPLICATE_IDS] Found duplicate IDs in render:', duplicateIds.length);
-      duplicateIds.slice(0, 5).forEach(([id, count]) => {
-        const event = currentEvents.find(e => e.id === id);
-        console.warn(`  - ${event?.title} (${id.substring(0, 12)}...): ${count}번`);
-      });
-    } else {
-      console.log('[Explore][DUPLICATE_CHECK] ✅ No duplicate IDs in currentEvents');
-    }
-  }
-
-  const formatEndDate = (endAt: string | undefined) => {
-    const date = parseDate(endAt);
-    if (!date) return '일정 미정';
-    return formatShortDate(date);
+  const handleLoadMore = () => {
+    if (!loading && hasMore) setPage(prev => prev + 1);
   };
 
-  return (
-    <View style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* 헤더 */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>탐색</Text>
-          <Text style={styles.headerSubtitle}>
-            총 {totalCount.toLocaleString()}개의 이벤트
-          </Text>
-        </View>
+  // ─── 카드 렌더링 ────────────────────────────────
+  const renderCard = ({ item }: { item: EventCardData }) => {
+    // 배지 우선순위: 무료 > 마감임박 > 인기 (최대 2개)
+    const badges: { text: string }[] = [];
+    if (item.isFree) badges.push({ text: '💰 무료' });
+    if (item.isEndingSoon) badges.push({ text: '⏰ 마감' });
+    if ((item.buzzScore ?? 0) >= 70 && badges.length === 0) badges.push({ text: '🔥 인기' });
+    const visibleBadges = badges.slice(0, 2);
 
-        {/* 검색바 */}
-        <View style={styles.searchSection}>
-          <View style={styles.searchContainer}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="이벤트, 장소 검색"
-              value={searchInput}
-              onChangeText={setSearchInput}
-              onSubmitEditing={handleSearch}
-              returnKeyType="search"
-            />
-            <Pressable style={styles.searchButton} onPress={handleSearch}>
-              <Text style={styles.searchButtonText}>🔍</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* 지역 필터 */}
-        <View style={styles.filterSection}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterScroll}
-          >
-            {regionOptions.map((region) => (
-              <Pressable
-                key={region}
-                style={[
-                  styles.filterChip,
-                  selectedRegion === region && styles.filterChipActive,
-                ]}
-                onPress={() => handleRegionSelect(region)}
-              >
-                <Text
-                  style={[
-                    styles.filterChipText,
-                    selectedRegion === region && styles.filterChipTextActive,
-                  ]}
-                >
-                  {region}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-
-        {/* 카테고리 필터 */}
-        <View style={styles.filterSection}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterScroll}
-          >
-            {EVENT_CATEGORIES.map((category) => (
-              <Pressable
-                key={category}
-                style={[
-                  styles.filterChip,
-                  selectedCategory === category && styles.filterChipActive,
-                ]}
-                onPress={() => handleCategorySelect(category)}
-              >
-                <Text
-                  style={[
-                    styles.filterChipText,
-                    selectedCategory === category && styles.filterChipTextActive,
-                  ]}
-                >
-                  {category}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-
-        {/* 이벤트 리스트 */}
-        <View style={styles.eventsContainer}>
-          {loading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#3182F6" />
-              <Text style={styles.loadingText}>로딩 중...</Text>
-            </View>
-          ) : currentEvents.length > 0 ? (
-            currentEvents.map((event) => (
-              <Pressable
-                key={event.id}
-                style={styles.eventCard}
-                onPress={() => navigation.navigate('/events/:id', { id: event.id })}
-                activeOpacity={0.7}
-              >
-                <Image
-                  source={getImageSource(event.thumbnailUrl, event.category)}
-                  style={styles.eventImage}
-                  resizeMode="cover"
-                />
-                <View style={styles.eventInfo}>
-                  <View style={styles.eventBadges}>
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{event.region}</Text>
-                    </View>
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{event.category}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.eventTitle} numberOfLines={2}>
-                    {event.title}
-                  </Text>
-                  <Text style={styles.eventMeta}>{event.periodText}</Text>
-                  {event.venue && (
-                    <Text style={styles.eventVenue} numberOfLines={1}>
-                      📍 {event.venue}
-                    </Text>
-                  )}
+    return (
+      <Pressable
+        style={styles.gridCard}
+        onPress={() => navigation.navigate('/events/:id', { id: item.id })}
+      >
+        {/* 이미지 + 배지 오버레이 */}
+        <View style={styles.cardImageWrapper}>
+          <EventImage
+            uri={item.thumbnailUrl}
+            category={item.category}
+            height={180}
+            borderRadius={12}
+          />
+          {visibleBadges.length > 0 && (
+            <View style={styles.cardBadgeContainer}>
+              {visibleBadges.map((badge, i) => (
+                <View key={i} style={styles.cardBadge}>
+                  <Text style={styles.cardBadgeText}>{badge.text}</Text>
                 </View>
-              </Pressable>
-            ))
-          ) : (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>검색 결과가 없습니다</Text>
+              ))}
             </View>
           )}
         </View>
 
-        {/* 페이지네이션 */}
-        {totalPages > 1 && (
-          <View style={styles.pagination}>
-            {currentGroupStart > 1 && (
-              <Pressable
-                style={styles.pageButton}
-                onPress={() => setCurrentPage(currentGroupStart - pageGroupSize)}
-              >
-                <Text style={styles.pageButtonText}>{'<'}</Text>
-              </Pressable>
-            )}
-            {Array.from({ length: currentGroupEnd - currentGroupStart + 1 }, (_, i) => currentGroupStart + i).map((page) => (
-              <Pressable
-                key={page}
-                style={[
-                  styles.pageButton,
-                  currentPage === page && styles.pageButtonActive,
-                ]}
-                onPress={() => setCurrentPage(page)}
-              >
-                <Text
-                  style={[
-                    styles.pageButtonText,
-                    currentPage === page && styles.pageButtonTextActive,
-                  ]}
-                >
-                  {page}
-                </Text>
-              </Pressable>
-            ))}
-            {currentGroupEnd < totalPages && (
-              <Pressable
-                style={styles.pageButton}
-                onPress={() => setCurrentPage(currentGroupEnd + 1)}
-              >
-                <Text style={styles.pageButtonText}>{'>'}</Text>
-              </Pressable>
-            )}
-          </View>
-        )}
+        {/* 카드 텍스트 */}
+        <View style={styles.cardInfo}>
+          <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
+          <Text style={styles.cardMeta} numberOfLines={1}>📍 {item.venue || item.region}</Text>
+          <Text style={styles.cardMeta} numberOfLines={1}>📅 {item.periodText}</Text>
+        </View>
+      </Pressable>
+    );
+  };
 
-        {/* 하단 여백 */}
-        <View style={{ height: 100 }} />
-      </ScrollView>
+  // ─── FlatList 헤더: 결과 카운트만 ───────────────
+  const renderCountRow = () => (
+    <View style={styles.countRow}>
+      <Text style={styles.countText}>총 {totalCount.toLocaleString()}개</Text>
+    </View>
+  );
+
+  // ─── Empty State ────────────────────────────────
+  const renderEmpty = () => {
+    if (loading) return null;
+    const hasFilter = activeFilters.quickFilter || activeFilters.region || activeFilters.category;
+    return (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyIcon}>🔍</Text>
+        <Text style={styles.emptyText}>
+          {activeFilters.region ? `${activeFilters.region}에 ` : ''}
+          {activeFilters.category ? `${activeFilters.category} ` : ''}
+          이벤트가 없어요
+        </Text>
+        <Text style={styles.emptyHint}>
+          {hasFilter ? '필터를 변경해보세요' : '잠시 후 다시 확인해주세요'}
+        </Text>
+      </View>
+    );
+  };
+
+  // ─── 렌더링 ─────────────────────────────────────
+  return (
+    <View style={[styles.container, { backgroundColor: adaptive.background }]}>
+      {/* 고정 검색바 */}
+      <View style={[styles.fixedSearchBar, { backgroundColor: adaptive.background }]}>
+        <Pressable
+          style={styles.fakeSearchInput}
+          onPress={() => navigation.push('/search', {
+            category: activeFilters.category,
+            region: activeFilters.region,
+            quickFilter: activeFilters.quickFilter,
+          })}
+        >
+          <Text style={styles.searchPlaceholder}>🔍 이벤트, 장소, 키워드 검색</Text>
+        </Pressable>
+      </View>
+
+      {/* 콘텐츠 영역 (FlatList + absolute 필터 헤더) */}
+      <View style={styles.contentArea}>
+        {/* 스크롤 반응형 필터 헤더 — position: absolute + translateY */}
+        <Animated.View
+          style={[
+            styles.filterHeader,
+            {
+              backgroundColor: adaptive.background,
+              transform: [{ translateY: filterTranslateY }],
+            },
+          ]}
+          onLayout={handleFilterLayout}
+        >
+          {/* 카테고리 언더라인 탭 + 지역 버튼 */}
+          <View style={styles.categoryRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ flex: 1 }}
+              contentContainerStyle={styles.categoryTabsContent}
+            >
+              {CATEGORIES.map((cat) => {
+                const isActive = activeFilters.category === cat.value;
+                return (
+                  <Pressable
+                    key={cat.id}
+                    style={[styles.categoryTab, isActive && styles.categoryTabActive]}
+                    onPress={() => handleCategoryPress(cat.value)}
+                  >
+                    <Text style={[styles.categoryTabText, isActive && styles.categoryTabTextActive]}>
+                      {cat.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            <Pressable style={styles.regionPill} onPress={() => setShowRegionSheet(true)}>
+              <Text style={styles.regionPillText}>
+                📍 {activeFilters.region ?? '전국'} ▾
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* 퀵 필터 칩 */}
+          <View style={styles.quickFiltersRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.quickFiltersContent}
+            >
+              {QUICK_FILTERS.map((filter) => {
+                const isActive = activeFilters.quickFilter === filter.id;
+                return (
+                  <Pressable
+                    key={filter.id}
+                    style={[
+                      styles.quickFilterChip,
+                      { borderColor: adaptive.grey300 },
+                      isActive && { backgroundColor: adaptive.grey900, borderColor: adaptive.grey900 },
+                    ]}
+                    onPress={() => handleQuickFilterPress(filter.id)}
+                  >
+                    <Text style={[styles.quickFilterText, isActive && { color: '#FFFFFF' }]}>
+                      {filter.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </Animated.View>
+
+        {/* 이벤트 목록 — paddingTop으로 필터 헤더 아래부터 시작 */}
+        {loading && page === 0 ? (
+          <ActivityIndicator size="large" style={[styles.loader, { marginTop: filterHeight }]} />
+        ) : (
+          <FlatList
+            data={events}
+            numColumns={2}
+            keyExtractor={(item) => item.id}
+            ListHeaderComponent={renderCountRow}
+            ListEmptyComponent={renderEmpty}
+            renderItem={renderCard}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.5}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            ListFooterComponent={
+              loading && page > 0
+                ? <ActivityIndicator size="small" style={styles.footerLoader} />
+                : null
+            }
+            contentContainerStyle={[styles.flatListContent, { paddingTop: filterHeight }]}
+            columnWrapperStyle={styles.columnWrapper}
+            removeClippedSubviews
+            windowSize={10}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            updateCellsBatchingPeriod={50}
+          />
+        )}
+      </View>
 
       <BottomTabBar currentTab="explore" />
+
+      {/* 지역 선택 BottomSheet */}
+      <BottomSheet.Root
+        open={showRegionSheet}
+        onClose={() => setShowRegionSheet(false)}
+        onDimmerClick={() => setShowRegionSheet(false)}
+      >
+        <BottomSheet.Header title="지역 선택" />
+        <ScrollView
+          style={styles.regionSheetList}
+          contentContainerStyle={{ paddingBottom: 48 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <Pressable
+            style={styles.regionSheetItem}
+            onPress={() => handleRegionSelect(null)}
+          >
+            <Text style={[styles.regionSheetText, !activeFilters.region && styles.regionSheetTextActive]}>
+              🗺️ 전국 전체
+            </Text>
+            {!activeFilters.region && <Text style={styles.regionCheckmark}>✓</Text>}
+          </Pressable>
+
+          {REGION_LIST.map(({ value, count }) => (
+            <Pressable
+              key={value}
+              style={styles.regionSheetItem}
+              onPress={() => handleRegionSelect(value)}
+            >
+              <Text style={[styles.regionSheetText, activeFilters.region === value && styles.regionSheetTextActive]}>
+                {value}
+              </Text>
+              <View style={styles.regionSheetRight}>
+                <Text style={styles.regionCountText}>{count.toLocaleString()}개</Text>
+                {activeFilters.region === value && (
+                  <Text style={styles.regionCheckmark}>✓</Text>
+                )}
+              </View>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </BottomSheet.Root>
     </View>
   );
 }
@@ -762,171 +564,244 @@ function ExplorePage() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F2F4F6',
   },
-  scrollView: {
-    flex: 1,
+
+  // ── 고정 검색바 ──────────────────────────────────
+  fixedSearchBar: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F4F6',
   },
-  header: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 16,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#191F28',
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: '#6B7684',
-  },
-  searchSection: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F2F4F6',
+  fakeSearchInput: {
+    height: 48,
+    backgroundColor: '#F5F5F5',
     borderRadius: 12,
     paddingHorizontal: 16,
+    justifyContent: 'center',
   },
-  searchInput: {
-    flex: 1,
-    height: 48,
+  searchPlaceholder: {
     fontSize: 15,
+    color: '#999',
+  },
+
+  // ── 콘텐츠 영역 (FlatList + absolute 필터 헤더) ─
+  contentArea: {
+    flex: 1,
+    overflow: 'hidden',
+  },
+
+  // ── 스크롤 반응형 필터 헤더 ──────────────────────
+  filterHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    elevation: 3,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F4F6',
+  },
+
+  // ── 카테고리 언더라인 탭 ─────────────────────────
+  categoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E8EB',
+  },
+  categoryTabsContent: {
+    paddingLeft: 16,
+  },
+  categoryTab: {
+    paddingHorizontal: 4,
+    paddingVertical: 14,
+    marginRight: 20,
+  },
+  categoryTabActive: {
+    borderBottomWidth: 2,
+    borderBottomColor: '#191F28',
+  },
+  categoryTabText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#8B95A1',
+  },
+  categoryTabTextActive: {
     color: '#191F28',
+    fontWeight: '700',
   },
-  searchButton: {
-    padding: 8,
+
+  // ── 지역 필터 pill ──────────────────────────────
+  regionPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    marginRight: 16,
+    marginLeft: 4,
+    backgroundColor: '#F2F4F6',
+    borderRadius: 16,
   },
-  searchButtonText: {
-    fontSize: 20,
+  regionPillText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4E5968',
   },
-  filterSection: {
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 8,
+
+  // ── 퀵 필터 칩 ──────────────────────────────────
+  quickFiltersRow: {
+    paddingVertical: 10,
   },
-  filterScroll: {
-    paddingHorizontal: 20,
+  quickFiltersContent: {
+    paddingHorizontal: 16,
   },
-  filterChip: {
+  quickFilterChip: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: '#F2F4F6',
+    borderWidth: 1,
     marginRight: 8,
   },
-  filterChipActive: {
-    backgroundColor: '#3182F6',
-  },
-  filterChipText: {
+  quickFilterText: {
     fontSize: 14,
     fontWeight: '600',
     color: '#4E5968',
   },
-  filterChipTextActive: {
-    color: '#FFFFFF',
+
+  // ── 결과 카운트 ──────────────────────────────────
+  countRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F4F6',
   },
-  eventsContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-  },
-  loadingContainer: {
-    paddingVertical: 60,
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 14,
+  countText: {
+    fontSize: 13,
+    fontWeight: '500',
     color: '#8B95A1',
   },
-  eventCard: {
-    flexDirection: 'row',
+
+  // ── FlatList ─────────────────────────────────────
+  flatListContent: {
+    paddingHorizontal: 10,
+    paddingBottom: 100,
+  },
+  columnWrapper: {
+    justifyContent: 'space-between',
+  },
+
+  // ── 그리드 카드 ──────────────────────────────────
+  gridCard: {
+    width: '48%',
+    marginVertical: 6,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    marginBottom: 12,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
   },
-  eventImage: {
-    width: 100,
-    height: 100,
+  cardImageWrapper: {
+    position: 'relative',
   },
-  eventInfo: {
-    flex: 1,
-    padding: 12,
-  },
-  eventBadges: {
+  cardBadgeContainer: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
     flexDirection: 'row',
-    marginBottom: 6,
+    gap: 4,
   },
-  badge: {
-    backgroundColor: '#E5EDFF',
+  cardBadge: {
+    backgroundColor: 'rgba(0, 0, 0, 0.60)',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 4,
-    marginRight: 6,
+    borderRadius: 10,
   },
-  badgeText: {
+  cardBadgeText: {
+    color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '600',
-    color: '#3182F6',
   },
-  eventTitle: {
-    fontSize: 15,
-    fontWeight: '600',
+  cardInfo: {
+    padding: 8,
+  },
+  cardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
     color: '#191F28',
     marginBottom: 4,
     lineHeight: 20,
   },
-  eventMeta: {
-    fontSize: 13,
+  cardMeta: {
+    fontSize: 12,
     color: '#6B7684',
-    marginBottom: 4,
+    marginTop: 2,
   },
-  eventVenue: {
+
+  // ── 로더 ─────────────────────────────────────────
+  loader: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  footerLoader: {
+    marginVertical: 20,
+  },
+
+  // ── Empty State ──────────────────────────────────
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+  },
+  emptyIcon: {
+    fontSize: 40,
+    marginBottom: 16,
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyHint: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+
+  // ── 지역 BottomSheet ─────────────────────────────
+  regionSheetList: {
+    paddingHorizontal: 20,
+    maxHeight: 460,
+  },
+  regionSheetItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F4F6',
+  },
+  regionSheetText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#6B7684',
+  },
+  regionSheetTextActive: {
+    color: '#191F28',
+    fontWeight: '700',
+  },
+  regionSheetRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  regionCountText: {
     fontSize: 13,
     color: '#8B95A1',
   },
-  emptyContainer: {
-    paddingVertical: 60,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 15,
-    color: '#B0B8C1',
-  },
-  pagination: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    paddingVertical: 24,
-    gap: 8,
-  },
-  pageButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: '#F2F4F6',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pageButtonActive: {
-    backgroundColor: '#3182F6',
-  },
-  pageButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4E5968',
-  },
-  pageButtonTextActive: {
-    color: '#FFFFFF',
+  regionCheckmark: {
+    fontSize: 16,
+    color: '#3182F6',
+    fontWeight: '700',
   },
 });

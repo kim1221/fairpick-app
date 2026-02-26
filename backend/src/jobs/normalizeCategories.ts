@@ -4,7 +4,7 @@ import {
 } from '../db';
 
 // 카테고리 정의
-const MAIN_CATEGORIES = ['공연', '전시', '축제', '행사'] as const;
+const MAIN_CATEGORIES = ['공연', '전시', '축제', '행사', '팝업'] as const;
 type MainCategory = typeof MAIN_CATEGORIES[number];
 
 const SUB_CATEGORIES: Record<MainCategory, readonly string[]> = {
@@ -12,6 +12,7 @@ const SUB_CATEGORIES: Record<MainCategory, readonly string[]> = {
   전시: ['미술 전시', '사진 전시', '미디어아트', '체험형 전시', '어린이 전시', '특별전', '기타 전시'],
   축제: ['지역 축제', '음악 축제', '불꽃 / 드론 / 빛 축제', '계절 축제', '전통 / 문화 축제', '기타 축제'],
   행사: ['문화 행사', '체험 행사', '교육 / 강연', '마켓 / 플리마켓', '기념 행사', '가족 / 어린이', '기타 행사'],
+  팝업: ['브랜드 팝업', '전시형 팝업', '체험형 팝업', 'F&B 팝업', '기타 팝업'],
 };
 
 // 기본 서브 카테고리 (매핑 실패 시)
@@ -20,6 +21,7 @@ const DEFAULT_SUB_CATEGORIES: Record<MainCategory, string> = {
   전시: '기타 전시',
   축제: '기타 축제',
   행사: '기타 행사',
+  팝업: '기타 팝업',
 };
 
 // source_priority_winner 규칙
@@ -28,6 +30,7 @@ const SOURCE_PRIORITY: Record<MainCategory, string> = {
   전시: 'culture',
   축제: 'tour',
   행사: 'culture',
+  팝업: 'manual',
 };
 
 /**
@@ -37,6 +40,14 @@ function inferMainCategory(title: string, subCategory: string | null): MainCateg
   const titleLower = (title || '').toLowerCase();
   const subLower = (subCategory || '').toLowerCase();
   const combined = titleLower + ' ' + subLower;
+
+  // 팝업 키워드 (가장 먼저 체크 — '팝업스토어', '팝업'이 제목에 있으면 명확)
+  const popupKeywords = [
+    '팝업', 'popup', 'pop-up', 'pop up',
+  ];
+  if (popupKeywords.some(keyword => combined.includes(keyword))) {
+    return '팝업';
+  }
 
   // 공연 키워드
   const performanceKeywords = [
@@ -135,6 +146,15 @@ function inferSubCategory(mainCategory: MainCategory, title: string, currentSubC
     return '문화 행사';
   }
 
+  // 팝업 서브 카테고리
+  if (mainCategory === '팝업') {
+    if (/카페|커피|음식|맛집|fnb|f&b|디저트|베이커리/.test(combined)) return 'F&B 팝업';
+    if (/전시|갤러리|아트|작가/.test(combined)) return '전시형 팝업';
+    if (/체험|워크숍|만들기|클래스/.test(combined)) return '체험형 팝업';
+    if (/브랜드|콜라보|협업|한정판|스토어/.test(combined)) return '브랜드 팝업';
+    return '기타 팝업';
+  }
+
   // 기본값
   return DEFAULT_SUB_CATEGORIES[mainCategory];
 }
@@ -193,15 +213,30 @@ async function normalizeCategories() {
 
   for (const event of events) {
     try {
-      // 2. 메인 카테고리 추론
-      const inferredMainCategory = inferMainCategory(event.title, event.sub_category);
+      // 2. 수동 생성 이벤트는 카테고리를 건드리지 않음
+      if (event.source_priority_winner === 'manual') {
+        unchangedCount++;
+        continue;
+      }
 
-      // 3. 서브 카테고리 추론
-      const inferredSubCategory = inferSubCategory(
-        inferredMainCategory,
-        event.title,
-        event.sub_category,
-      );
+      // 3. 카테고리 결정: 수집 단계에서 설정된 값을 신뢰
+      //    - 이미 유효한 main_category가 있으면 그대로 유지
+      //    - null이거나 허용 리스트 밖의 값일 때만 제목 기반으로 추론
+      //    (각 collector의 API 코드 매핑이 제목 키워드 추론보다 정확함)
+      const hasValidCategory = event.main_category &&
+        MAIN_CATEGORIES.includes(event.main_category as MainCategory);
+
+      const inferredMainCategory: MainCategory = hasValidCategory
+        ? (event.main_category as MainCategory)
+        : inferMainCategory(event.title, event.sub_category);
+
+      // 4. 서브 카테고리 추론 (유효하지 않은 경우만)
+      const hasValidSubCategory = event.sub_category &&
+        SUB_CATEGORIES[inferredMainCategory]?.includes(event.sub_category);
+
+      const inferredSubCategory = hasValidSubCategory
+        ? event.sub_category!
+        : inferSubCategory(inferredMainCategory, event.title, event.sub_category);
 
       // 4. 최종 검증 및 교정 (완전성 보장)
       const { validMainCategory, validSubCategory } = validateAndCorrectCategories(

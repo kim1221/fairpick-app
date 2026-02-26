@@ -11,6 +11,7 @@
 
 import { pool } from '../db';
 import { searchEventInfo, mergeSearchResults } from '../lib/naverApi';
+// @ts-ignore - extractEventInfo is deprecated but still used by this backfill job
 import { extractEventInfo, extractDerivedTagsOnly } from '../lib/aiExtractor';
 import { DEFAULT_POLICY, AGGRESSIVE_POLICY, CONSERVATIVE_POLICY, EnrichmentPolicy } from '../lib/enrichmentPolicy';
 import { 

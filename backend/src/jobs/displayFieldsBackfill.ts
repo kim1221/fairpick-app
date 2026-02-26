@@ -75,7 +75,7 @@ function buildDisplayFieldSources(
     addSource('metadata.display.exhibition.genre', exh.genre);
     addSource('metadata.display.exhibition.duration_minutes', exh.duration_minutes);
     addSource('metadata.display.exhibition.type', exh.type);
-    addSource('metadata.display.exhibition.discounts', exh.discounts);
+    addSource('metadata.display.exhibition.discounts', (exh as any).discounts);
     addSource('metadata.display.exhibition.last_admission', exh.last_admission);
   }
 

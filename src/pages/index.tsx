@@ -14,7 +14,7 @@ import { Accuracy, getCurrentLocation, GetCurrentLocationPermissionError } from 
 // API 서비스
 import recommendationService from '../services/recommendationService';
 import userEventService from '../services/userEventService';
-import { getCurrentUserId, isLoggedIn } from '../utils/anonymousUser';
+import { getCurrentUserId } from '../utils/anonymousUser';
 import { reverseGeocode } from '../utils/geocoding';
 
 // 타입
@@ -41,13 +41,16 @@ function HomePage() {
   const [todayPick, setTodayPick] = useState<TodayPickData>({ event: null, loading: true });
   const [nearby, setNearby] = useState<ScoredEvent[]>([]); // 내 주변 이벤트
   const [trending, setTrending] = useState<ScoredEvent[]>([]);
+  const [endingSoon, setEndingSoon] = useState<ScoredEvent[]>([]); // 곧 끝나요
+  const [exhibition, setExhibition] = useState<ScoredEvent[]>([]); // 전시 큐레이션
   const [weekend, setWeekend] = useState<ScoredEvent[]>([]); // 이번 주말
+  const [freeEvents, setFreeEvents] = useState<ScoredEvent[]>([]); // 무료로 즐겨요
   const [latest, setLatest] = useState<ScoredEvent[]>([]);
   const [userId, setUserId] = useState<string>('');
   const [location, setLocation] = useState<Location | undefined>(undefined);
   const [currentAddress, setCurrentAddress] = useState<string>(''); // 행정동 표시
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  
+
   const excludedIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -152,11 +155,20 @@ function HomePage() {
       
       // 3. 지금 떠오르는 (위치 정보 전달)
       await loadTrending(loc);
-      
-      // 4. 이번 주말 (위치 정보 전달)
+
+      // 4. 곧 끝나요 (테마 섹션 - excludeIds 없음)
+      await loadEndingSoon(loc);
+
+      // 5. 전시 큐레이션 (테마 섹션 - excludeIds 없음)
+      await loadExhibition(loc);
+
+      // 6. 이번 주말 (위치 정보 전달)
       await loadWeekend(loc);
-      
-      // 5. 새로 올라왔어요 (위치 정보 전달)
+
+      // 7. 무료로 즐겨요 (테마 섹션 - excludeIds 없음)
+      await loadFreeEvents(loc);
+
+      // 8. 새로 올라왔어요 (위치 정보 전달)
       await loadLatest(loc);
       
     } catch (error) {
@@ -198,27 +210,6 @@ function HomePage() {
     }
   };
 
-  const loadTrending = async (userLocation?: Location) => {
-    try {
-      const response = await recommendationService.getTrending({
-        excludeIds: Array.from(excludedIds.current),
-        limit: 10,
-        location: userLocation, // 위치 정보 전달
-      });
-      
-      if (response.success && response.data) {
-        setTrending(response.data);
-        console.log('[Home/Trending] Loaded:', response.data.length, 'events');
-      } else {
-        setTrending([]);
-        console.log('[Home/Trending] No trending events');
-      }
-    } catch (error) {
-      console.error('[Home/Trending] Error:', error);
-      setTrending([]);
-    }
-  };
-
   const loadNearby = async (userLocation: Location) => {
     try {
       const response = await recommendationService.getNearby(
@@ -228,9 +219,11 @@ function HomePage() {
           limit: 10,
         }
       );
-      
+
       if (response.success && response.data) {
         setNearby(response.data);
+        // 이후 섹션 중복 제거를 위해 ID 등록
+        response.data.forEach((e: ScoredEvent) => excludedIds.current.add(e.id));
         console.log('[Home/Nearby] Loaded:', response.data.length, 'events');
       } else {
         setNearby([]);
@@ -242,14 +235,89 @@ function HomePage() {
     }
   };
 
-  const loadWeekend = async (userLocation?: Location) => {
+  const loadTrending = async (userLocation?: Location) => {
     try {
-      const response = await recommendationService.getWeekend({
+      const response = await recommendationService.getTrending({
         excludeIds: Array.from(excludedIds.current),
         limit: 10,
         location: userLocation,
       });
-      
+
+      if (response.success && response.data) {
+        setTrending(response.data);
+        response.data.forEach((e: ScoredEvent) => excludedIds.current.add(e.id));
+        console.log('[Home/Trending] Loaded:', response.data.length, 'events');
+      } else {
+        setTrending([]);
+        console.log('[Home/Trending] No trending events');
+      }
+    } catch (error) {
+      console.error('[Home/Trending] Error:', error);
+      setTrending([]);
+    }
+  };
+
+  const loadEndingSoon = async (userLocation?: Location) => {
+    try {
+      const response = await recommendationService.getEndingSoon({
+        limit: 10,
+        location: userLocation,
+      });
+      if (response.success && response.data) {
+        setEndingSoon(response.data);
+        console.log('[Home/EndingSoon] Loaded:', response.data.length, 'events');
+      } else {
+        setEndingSoon([]);
+      }
+    } catch (error) {
+      console.error('[Home/EndingSoon] Error:', error);
+      setEndingSoon([]);
+    }
+  };
+
+  const loadExhibition = async (userLocation?: Location) => {
+    try {
+      const response = await recommendationService.getExhibition({
+        limit: 10,
+        location: userLocation,
+      });
+      if (response.success && response.data) {
+        setExhibition(response.data);
+        console.log('[Home/Exhibition] Loaded:', response.data.length, 'events');
+      } else {
+        setExhibition([]);
+      }
+    } catch (error) {
+      console.error('[Home/Exhibition] Error:', error);
+      setExhibition([]);
+    }
+  };
+
+  const loadFreeEvents = async (userLocation?: Location) => {
+    try {
+      const response = await recommendationService.getFreeEvents({
+        limit: 10,
+        location: userLocation,
+      });
+      if (response.success && response.data) {
+        setFreeEvents(response.data);
+        console.log('[Home/Free] Loaded:', response.data.length, 'events');
+      } else {
+        setFreeEvents([]);
+      }
+    } catch (error) {
+      console.error('[Home/Free] Error:', error);
+      setFreeEvents([]);
+    }
+  };
+
+  const loadWeekend = async (userLocation?: Location) => {
+    try {
+      const response = await recommendationService.getWeekend({
+        limit: 10,
+        location: userLocation,
+      });
+
       if (response.success && response.data) {
         setWeekend(response.data);
         console.log('[Home/Weekend] Loaded:', response.data.length, 'events');
@@ -268,9 +336,9 @@ function HomePage() {
       const response = await recommendationService.getLatest({
         excludeIds: Array.from(excludedIds.current),
         limit: 10,
-        location: userLocation, // 위치 정보 전달
+        location: userLocation,
       });
-      
+
       if (response.success && response.data) {
         setLatest(response.data);
         console.log('[Home/Latest] Loaded:', response.data.length, 'events');
@@ -293,9 +361,9 @@ function HomePage() {
     } catch (error) {
       console.error('[Home] Failed to log event click:', error);
     }
-    
+
     // 이벤트 상세 페이지로 이동
-    navigation.navigate(`/events/${eventId}`);
+    navigation.navigate('/events/:id', { id: eventId });
   };
 
   const handleRefresh = async () => {
@@ -428,6 +496,54 @@ function HomePage() {
           </View>
         )}
 
+        {/* 곧 끝나요 */}
+        {endingSoon.length >= 5 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>⏰ 곧 끝나요</Text>
+              <Text style={styles.sectionSubtitle}>7일 안에 마감되는 이벤트</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+            >
+              {endingSoon.map((event) => (
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  onPress={handleEventPress}
+                  variant="small"
+                />
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* 전시 큐레이션 */}
+        {exhibition.length >= 3 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>🎨 전시 큐레이션</Text>
+              <Text style={styles.sectionSubtitle}>놓치면 아쉬운 전시</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+            >
+              {exhibition.map((event) => (
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  onPress={handleEventPress}
+                  variant="small"
+                />
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
         {/* 이번 주말 */}
         {weekend.length > 0 && (
           <View style={styles.section}>
@@ -452,29 +568,29 @@ function HomePage() {
           </View>
         )}
 
-        {/* 취향 저격 - 로그인 유도 */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>❤️ 당신만을 위한 추천</Text>
-            <Text style={styles.sectionSubtitle}>나에게 딱 맞는 이벤트</Text>
+        {/* 무료로 즐겨요 */}
+        {freeEvents.length >= 5 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>💸 무료로 즐겨요</Text>
+              <Text style={styles.sectionSubtitle}>무료 입장 이벤트 모음</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+            >
+              {freeEvents.map((event) => (
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  onPress={handleEventPress}
+                  variant="small"
+                />
+              ))}
+            </ScrollView>
           </View>
-          <Pressable 
-            onPress={() => {
-              // TODO: 로그인 화면으로 이동
-              console.log('[Home] Login button pressed');
-            }}
-            style={styles.lockedSection}
-          >
-            <View style={styles.lockIcon}>
-              <Text style={styles.lockEmoji}>🔒</Text>
-            </View>
-            <Text style={styles.lockedTitle}>로그인하고</Text>
-            <Text style={styles.lockedSubtitle}>맞춤 추천을 받아보세요</Text>
-            <View style={styles.loginButton}>
-              <Text style={styles.loginButtonText}>로그인하기</Text>
-            </View>
-          </Pressable>
-        </View>
+        )}
 
         {/* 새로 올라왔어요 */}
         {latest.length > 0 && (
@@ -611,46 +727,6 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     color: '#6B7280',
-  },
-  // 취향 저격 잠금 섹션
-  lockedSection: {
-    marginHorizontal: 20,
-    padding: 32,
-    backgroundColor: '#F8F9FA',
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderStyle: 'dashed',
-  },
-  lockIcon: {
-    marginBottom: 12,
-  },
-  lockEmoji: {
-    fontSize: 48,
-  },
-  lockedTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1F2937',
-    marginBottom: 8,
-  },
-  lockedSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 20,
-  },
-  loginButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: '#3182F6',
-    borderRadius: 8,
-  },
-  loginButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#FFFFFF',
   },
 });
 

@@ -5,6 +5,7 @@
 
 import { createSuggestion, type FieldSuggestion, type DataSource } from './confidenceCalculator';
 import type { AIExtractedInfo } from './aiExtractor';
+import { buildNaverSearchUrl, getQueryStrategy } from './queryBuilder';
 
 export interface EventSuggestions {
   [fieldName: string]: FieldSuggestion;
@@ -28,6 +29,24 @@ export function buildSuggestionsFromAI(
   const suggestions: EventSuggestions = {};
   const currentEvent = context.currentEvent || {};
   const forceFields = context.forceFields || [];
+  
+  // 서버가 resolveIndexes()로 채운 sources 정보 (Naver 검색결과 기반, AI 생성 URL 아님)
+  const sources = (extracted as any).sources || {};
+  const getSourceInfo = (fieldName: string) => {
+    const sourceInfo = sources[fieldName];
+    if (!sourceInfo) return {};
+    // url은 반드시 Naver 검색결과에서 resolve된 값이어야 함
+    // AI가 직접 출력한 URL이 남아있으면 무시 (resolveIndexes가 먼저 처리하지만 방어 이중 체크)
+    const rawUrl = sourceInfo.url;
+    const safeUrl = (typeof rawUrl === 'string' && (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')))
+      ? rawUrl  // resolveIndexes가 채운 Naver URL이므로 허용
+      : undefined;
+    return {
+      evidence: sourceInfo.evidence,
+      reason: sourceInfo.reason,
+      url: safeUrl,
+    };
+  };
   
   // Helper: 필드가 제안 대상인지 확인
   const shouldSuggest = (fieldName: string, hasValue: boolean): boolean => {
@@ -75,7 +94,10 @@ export function buildSuggestionsFromAI(
         ? `Gemini extraction from ${context.searchResultCount || 0} search results`
         : 'Gemini extraction (no search results)',
       'overview',
-      { hasContextualData: context.hasSearchResults }
+      { 
+        hasContextualData: context.hasSearchResults,
+        ...getSourceInfo('overview') // 🆕 출처 정보 추가
+      }
     );
   }
 
@@ -95,7 +117,10 @@ export function buildSuggestionsFromAI(
       'AI',
       'Gemini extracted date',
       'start_at',
-      { hasContextualData: context.hasSearchResults }
+      { 
+        hasContextualData: context.hasSearchResults,
+        ...getSourceInfo('start_date') // 🆕 출처 정보 추가
+      }
     );
   }
 
@@ -105,7 +130,10 @@ export function buildSuggestionsFromAI(
       'AI',
       'Gemini extracted date',
       'end_at',
-      { hasContextualData: context.hasSearchResults }
+      { 
+        hasContextualData: context.hasSearchResults,
+        ...getSourceInfo('end_date') // 🆕 출처 정보 추가
+      }
     );
   }
 
@@ -119,7 +147,10 @@ export function buildSuggestionsFromAI(
       'AI',
       'Gemini extracted venue',
       'venue',
-      { hasContextualData: context.hasSearchResults }
+      { 
+        hasContextualData: context.hasSearchResults,
+        ...getSourceInfo('venue') // 🆕 출처 정보 추가
+      }
     );
   }
 
@@ -129,7 +160,10 @@ export function buildSuggestionsFromAI(
       'AI',
       'Gemini extracted address',
       'address',
-      { hasContextualData: context.hasSearchResults }
+      { 
+        hasContextualData: context.hasSearchResults,
+        ...getSourceInfo('address') // 🆕 출처 정보 추가
+      }
     );
   }
 
@@ -143,7 +177,10 @@ export function buildSuggestionsFromAI(
       'AI',
       'Gemini extracted price',
       'price_min',
-      { hasContextualData: context.hasSearchResults }
+      { 
+        hasContextualData: context.hasSearchResults,
+        ...getSourceInfo('price_min') // 🆕 출처 정보 추가
+      }
     );
   }
 
@@ -153,7 +190,10 @@ export function buildSuggestionsFromAI(
       'AI',
       'Gemini extracted price',
       'price_max',
-      { hasContextualData: context.hasSearchResults }
+      { 
+        hasContextualData: context.hasSearchResults,
+        ...getSourceInfo('price_max') // 🆕 출처 정보 추가
+      }
     );
   }
 
@@ -165,7 +205,40 @@ export function buildSuggestionsFromAI(
       'AI',
       'Gemini derived tags',
       'derived_tags',
-      { hasContextualData: context.hasSearchResults }
+      { 
+        hasContextualData: context.hasSearchResults,
+        ...getSourceInfo('derived_tags') // 🆕 출처 정보 추가
+      }
+    );
+  }
+
+  // 🚗 주차 정보: 선택한 필드에 포함되어 있으면 제안
+  const hasParkingAvailable = currentEvent.parking_available !== null && currentEvent.parking_available !== undefined;
+  const hasParkingInfo = currentEvent.parking_info && currentEvent.parking_info.trim() !== '';
+  
+  if (extracted.parking_available !== undefined && extracted.parking_available !== null && shouldSuggest('parking_available', hasParkingAvailable)) {
+    suggestions.parking_available = createSuggestion(
+      extracted.parking_available,
+      'AI',
+      'Gemini extracted parking availability',
+      'parking_available',
+      { 
+        hasContextualData: context.hasSearchResults,
+        ...getSourceInfo('parking_available') // 🆕 출처 정보 추가
+      }
+    );
+  }
+  
+  if (extracted.parking_info && shouldSuggest('parking_info', hasParkingInfo)) {
+    suggestions.parking_info = createSuggestion(
+      extracted.parking_info,
+      'AI',
+      'Gemini extracted parking info',
+      'parking_info',
+      { 
+        hasContextualData: context.hasSearchResults,
+        ...getSourceInfo('parking_info') // 🆕 출처 정보 추가
+      }
     );
   }
 
@@ -180,7 +253,10 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted hours',
         'opening_hours',
-        { hasContextualData: context.hasSearchResults }
+        { 
+          hasContextualData: context.hasSearchResults,
+          ...getSourceInfo('opening_hours') // 🆕 출처 정보 추가
+        }
       );
     }
   }
@@ -194,31 +270,42 @@ export function buildSuggestionsFromAI(
     const hasTicketLink = !!currentLinks.ticket;
     const hasReservationLink = !!currentLinks.reservation;
     
-    if (links.official && shouldSuggest('external_links.official', hasOfficialLink)) {
+    // external_links URL은 resolveIndexes()가 Naver 검색결과에서 채운 값만 허용
+    // links.official_index 등 AI 원본 index 필드는 무시하고 resolve된 string만 사용
+    if (links.official && typeof links.official === 'string' && shouldSuggest('external_links.official', hasOfficialLink)) {
       suggestions['external_links.official'] = createSuggestion(
         links.official,
-        'AI',
-        'Gemini extracted official link',
+        'NAVER_API',  // AI 생성이 아닌 Naver 검색결과에서 resolve된 URL
+        'Resolved from Naver search results via official_index',
         'external_links.official',
-        { hasContextualData: context.hasSearchResults }
+        {
+          hasContextualData: context.hasSearchResults,
+          ...getSourceInfo('external_links.official'),
+        }
       );
     }
-    if (links.ticket && shouldSuggest('external_links.ticket', hasTicketLink)) {
+    if (links.ticket && typeof links.ticket === 'string' && shouldSuggest('external_links.ticket', hasTicketLink)) {
       suggestions['external_links.ticket'] = createSuggestion(
         links.ticket,
-        'AI',
-        'Gemini extracted ticket link',
+        'NAVER_API',
+        'Resolved from Naver search results via ticket_index',
         'external_links.ticket',
-        { hasContextualData: context.hasSearchResults }
+        {
+          hasContextualData: context.hasSearchResults,
+          ...getSourceInfo('external_links.ticket'),
+        }
       );
     }
-    if (links.reservation && shouldSuggest('external_links.reservation', hasReservationLink)) {
+    if (links.reservation && typeof links.reservation === 'string' && shouldSuggest('external_links.reservation', hasReservationLink)) {
       suggestions['external_links.reservation'] = createSuggestion(
         links.reservation,
-        'AI',
-        'Gemini extracted reservation link',
+        'NAVER_API',
+        'Resolved from Naver search results via reservation_index',
         'external_links.reservation',
-        { hasContextualData: context.hasSearchResults }
+        {
+          hasContextualData: context.hasSearchResults,
+          ...getSourceInfo('external_links.reservation'),
+        }
       );
     }
   }
@@ -239,7 +326,10 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted artists',
         'metadata.display.exhibition.artists',
-        { hasContextualData: context.hasSearchResults }
+        { 
+          hasContextualData: context.hasSearchResults,
+          ...getSourceInfo('exhibition_display.artists') // 🆕 출처 정보 추가
+        }
       );
     }
     
@@ -250,7 +340,10 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted genre',
         'metadata.display.exhibition.genre',
-        { hasContextualData: context.hasSearchResults }
+        { 
+          hasContextualData: context.hasSearchResults,
+          ...getSourceInfo('exhibition_display.genre') // 🆕 출처 정보 추가
+        }
       );
     }
     
@@ -261,7 +354,10 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted duration',
         'metadata.display.exhibition.duration_minutes',
-        { hasContextualData: context.hasSearchResults }
+        { 
+          hasContextualData: context.hasSearchResults,
+          ...getSourceInfo('exhibition_display.duration_minutes') // 🆕 출처 정보 추가
+        }
       );
     }
     
@@ -272,7 +368,10 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted exhibition type',
         'metadata.display.exhibition.type',
-        { hasContextualData: context.hasSearchResults }
+        { 
+          hasContextualData: context.hasSearchResults,
+          ...getSourceInfo('exhibition_display.type') // 🆕 출처 정보 추가
+        }
       );
     }
     
@@ -283,7 +382,10 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted facilities',
         'metadata.display.exhibition.facilities',
-        { hasContextualData: context.hasSearchResults }
+        { 
+          hasContextualData: context.hasSearchResults,
+          ...getSourceInfo('exhibition_display.facilities') // 🆕 출처 정보 추가
+        }
       );
     }
     
@@ -294,7 +396,10 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted docent tour info',
         'metadata.display.exhibition.docent_tour',
-        { hasContextualData: context.hasSearchResults }
+        { 
+          hasContextualData: context.hasSearchResults,
+          ...getSourceInfo('exhibition_display.docent_tour') // 🆕 출처 정보 추가
+        }
       );
     }
   }
@@ -311,7 +416,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted cast',
         'metadata.display.performance.cast',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('performance_display.cast') }
       );
     }
     
@@ -322,7 +427,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted genre',
         'metadata.display.performance.genre',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('performance_display.genre') }
       );
     }
     
@@ -333,7 +438,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted duration',
         'metadata.display.performance.duration_minutes',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('performance_display.duration_minutes') }
       );
     }
     
@@ -344,7 +449,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted age limit',
         'metadata.display.performance.age_limit',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('performance_display.age_limit') }
       );
     }
     
@@ -355,7 +460,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted intermission info',
         'metadata.display.performance.intermission',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('performance_display.intermission') }
       );
     }
     
@@ -366,7 +471,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted discounts',
         'metadata.display.performance.discounts',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('performance_display.discounts') }
       );
     }
   }
@@ -384,7 +489,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted organizer',
         'metadata.display.festival.organizer',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('festival_display.organizer') }
       );
     }
     
@@ -395,7 +500,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted program highlights',
         'metadata.display.festival.program_highlights',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('festival_display.program_highlights') }
       );
     }
     
@@ -406,7 +511,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted food and booths',
         'metadata.display.festival.food_and_booths',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('festival_display.food_and_booths') }
       );
     }
     
@@ -417,7 +522,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted scale',
         'metadata.display.festival.scale_text',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('festival_display.scale_text') }
       );
     }
     
@@ -428,7 +533,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted parking tips',
         'metadata.display.festival.parking_tips',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('festival_display.parking_tips') }
       );
     }
   }
@@ -446,7 +551,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted target audience',
         'metadata.display.event.target_audience',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('event_display.target_audience') }
       );
     }
     
@@ -457,7 +562,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted capacity',
         'metadata.display.event.capacity',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('event_display.capacity') }
       );
     }
     
@@ -468,7 +573,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted registration info',
         'metadata.display.event.registration',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('event_display.registration') }
       );
     }
   }
@@ -486,7 +591,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted popup type',
         'metadata.display.popup.type',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('popup_display.type') }
       );
     }
     
@@ -498,7 +603,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted brands',
         'metadata.display.popup.brands',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('popup_display.brands') }
       );
     }
     
@@ -510,7 +615,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted collaboration description',
         'metadata.display.popup.collab_description',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('popup_display.collab_description') }
       );
     }
     
@@ -522,7 +627,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted F&B status',
         'metadata.display.popup.is_fnb',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('popup_display.is_fnb') }
       );
     }
     
@@ -539,7 +644,7 @@ export function buildSuggestionsFromAI(
           'AI',
           'Gemini extracted signature menu',
           'metadata.display.popup.fnb_items.signature_menu',
-          { hasContextualData: context.hasSearchResults }
+          { hasContextualData: context.hasSearchResults, ...getSourceInfo('popup_display.fnb_items.signature_menu') }
         );
       }
       
@@ -552,7 +657,7 @@ export function buildSuggestionsFromAI(
           'AI',
           'Gemini extracted menu categories',
           'metadata.display.popup.fnb_items.menu_categories',
-          { hasContextualData: context.hasSearchResults }
+          { hasContextualData: context.hasSearchResults, ...getSourceInfo('popup_display.fnb_items.menu_categories') }
         );
       }
       
@@ -564,7 +669,7 @@ export function buildSuggestionsFromAI(
           'AI',
           'Gemini extracted price range',
           'metadata.display.popup.fnb_items.price_range',
-          { hasContextualData: context.hasSearchResults }
+          { hasContextualData: context.hasSearchResults, ...getSourceInfo('popup_display.fnb_items.price_range') }
         );
       }
       
@@ -576,7 +681,7 @@ export function buildSuggestionsFromAI(
           'AI',
           'Gemini extracted F&B items',
           'metadata.display.popup.fnb_items',
-          { hasContextualData: context.hasSearchResults }
+          { hasContextualData: context.hasSearchResults, ...getSourceInfo('popup_display.fnb_items') }
         );
       }
     }
@@ -589,7 +694,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted goods',
         'metadata.display.popup.goods_items',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('popup_display.goods_items') }
       );
     }
     
@@ -601,7 +706,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted photo zone',
         'metadata.display.popup.photo_zone',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('popup_display.photo_zone') }
       );
     }
     
@@ -613,7 +718,7 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted photo zone description',
         'metadata.display.popup.photo_zone_desc',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('popup_display.photo_zone_desc') }
       );
     }
     
@@ -625,88 +730,125 @@ export function buildSuggestionsFromAI(
         'AI',
         'Gemini extracted waiting hint',
         'metadata.display.popup.waiting_hint',
-        { hasContextualData: context.hasSearchResults }
+        { hasContextualData: context.hasSearchResults, ...getSourceInfo('popup_display.waiting_hint') }
       );
     }
   }
 
-  // 🆕 선택한 필드 중 정보를 못 찾은 필드에 대한 설명 추가
+  // 선택한 필드 중 정보를 못 찾은 필드에 대한 품질 게이트 처리
+  // forceFields=[] 이어도 "값은 있지만 근거(url/evidence/provider) 없는 제안"에 경고 플래그 추가
+  const fieldDescriptions: Record<string, string> = {
+    'overview': '개요',
+    'start_at': '시작 날짜',
+    'end_at': '종료 날짜',
+    'venue': '장소',
+    'address': '주소',
+    'price_min': '최소 가격',
+    'price_max': '최대 가격',
+    'derived_tags': '태그',
+    'opening_hours': '운영 시간',
+    'external_links': '외부 링크',
+    'external_links.official': '공식 링크',
+    'external_links.ticket': '티켓 링크',
+    'external_links.reservation': '예약 링크',
+    'parking_available': '주차 가능 여부',
+    'parking_info': '주차 상세',
+    'metadata.display.exhibition.artists': '작가/아티스트',
+    'metadata.display.exhibition.genre': '전시 장르',
+    'metadata.display.exhibition.type': '전시 유형',
+    'metadata.display.exhibition.duration_minutes': '관람 시간',
+    'metadata.display.exhibition.facilities': '편의시설',
+    'metadata.display.exhibition.docent_tour': '도슨트 투어',
+    'metadata.display.performance.cast': '출연진',
+    'metadata.display.performance.genre': '공연 장르',
+    'metadata.display.performance.duration_minutes': '공연 시간',
+    'metadata.display.performance.intermission': '인터미션',
+    'metadata.display.performance.age_limit': '연령 제한',
+    'metadata.display.performance.discounts': '할인 정보',
+    'metadata.display.festival.organizer': '주최/주관',
+    'metadata.display.festival.program_highlights': '주요 프로그램',
+    'metadata.display.festival.food_and_booths': '먹거리/부스',
+    'metadata.display.festival.scale_text': '규모',
+    'metadata.display.festival.parking_tips': '주차 정보',
+    'metadata.display.event.target_audience': '참가 대상',
+    'metadata.display.event.capacity': '정원',
+    'metadata.display.event.registration': '사전 등록 정보',
+    'metadata.display.popup.type': '팝업 타입',
+    'metadata.display.popup.brands': '브랜드',
+    'metadata.display.popup.collab_description': '콜라보 설명',
+    'metadata.display.popup.fnb_items': 'F&B 메뉴',
+    'metadata.display.popup.fnb_items.signature_menu': '시그니처 메뉴',
+    'metadata.display.popup.fnb_items.menu_categories': '메뉴 카테고리',
+    'metadata.display.popup.fnb_items.price_range': 'F&B 가격대',
+    'metadata.display.popup.goods_items': '굿즈',
+    'metadata.display.popup.photo_zone': '포토존 여부',
+    'metadata.display.popup.photo_zone_desc': '포토존 설명',
+    'metadata.display.popup.waiting_hint': '대기 시간',
+  };
+
+  // 품질 게이트: 값은 있지만 evidence/url/provider가 모두 없으면 ⚠️ 플래그
+  Object.entries(suggestions).forEach(([fieldName, suggestion]) => {
+    if (suggestion.value !== null && suggestion.value !== undefined) {
+      const hasEvidence = !!(suggestion.evidence || suggestion.url);
+      if (!hasEvidence && suggestion.source === 'AI') {
+        // evidence가 없는 AI 제안 → 경고 플래그 (값은 유지하되 warning 추가)
+        if (!suggestion.warning) {
+          (suggestion as any).warning = `근거 데이터 없이 AI가 추론한 값이에요. 직접 확인 후 적용하세요.`;
+        }
+        (suggestion as any).hasEvidenceGap = true;
+      }
+    }
+  });
+
+  // 선택 필드 중 제안이 없는 경우 → null + reasonCode
   if (forceFields.length > 0) {
     console.log('[SuggestionBuilder] Checking for missing fields in forceFields:', forceFields);
-    
-    const fieldDescriptions: Record<string, string> = {
-      'overview': '개요',
-      'start_at': '시작 날짜',
-      'end_at': '종료 날짜',
-      'venue': '장소',
-      'address': '주소',
-      'price_min': '최소 가격',
-      'price_max': '최대 가격',
-      'derived_tags': '태그',
-      'opening_hours': '운영 시간',
-      'external_links': '외부 링크',
-      'external_links.official': '공식 링크',
-      'external_links.ticket': '티켓 링크',
-      'external_links.reservation': '예약 링크',
-      'metadata.display.exhibition.artists': '작가/아티스트',
-      'metadata.display.exhibition.genre': '전시 장르',
-      'metadata.display.exhibition.type': '전시 유형',
-      'metadata.display.exhibition.duration_minutes': '관람 시간',
-      'metadata.display.exhibition.facilities': '편의시설',
-      'metadata.display.exhibition.docent_tour': '도슨트 투어',
-      'metadata.display.performance.cast': '출연진',
-      'metadata.display.performance.genre': '공연 장르',
-      'metadata.display.performance.duration_minutes': '공연 시간',
-      'metadata.display.performance.intermission': '인터미션',
-      'metadata.display.performance.age_limit': '연령 제한',
-      'metadata.display.performance.discounts': '할인 정보',
-      'metadata.display.festival.organizer': '주최/주관',
-      'metadata.display.festival.program_highlights': '주요 프로그램',
-      'metadata.display.festival.food_and_booths': '먹거리/부스',
-      'metadata.display.festival.scale_text': '규모',
-      'metadata.display.festival.parking_tips': '주차 정보',
-      'metadata.display.event.target_audience': '참가 대상',
-      'metadata.display.event.capacity': '정원',
-      'metadata.display.event.registration': '사전 등록 정보',
-      'metadata.display.popup.type': '팝업 타입',
-      'metadata.display.popup.brands': '브랜드',
-      'metadata.display.popup.collab_description': '콜라보 설명',
-      'metadata.display.popup.fnb_items': 'F&B 메뉴',
-      'metadata.display.popup.fnb_items.signature_menu': '시그니처 메뉴',
-      'metadata.display.popup.fnb_items.menu_categories': '메뉴 카테고리',
-      'metadata.display.popup.fnb_items.price_range': 'F&B 가격대',
-      'metadata.display.popup.goods_items': '굿즈',
-      'metadata.display.popup.photo_zone': '포토존 여부',
-      'metadata.display.popup.photo_zone_desc': '포토존 설명',
-      'metadata.display.popup.waiting_hint': '대기 시간',
-    };
-    
+
     forceFields.forEach(fieldName => {
+      if (fieldName === '*') return;
       // 이미 제안이 있는 필드는 건너뛰기
       if (suggestions[fieldName]) return;
-      
-      // 부모 필드가 제안되었는지 확인 (예: external_links.official의 부모는 external_links)
+
+      // 부모 필드가 제안되었는지 확인
       const parentField = fieldName.split('.').slice(0, -1).join('.');
       if (parentField && suggestions[parentField]) return;
-      
-      // 자식 필드가 제안되었는지 확인 (예: metadata.display.popup의 자식들)
+
+      // 자식 필드가 제안되었는지 확인
       const hasChildSuggestion = Object.keys(suggestions).some(key => key.startsWith(fieldName + '.'));
       if (hasChildSuggestion) return;
-      
-      // 정보를 못 찾은 필드에 대한 설명 추가
+
       const fieldDesc = fieldDescriptions[fieldName] || fieldName;
-      const searchMethod = context.hasSearchResults ? '네이버 검색 결과' : 'AI 직접 검색 (Google Grounding)';
-      
-      console.log(`[SuggestionBuilder] ⚠️ No suggestion for selected field: ${fieldName} (${fieldDesc})`);
-      
+      const strategy = getQueryStrategy(fieldName);
+
+      console.log(`[SuggestionBuilder] ⚠️ No suggestion for selected field: ${fieldName} (${fieldDesc}) strategy=${strategy}`);
+
+      // 이벤트 정보로 네이버 바로 검색 링크 생성 (필드별 최적화)
+      const naverSearchUrl = buildNaverSearchUrl(fieldName, {
+        title: currentEvent.title || '',
+        venue: currentEvent.venue || '',
+        address: currentEvent.address || '',
+        region: currentEvent.region || '',
+        category: context.category || '',
+      });
+
+      // 필드별 맞춤 메시지
+      let reasonMessage: string;
+      if (strategy === 'venue-first') {
+        reasonMessage = `지금은 장소 기준으로도 "${fieldDesc}" 근거를 찾기 어려워요. 네이버에서 한 번 확인해 주세요.`;
+      } else {
+        reasonMessage = `"${fieldDesc}" 정보를 찾지 못했어요. 네이버에서 직접 검색해 확인해 보세요.`;
+      }
+
       suggestions[fieldName] = {
         value: null,
         confidence: 0,
         source: 'AI',
-        source_detail: `${searchMethod}에서 찾을 수 없음`,
-        warning: `⚠️ "${fieldDesc}" 정보를 찾을 수 없습니다.\n\n가능한 이유:\n• ${searchMethod}에 해당 정보가 없음\n• 이벤트명이 부정확하거나 너무 일반적임\n• 이벤트가 최신이어서 온라인에 정보가 부족함\n\n💡 수동으로 입력하거나, 다른 소스에서 정보를 확인해주세요.`,
+        source_detail: context.hasSearchResults ? '네이버 검색 결과에서 찾을 수 없음' : 'AI 직접 추론 불가',
+        reasonCode: strategy === 'venue-first' ? 'NAVER_PLACE_NO_EVIDENCE' : 'NAVER_NO_EVIDENCE',
+        reasonMessage,
+        naverSearchUrl,
         extracted_at: new Date().toISOString(),
-      };
+      } as any;
     });
   }
 

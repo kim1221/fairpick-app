@@ -98,6 +98,13 @@ export const EventCard: React.FC<EventCardProps> = ({ event, onPress, variant = 
       <View style={styles.categoryBadge}>
         <Text style={styles.categoryBadgeText}>{event.category}</Text>
       </View>
+
+      {/* 지역 배지 */}
+      {event.region && (
+        <View style={styles.regionBadge}>
+          <Text style={styles.regionBadgeText}>📍 {event.region}</Text>
+        </View>
+      )}
     </View>
   );
 
@@ -313,6 +320,22 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '600',
+  },
+
+  // 지역 배지
+  regionBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  regionBadgeText: {
+    color: '#1A1A1A',
+    fontSize: 11,
+    fontWeight: '500',
   },
 
   // 콘텐츠

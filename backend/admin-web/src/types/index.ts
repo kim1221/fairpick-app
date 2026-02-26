@@ -11,6 +11,13 @@ export interface FieldSuggestion {
   source_detail: string;
   warning?: string;
   extracted_at: string;
+  // 근거 품질 필드
+  evidence?: string;        // 네이버 검색 snippet
+  url?: string;             // 네이버 검색 URL (resolveIndexes가 채운 값만)
+  reason?: string;          // 추출 이유 설명
+  // 제안 실패 시
+  reasonCode?: string;      // SuggestionReasonCode
+  reasonMessage?: string;   // 해요체 실패 안내 메시지
 }
 
 export interface EventSuggestions {
@@ -64,11 +71,37 @@ export interface PerformanceDisplay {
   last_admission?: string | null;
 }
 
+// 축제 (Festival)
+export interface FestivalDisplay {
+  [key: string]: any;
+}
+
+// 행사 (Event)
+export interface EventDisplay {
+  [key: string]: any;
+}
+
+// 팝업 (Popup)
+export interface PopupDisplay {
+  brand?: string;
+  type?: string;
+  goods?: string[];
+  has_photo_zone?: boolean;
+  photo_zone_description?: string | null;
+  wait_time?: string | null;
+  is_fnb?: boolean;
+  best_items?: string[];
+  [key: string]: any;
+}
+
 // metadata 구조
 export interface EventMetadata {
   display?: {
     exhibition?: ExhibitionDisplay;
     performance?: PerformanceDisplay;
+    festival?: FestivalDisplay;
+    event?: EventDisplay;
+    popup?: PopupDisplay;
   };
   internal?: {
     companions?: string[];
@@ -123,6 +156,8 @@ export interface Event {
     reservation?: string;
     instagram?: string;
   };
+  parking_available?: boolean | null;  // 🚗 주차 가능 여부
+  parking_info?: string | null;        // 🅿️ 주차 상세 정보
   status?: string;
   quality_flags?: {
     has_real_image?: boolean;
@@ -169,7 +204,7 @@ export interface PaginatedResponse<T> {
   size: number;
 }
 
-// 팝업 생성 폼 (7개 핵심 필드 + Instagram URL + 이미지)
+// 팝업 생성 폼 (7개 핵심 필드 + Instagram URL + 이미지 + Phase 1 공통 필드)
 export interface PopupFormData {
   instagramUrl: string;
   title: string;
@@ -186,6 +221,30 @@ export interface PopupFormData {
   imageSourcePageUrl?: string;
   imageKey?: string;
   imageMetadata?: ImageMetadata;
+  // Phase 1 공통 필드
+  is_free?: boolean;
+  price_info?: string | null;
+  external_links?: {
+    official?: string;
+    ticket?: string;
+    reservation?: string;
+    instagram?: string;
+  };
+  price_min?: number | null;
+  price_max?: number | null;
+  source_tags?: string[];
+  derived_tags?: string[];
+  opening_hours?: {
+    weekday?: string;
+    weekend?: string;
+    holiday?: string;
+    closed?: string;
+    notes?: string;
+  };
+  parking_available?: boolean | null;
+  parking_info?: string | null;
+  // Phase 3: 카테고리별 특화 필드
+  metadata?: EventMetadata;
 }
 
 // 이미지 메타데이터

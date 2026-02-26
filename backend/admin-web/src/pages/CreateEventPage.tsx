@@ -1,6 +1,8 @@
 import { useState, type FormEvent, type ChangeEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { adminApi } from '../services/api';
+import FieldSelectorModal from '../components/FieldSelectorModal';
+import DeployChecklist from '../components/DeployChecklist';
 
 interface EventFormData {
   mainCategory: string;
@@ -45,6 +47,9 @@ interface EventFormData {
   sourceTags?: string[];
   derivedTags?: string[];
   openingHours?: Record<string, string>;
+  // 주차 정보
+  parkingAvailable?: boolean | null;
+  parkingInfo?: string | null;
   // 🆕 카테고리별 특화 필드
   metadata?: {
     display?: {
@@ -66,9 +71,8 @@ export default function CreateEventPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [agreedCopyright, setAgreedCopyright] = useState(false);
   const [autoFillStatus, setAutoFillStatus] = useState<Record<string, boolean>>({});
-  // 🆕 필드 선택 기능
-  const [showFieldSelector, setShowFieldSelector] = useState(false);
-  const [selectedFields, setSelectedFields] = useState<string[]>([]);
+  // 🆕 필드 선택 기능 (EventsPage와 동일)
+  const [showFieldSelectorModal, setShowFieldSelectorModal] = useState(false);
   // 🆕 AI 제안 시스템
   const [aiSuggestions, setAiSuggestions] = useState<any>(null);
 
@@ -124,9 +128,14 @@ export default function CreateEventPage() {
         sourceTags: [],
         derivedTags: [],
         openingHours: {},
+        // 주차 정보
+        parkingAvailable: null,
+        parkingInfo: null,
+        // 🆕 Phase 3: 카테고리별 특화 필드
+        metadata: {},
       };
     }
-    
+
     // 일반 모드
     return {
       mainCategory: '',
@@ -157,11 +166,16 @@ export default function CreateEventPage() {
       sourceTags: [],
       derivedTags: [],
       openingHours: {},
+      // 주차 정보
+      parkingAvailable: null,
+      parkingInfo: null,
+      // 🆕 Phase 3: 카테고리별 특화 필드
+      metadata: {},
     };
   });
 
-  // 빈 필드만 AI 보완 (네이버 API + AI) - 직접 적용
-  const handleAutoFill = async () => {
+  // 🆕 통합 AI 보완 함수 (EventsPage와 동일 패턴)
+  const handleAIEnrichPreview = async (forceFields: string[] = []) => {
     if (!formData.title) {
       alert('제목을 먼저 입력하세요!');
       return;
@@ -176,421 +190,102 @@ export default function CreateEventPage() {
         venue: formData.venue || undefined,
         main_category: formData.mainCategory || undefined,
         overview: formData.overview || undefined,
+        selectedFields: forceFields.length > 0 && !forceFields.includes('*') ? forceFields : undefined,
       });
 
-      // 🆕 Phase 2: 제안 시스템
+      if (!result.success) {
+        alert(result.message || 'AI 분석에 실패했습니다.');
+        return;
+      }
+
+      // Phase 2: 제안 시스템
       if (result.suggestions) {
-        // 빈 필드만 보완은 자동 적용
+        // forceFields가 비어있거나 '*'이면 빈 필드만 보완
+        const isEmptyFieldsOnly = forceFields.length === 0;
+        const isForceAll = forceFields.includes('*');
+
         const enriched: any = {};
         Object.keys(result.suggestions).forEach((fieldName) => {
           const suggestion = result.suggestions[fieldName];
           enriched[fieldName] = suggestion.value;
         });
 
-        // 결과를 폼에 자동 입력 (빈 필드만)
-        setFormData((prev) => ({
-          ...prev,
-          // 기본 정보 (빈 필드만)
-          startAt: !prev.startAt && enriched.start_at ? enriched.start_at : prev.startAt,
-          endAt: !prev.endAt && enriched.end_at ? enriched.end_at : prev.endAt,
-          venue: !prev.venue && enriched.venue ? enriched.venue : prev.venue,
-          address: !prev.address && enriched.address ? enriched.address : prev.address,
-          overview: !prev.overview && enriched.overview ? enriched.overview : prev.overview,
+        // 결과를 폼에 적용
+        setFormData((prev) => {
+          const shouldUpdate = (fieldKey: string, currentValue: any) => {
+            if (isForceAll) return true; // 전체 재생성이면 무조건 업데이트
+            if (isEmptyFieldsOnly) {
+              // 빈 필드만 모드: 현재 값이 비어있을 때만 업데이트
+              if (Array.isArray(currentValue)) return currentValue.length === 0;
+              if (typeof currentValue === 'object' && currentValue !== null) return Object.keys(currentValue).length === 0;
+              return !currentValue || currentValue === '' || currentValue === null;
+            }
+            // 선택한 필드 모드: forceFields에 포함된 경우만 업데이트
+            return forceFields.includes(fieldKey);
+          };
 
-          // 지오코딩 결과 (빈 필드만)
-          lat: prev.lat ?? enriched.lat ?? prev.lat,
-          lng: prev.lng ?? enriched.lng ?? prev.lng,
-          region: !prev.region && enriched.region ? enriched.region : prev.region,
+          // 🆕 metadata 필드 처리
+          const updatedMetadata: any = { ...prev.metadata };
+          Object.keys(enriched).forEach((key) => {
+            if (key.startsWith('metadata.display.')) {
+              const parts = key.split('.');
+              if (parts.length >= 4) {
+                const category = parts[2]; // exhibition, performance, popup, etc.
+                const field = parts.slice(3).join('.'); // 나머지 경로
 
-          // 추가 정보 (빈 필드만)
-          derivedTags: !prev.derivedTags?.length && enriched.derived_tags ? enriched.derived_tags : prev.derivedTags,
-          openingHours: Object.keys(prev.openingHours || {}).length === 0 && enriched.opening_hours ? enriched.opening_hours : prev.openingHours,
-          priceMin: prev.priceMin == null && enriched.price_min != null ? enriched.price_min : prev.priceMin,
-          priceMax: prev.priceMax == null && enriched.price_max != null ? enriched.price_max : prev.priceMax,
-          externalLinks: {
-            official: prev.externalLinks?.official || enriched['external_links.official'] || '',
-            ticket: prev.externalLinks?.ticket || enriched['external_links.ticket'] || '',
-            reservation: prev.externalLinks?.reservation || enriched['external_links.reservation'] || '',
-          },
-        }));
+                if (shouldUpdate(key, prev.metadata?.display?.[category as any]?.[field])) {
+                  if (!updatedMetadata.display) updatedMetadata.display = {};
+                  if (!updatedMetadata.display[category]) updatedMetadata.display[category] = {};
 
-        alert(`✅ 빈 필드 ${Object.keys(result.suggestions).length}개 자동 채우기 완료!`);
-        return;
-      }
-
-      // 🆕 Fallback (기존 enriched 형식)
-      if (!result.success || !result.enriched) {
-        alert(result.message || 'AI 분석에 실패했습니다.');
-        return;
-      }
-
-      const enriched = result.enriched;
-
-      // 결과를 폼에 자동 입력
-      setFormData((prev) => ({
-        ...prev,
-        // 기본 정보
-        startAt: enriched.start_date || prev.startAt,
-        endAt: enriched.end_date || prev.endAt,
-        venue: enriched.venue || prev.venue,
-        address: enriched.address || prev.address,
-        overview: enriched.overview || prev.overview,
-
-        // 지오코딩 결과
-        lat: enriched.lat ?? prev.lat,
-        lng: enriched.lng ?? prev.lng,
-        region: enriched.region || prev.region,
-
-        // 추가 정보
-        derivedTags: enriched.derived_tags || prev.derivedTags,
-        openingHours: enriched.opening_hours || prev.openingHours,
-        priceMin: enriched.price_min ?? prev.priceMin,
-        priceMax: enriched.price_max ?? prev.priceMax,
-        externalLinks: {
-          ...prev.externalLinks,
-          ...enriched.external_links,
-        },
-      }));
-
-      // 채워진 필드 표시
-      setAutoFillStatus({
-        startAt: !!enriched.start_date,
-        endAt: !!enriched.end_date,
-        venue: !!enriched.venue,
-        address: !!enriched.address,
-        overview: !!enriched.overview,
-        derivedTags: !!enriched.derived_tags && enriched.derived_tags.length > 0,
-        openingHours: !!enriched.opening_hours,
-        priceMin: enriched.price_min !== null && enriched.price_min !== undefined,
-        priceMax: enriched.price_max !== null && enriched.price_max !== undefined,
-        externalLinks: !!enriched.external_links,
-      });
-
-      // 성공 메시지
-      const filledFields: string[] = [];
-      if (enriched.start_date) filledFields.push('시작일');
-      if (enriched.end_date) filledFields.push('종료일');
-      if (enriched.venue) filledFields.push('장소');
-      if (enriched.address) filledFields.push('주소');
-      if (enriched.lat && enriched.lng) filledFields.push('좌표');
-      if (enriched.overview) filledFields.push('개요');
-      if (enriched.derived_tags?.length) filledFields.push('태그');
-      if (enriched.opening_hours) filledFields.push('운영시간');
-      if (enriched.price_min !== null || enriched.price_max !== null) filledFields.push('가격');
-      if (enriched.external_links) filledFields.push('예매링크');
-
-      alert(`✅ AI 자동 채우기 완료!\n\n채워진 항목: ${filledFields.join(', ')}`);
-    } catch (error: any) {
-      console.error('[AutoFill] Error:', error);
-      alert('AI 분석 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
-    } finally {
-      setAutoFillLoading(false);
-    }
-  };
-
-  // AI만으로 빈 필드 보완 (네이버 API 없이) - 직접 적용
-  const handleAutoFillAIOnly = async () => {
-    if (!formData.title) {
-      alert('제목을 먼저 입력하세요!');
-      return;
-    }
-
-    setAutoFillLoading(true);
-    setAutoFillStatus({});
-
-    try {
-      const result = await adminApi.enrichEventPreviewAIOnly({
-        title: formData.title,
-        venue: formData.venue || undefined,
-        main_category: formData.mainCategory || undefined,
-        overview: formData.overview || undefined,
-      });
-
-      // 🆕 Phase 2: 제안 시스템
-      if (result.suggestions) {
-        // AI만으로 빈 필드 보완은 자동 적용
-        const enriched: any = {};
-        Object.keys(result.suggestions).forEach((fieldName) => {
-          const suggestion = result.suggestions[fieldName];
-          enriched[fieldName] = suggestion.value;
-        });
-
-        // 결과를 폼에 "빈 필드만" merge
-        setFormData((prev) => ({
-          ...prev,
-          startAt: !prev.startAt && enriched.start_at ? enriched.start_at : prev.startAt,
-          endAt: !prev.endAt && enriched.end_at ? enriched.end_at : prev.endAt,
-          venue: !prev.venue && enriched.venue ? enriched.venue : prev.venue,
-          address: !prev.address && enriched.address ? enriched.address : prev.address,
-          overview: !prev.overview && enriched.overview ? enriched.overview : prev.overview,
-          lat: prev.lat ?? enriched.lat ?? prev.lat,
-          lng: prev.lng ?? enriched.lng ?? prev.lng,
-          region: !prev.region && enriched.region ? enriched.region : prev.region,
-          derivedTags: !prev.derivedTags?.length && enriched.derived_tags ? enriched.derived_tags : prev.derivedTags,
-          openingHours: Object.keys(prev.openingHours || {}).length === 0 && enriched.opening_hours ? enriched.opening_hours : prev.openingHours,
-          priceMin: prev.priceMin == null && enriched.price_min != null ? enriched.price_min : prev.priceMin,
-          priceMax: prev.priceMax == null && enriched.price_max != null ? enriched.price_max : prev.priceMax,
-          externalLinks: {
-            official: prev.externalLinks?.official || enriched['external_links.official'] || '',
-            ticket: prev.externalLinks?.ticket || enriched['external_links.ticket'] || '',
-            reservation: prev.externalLinks?.reservation || enriched['external_links.reservation'] || '',
-          },
-        }));
-
-        alert(`✅ AI만으로 빈 필드 ${Object.keys(result.suggestions).length}개 자동 채우기 완료! (네이버 검색 없이)`);
-        return;
-      }
-
-      // Fallback
-      if (!result.success || !result.enriched) {
-        alert(result.message || 'AI 분석에 실패했습니다.');
-        return;
-      }
-
-      const enriched = result.enriched;
-
-      // 결과를 폼에 "빈 필드만" merge (기존 값은 덮어쓰지 않음)
-      setFormData((prev) => ({
-        ...prev,
-        // 기본 정보 (빈 필드만)
-        startAt: prev.startAt || enriched.start_date || prev.startAt,
-        endAt: prev.endAt || enriched.end_date || prev.endAt,
-        venue: prev.venue || enriched.venue || prev.venue,
-        address: prev.address || enriched.address || prev.address,
-        overview: prev.overview || enriched.overview || prev.overview,
-
-        // 지오코딩 결과 (빈 필드만)
-        lat: prev.lat ?? enriched.lat ?? prev.lat,
-        lng: prev.lng ?? enriched.lng ?? prev.lng,
-        region: prev.region || enriched.region || prev.region,
-
-        // 추가 정보 (빈 필드만)
-        derivedTags: prev.derivedTags?.length ? prev.derivedTags : (enriched.derived_tags || prev.derivedTags),
-        openingHours: Object.keys(prev.openingHours || {}).length > 0 ? prev.openingHours : (enriched.opening_hours || prev.openingHours),
-        priceMin: prev.priceMin ?? enriched.price_min ?? prev.priceMin,
-        priceMax: prev.priceMax ?? enriched.price_max ?? prev.priceMax,
-        externalLinks: {
-          official: prev.externalLinks?.official || enriched.external_links?.official || '',
-          ticket: prev.externalLinks?.ticket || enriched.external_links?.ticket || '',
-          reservation: prev.externalLinks?.reservation || enriched.external_links?.reservation || '',
-        },
-      }));
-
-      // 채워진 필드 표시
-      setAutoFillStatus({
-        startAt: !!enriched.start_date,
-        endAt: !!enriched.end_date,
-        venue: !!enriched.venue,
-        address: !!enriched.address,
-        overview: !!enriched.overview,
-        derivedTags: !!enriched.derived_tags && enriched.derived_tags.length > 0,
-        openingHours: !!enriched.opening_hours,
-        priceMin: enriched.price_min !== null && enriched.price_min !== undefined,
-        priceMax: enriched.price_max !== null && enriched.price_max !== undefined,
-        externalLinks: !!enriched.external_links,
-      });
-
-      // 성공 메시지
-      const filledFields: string[] = [];
-      if (enriched.start_date && !formData.startAt) filledFields.push('시작일');
-      if (enriched.end_date && !formData.endAt) filledFields.push('종료일');
-      if (enriched.venue && !formData.venue) filledFields.push('장소');
-      if (enriched.address && !formData.address) filledFields.push('주소');
-      if (enriched.lat && enriched.lng && !formData.lat) filledFields.push('좌표');
-      if (enriched.overview && !formData.overview) filledFields.push('개요');
-      if (enriched.derived_tags?.length && !formData.derivedTags?.length) filledFields.push('태그');
-      if (enriched.opening_hours && !Object.keys(formData.openingHours || {}).length) filledFields.push('운영시간');
-      if ((enriched.price_min !== null || enriched.price_max !== null) && (formData.priceMin === null || formData.priceMin === undefined)) filledFields.push('가격');
-      if (enriched.external_links && !formData.externalLinks?.official) filledFields.push('예매링크');
-
-      alert(`✅ AI만으로 빈 필드 보완 완료! (네이버 검색 없이)\n\n채워진 항목: ${filledFields.length > 0 ? filledFields.join(', ') : '없음 (모든 필드가 이미 채워져 있습니다)'}`);
-    } catch (error: any) {
-      console.error('[AutoFillAIOnly] Error:', error);
-      alert('AI 분석 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
-    } finally {
-      setAutoFillLoading(false);
-    }
-  };
-
-  // 🆕 네이버 API로 선택한 필드만 재생성 → 제안으로 표시
-  const handleAutoFillSelected = async () => {
-    if (!formData.title) {
-      alert('제목을 먼저 입력하세요!');
-      return;
-    }
-
-    if (selectedFields.length === 0) {
-      alert('재생성할 필드를 선택하세요!');
-      return;
-    }
-
-    setAutoFillLoading(true);
-    try {
-      const result = await adminApi.enrichEventPreview({
-        title: formData.title,
-        venue: formData.venue || undefined,
-        main_category: formData.mainCategory || undefined,
-        overview: formData.overview || undefined,
-        selectedFields: selectedFields, // 🆕 선택한 필드만 요청
-      });
-
-      // 🆕 Phase 2: 제안 시스템
-      if (result.suggestions) {
-        setAiSuggestions(result.suggestions);
-        alert(`✅ ${Object.keys(result.suggestions).length}개 필드에 대한 AI 제안이 생성되었습니다.\n\n아래 "AI 제안" 섹션에서 확인하고 적용하세요.`);
-        return;
-      }
-
-      // Fallback
-      if (!result.success || !result.enriched) {
-        alert(result.message || 'AI 분석에 실패했습니다.');
-        return;
-      }
-
-      const enriched = result.enriched;
-
-      // 선택한 필드만 merge
-      setFormData((prev) => {
-        const updated = { ...prev };
-
-        selectedFields.forEach((field) => {
-          switch (field) {
-            case 'venue':
-              if (enriched.venue) updated.venue = enriched.venue;
-              break;
-            case 'address':
-              if (enriched.address) updated.address = enriched.address;
-              break;
-            case 'overview':
-              if (enriched.overview) updated.overview = enriched.overview;
-              break;
-            case 'opening_hours':
-              if (enriched.opening_hours) updated.openingHours = enriched.opening_hours;
-              break;
-            case 'price_min':
-              if (enriched.price_min !== null && enriched.price_min !== undefined) updated.priceMin = enriched.price_min;
-              break;
-            case 'price_max':
-              if (enriched.price_max !== null && enriched.price_max !== undefined) updated.priceMax = enriched.price_max;
-              break;
-            case 'derived_tags':
-              if (enriched.derived_tags?.length) updated.derivedTags = enriched.derived_tags;
-              break;
-            case 'external_links':
-              if (enriched.external_links) updated.externalLinks = enriched.external_links;
-              break;
-          }
-        });
-
-        return updated;
-      });
-
-      alert(`✅ 네이버 API로 ${selectedFields.length}개 필드 재생성 완료!`);
-    } catch (error: any) {
-      console.error('[AutoFillSelected] Error:', error);
-      alert('AI 분석 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
-    } finally {
-      setAutoFillLoading(false);
-    }
-  };
-
-  // 🆕 AI만으로 선택한 필드만 재생성
-  const handleAutoFillAIOnlySelected = async () => {
-    if (!formData.title) {
-      alert('제목을 먼저 입력하세요!');
-      return;
-    }
-
-    if (selectedFields.length === 0) {
-      alert('재생성할 필드를 선택하세요!');
-      return;
-    }
-
-    setAutoFillLoading(true);
-    try {
-      const result = await adminApi.enrichEventPreviewAIOnly({
-        title: formData.title,
-        venue: formData.venue || undefined,
-        main_category: formData.mainCategory || undefined,
-        overview: formData.overview || undefined,
-        selectedFields: selectedFields,
-      });
-
-      // 🆕 Phase 2: 제안 시스템
-      if (result.suggestions) {
-        setAiSuggestions(result.suggestions);
-        alert(`✅ ${Object.keys(result.suggestions).length}개 필드에 대한 AI 제안이 생성되었습니다.\n\n아래 "AI 제안" 섹션에서 확인하고 적용하세요.`);
-        return;
-      }
-
-      // Fallback
-      if (!result.success || !result.enriched) {
-        alert(result.message || 'AI 분석에 실패했습니다.');
-        return;
-      }
-
-      const enriched = result.enriched;
-
-      // 선택한 필드만 merge (기존 값을 덮어씀)
-      setFormData((prev) => {
-        const updated = { ...prev };
-
-        // 각 필드별로 선택된 경우에만 업데이트
-        selectedFields.forEach((field) => {
-          switch (field) {
-            case 'venue':
-              if (enriched.venue) updated.venue = enriched.venue;
-              break;
-            case 'address':
-              if (enriched.address) updated.address = enriched.address;
-              break;
-            case 'overview':
-              if (enriched.overview) updated.overview = enriched.overview;
-              break;
-            case 'opening_hours':
-              if (enriched.opening_hours) updated.openingHours = enriched.opening_hours;
-              break;
-            case 'price_min':
-              if (enriched.price_min !== null && enriched.price_min !== undefined) updated.priceMin = enriched.price_min;
-              break;
-            case 'price_max':
-              if (enriched.price_max !== null && enriched.price_max !== undefined) updated.priceMax = enriched.price_max;
-              break;
-            case 'derived_tags':
-              if (enriched.derived_tags?.length) updated.derivedTags = enriched.derived_tags;
-              break;
-            case 'external_links':
-              if (enriched.external_links) updated.externalLinks = enriched.external_links;
-              break;
-            // metadata 필드들
-            default:
-              if (field.startsWith('metadata.')) {
-                const parts = field.split('.');
-                if (enriched.metadata && parts.length >= 3) {
-                  if (!updated.metadata) updated.metadata = {};
-                  if (!updated.metadata.display) updated.metadata.display = {};
-
-                  const category = parts[2]; // popup, exhibition, performance, etc.
-                  const fieldName = parts[3];
-
-                  if (enriched.metadata.display && (enriched.metadata.display as any)[category]?.[fieldName]) {
-                    if (!(updated.metadata.display as any)[category]) {
-                      (updated.metadata.display as any)[category] = {};
+                  // 중첩된 필드 처리 (예: fnb_items.signature_menu)
+                  if (field.includes('.')) {
+                    const fieldParts = field.split('.');
+                    let current = updatedMetadata.display[category];
+                    for (let i = 0; i < fieldParts.length - 1; i++) {
+                      if (!current[fieldParts[i]]) current[fieldParts[i]] = {};
+                      current = current[fieldParts[i]];
                     }
-                    (updated.metadata.display as any)[category][fieldName] = (enriched.metadata.display as any)[category][fieldName];
+                    current[fieldParts[fieldParts.length - 1]] = enriched[key];
+                  } else {
+                    updatedMetadata.display[category][field] = enriched[key];
                   }
                 }
               }
-              break;
-          }
+            }
+          });
+
+          return {
+            ...prev,
+            startAt: shouldUpdate('start_at', prev.startAt) && enriched.start_at ? enriched.start_at : prev.startAt,
+            endAt: shouldUpdate('end_at', prev.endAt) && enriched.end_at ? enriched.end_at : prev.endAt,
+            venue: shouldUpdate('venue', prev.venue) && enriched.venue ? enriched.venue : prev.venue,
+            address: shouldUpdate('address', prev.address) && enriched.address ? enriched.address : prev.address,
+            overview: shouldUpdate('overview', prev.overview) && enriched.overview ? enriched.overview : prev.overview,
+            lat: shouldUpdate('lat', prev.lat) && enriched.lat ? enriched.lat : prev.lat,
+            lng: shouldUpdate('lng', prev.lng) && enriched.lng ? enriched.lng : prev.lng,
+            region: shouldUpdate('region', prev.region) && enriched.region ? enriched.region : prev.region,
+            derivedTags: shouldUpdate('derived_tags', prev.derivedTags) && enriched.derived_tags ? enriched.derived_tags : prev.derivedTags,
+            openingHours: shouldUpdate('opening_hours', prev.openingHours) && enriched.opening_hours ? enriched.opening_hours : prev.openingHours,
+            priceMin: shouldUpdate('price_min', prev.priceMin) && enriched.price_min != null ? enriched.price_min : prev.priceMin,
+            priceMax: shouldUpdate('price_max', prev.priceMax) && enriched.price_max != null ? enriched.price_max : prev.priceMax,
+            externalLinks: {
+              official: (shouldUpdate('external_links.official', prev.externalLinks?.official) && enriched['external_links.official']) || prev.externalLinks?.official || '',
+              ticket: (shouldUpdate('external_links.ticket', prev.externalLinks?.ticket) && enriched['external_links.ticket']) || prev.externalLinks?.ticket || '',
+              reservation: (shouldUpdate('external_links.reservation', prev.externalLinks?.reservation) && enriched['external_links.reservation']) || prev.externalLinks?.reservation || '',
+            },
+            // 🆕 metadata 적용
+            metadata: Object.keys(updatedMetadata).length > 0 ? updatedMetadata : prev.metadata,
+          };
         });
 
-        return updated;
-      });
+        const modeLabel = isForceAll ? '전체 재생성' : isEmptyFieldsOnly ? '빈 필드 보완' : '선택 필드 재생성';
+        alert(`✅ ${modeLabel} 완료!\n\n생성된 제안: ${Object.keys(result.suggestions).length}개`);
+        return;
+      }
 
-      alert(`✅ AI로 ${selectedFields.length}개 필드 재생성 완료!\n\n${result.message || ''}`);
+      alert('AI 제안을 생성하지 못했습니다.');
     } catch (error: any) {
-      console.error('[AutoFillAIOnlySelected] Error:', error);
+      console.error('[AI Enrich Preview] Error:', error);
       alert('AI 분석 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
     } finally {
       setAutoFillLoading(false);
@@ -694,6 +389,56 @@ export default function CreateEventPage() {
 
     try {
       if (formData.mainCategory === '팝업') {
+        // 빈 문자열/배열 제거 헬퍼 함수
+        const cleanExternalLinks = (links: any) => {
+          const cleaned: any = {};
+          Object.entries(links || {}).forEach(([key, value]) => {
+            if (value && typeof value === 'string' && value.trim() !== '') {
+              cleaned[key] = value.trim();
+            }
+          });
+          return Object.keys(cleaned).length > 0 ? cleaned : null;
+        };
+
+        const cleanOpeningHours = (hours: any) => {
+          if (!hours) return null;
+          const cleaned: any = {};
+          Object.entries(hours).forEach(([key, value]) => {
+            if (value && typeof value === 'string' && value.trim() !== '') {
+              cleaned[key] = value.trim();
+            }
+          });
+          return Object.keys(cleaned).length > 0 ? cleaned : null;
+        };
+
+        const cleanTags = (tags: any) => {
+          if (!tags || !Array.isArray(tags)) return null;
+          const cleaned = tags.filter(tag => tag && typeof tag === 'string' && tag.trim() !== '');
+          return cleaned.length > 0 ? cleaned : null;
+        };
+
+        // 데이터 정리
+        // Instagram URL을 external_links에 추가 (팝업 전용 필드 → 공통 필드로 복사)
+        const externalLinksWithInstagram = {
+          ...formData.externalLinks,
+          instagram: formData.instagramUrl || formData.externalLinks?.instagram
+        };
+        const cleanedExternalLinks = cleanExternalLinks(externalLinksWithInstagram);
+        const cleanedOpeningHours = cleanOpeningHours(formData.openingHours);
+        const cleanedSourceTags = cleanTags(formData.sourceTags);
+        const cleanedDerivedTags = cleanTags(formData.derivedTags);
+
+        // 🔍 디버깅: 전송 데이터 확인
+        console.log('[CreatePopup] Sending data:', {
+          external_links: cleanedExternalLinks,
+          opening_hours: cleanedOpeningHours,
+          source_tags: cleanedSourceTags,
+          derived_tags: cleanedDerivedTags,
+          parking_available: formData.parkingAvailable,
+          parking_info: formData.parkingInfo,
+          metadata: formData.metadata,
+        });
+
         // 팝업 생성 API 사용
         await adminApi.createPopup({
           instagramUrl: formData.instagramUrl,
@@ -710,7 +455,20 @@ export default function CreateEventPage() {
           imageSourcePageUrl: formData.imageSourcePageUrl || '',
           imageKey: formData.imageKey,
           imageMetadata: formData.imageMetadata,
-        });
+          // Phase 1 공통 필드 (빈 문자열/배열 제거)
+          is_free: formData.isFree,
+          price_info: formData.priceInfo || null,
+          external_links: cleanedExternalLinks,
+          price_min: formData.priceMin ?? null,
+          price_max: formData.priceMax ?? null,
+          source_tags: cleanedSourceTags || undefined,
+          derived_tags: cleanedDerivedTags || undefined,
+          opening_hours: cleanedOpeningHours,
+          parking_available: formData.parkingAvailable ?? null,
+          parking_info: formData.parkingInfo || null,
+          // 🆕 Phase 3: 카테고리별 특화 필드
+          metadata: formData.metadata,
+        } as any);
       } else {
         // 빈 문자열/배열 제거 헬퍼 함수
         const cleanExternalLinks = (links: any) => {
@@ -740,6 +498,23 @@ export default function CreateEventPage() {
           return cleaned.length > 0 ? cleaned : null;
         };
 
+        // 데이터 정리
+        const cleanedExternalLinks = cleanExternalLinks(formData.externalLinks);
+        const cleanedOpeningHours = cleanOpeningHours(formData.openingHours);
+        const cleanedSourceTags = cleanTags(formData.sourceTags);
+        const cleanedDerivedTags = cleanTags(formData.derivedTags);
+
+        // 🔍 디버깅: 전송 데이터 확인
+        console.log('[CreateEvent] Sending data:', {
+          external_links: cleanedExternalLinks,
+          opening_hours: cleanedOpeningHours,
+          source_tags: cleanedSourceTags,
+          derived_tags: cleanedDerivedTags,
+          parking_available: formData.parkingAvailable,
+          parking_info: formData.parkingInfo,
+          metadata: formData.metadata,
+        });
+
         // 범용 이벤트 생성 API 사용
         await adminApi.createEvent({
           main_category: formData.mainCategory,
@@ -759,12 +534,17 @@ export default function CreateEventPage() {
           is_free: formData.isFree,
           price_info: formData.priceInfo || null,
           // Phase 1 공통 필드 (빈 문자열/배열 제거)
-          external_links: cleanExternalLinks(formData.externalLinks),
+          external_links: cleanedExternalLinks,
           price_min: formData.priceMin ?? null,
           price_max: formData.priceMax ?? null,
-          source_tags: cleanTags(formData.sourceTags) || undefined,
-          derived_tags: cleanTags(formData.derivedTags) || undefined,
-          opening_hours: cleanOpeningHours(formData.openingHours),
+          source_tags: cleanedSourceTags || undefined,
+          derived_tags: cleanedDerivedTags || undefined,
+          opening_hours: cleanedOpeningHours,
+          // 주차 정보
+          parking_available: formData.parkingAvailable ?? null,
+          parking_info: formData.parkingInfo || null,
+          // 🆕 Phase 3: 카테고리별 특화 필드
+          metadata: formData.metadata,
         } as any);
       }
       
@@ -814,6 +594,11 @@ export default function CreateEventPage() {
       sourceTags: [],
       derivedTags: [],
       openingHours: {},
+      // 주차 정보
+      parkingAvailable: null,
+      parkingInfo: null,
+      // 🆕 Phase 3: 카테고리별 특화 필드
+      metadata: {},
     });
     setAgreedCopyright(false);
     setAutoFillStatus({});
@@ -913,340 +698,37 @@ export default function CreateEventPage() {
                   </div>
                 </div>
                 
-                {/* 4개 버튼 */}
+                {/* 3개 버튼 (EventsPage와 동일) */}
                 <div className="flex gap-2 flex-wrap w-full">
                   <button
                     type="button"
-                    onClick={handleAutoFill}
+                    onClick={() => handleAIEnrichPreview([])}
                     disabled={!formData.title || autoFillLoading}
                     className="btn btn-secondary text-sm flex items-center gap-2"
                   >
-                    {autoFillLoading ? '🔄 분석 중...' : '🤖 빈 필드만 AI 보완'}
+                    {autoFillLoading ? '🔄 분석 중...' : '🤖 추천 보완 (네이버+AI)'}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowFieldSelector(!showFieldSelector)}
+                    onClick={() => setShowFieldSelectorModal(true)}
                     disabled={!formData.title}
                     className="btn btn-outline text-sm flex items-center gap-2"
                   >
-                    {showFieldSelector ? '✕ 선택 취소' : '🎯 선택한 필드만 재생성'}
+                    🎯 선택 필드 재생성
                   </button>
                   <button
                     type="button"
                     onClick={() => {
                       if (confirm('⚠️ 경고: 모든 필드를 강제로 재생성합니다.\n수동으로 입력한 데이터도 덮어씌워집니다.\n\n계속하시겠습니까?')) {
-                        handleAutoFill();
+                        handleAIEnrichPreview(['*']);
                       }
                     }}
                     disabled={!formData.title || autoFillLoading}
                     className="btn btn-danger text-sm flex items-center gap-2"
                   >
-                    🚨 강제 재생성
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleAutoFillAIOnly}
-                    disabled={!formData.title || autoFillLoading}
-                    className="btn btn-secondary text-sm flex items-center gap-2"
-                  >
-                    {autoFillLoading ? '🔄 분석 중...' : '🔍 AI만으로 빈 필드 보완'}
+                    🚨 전체 재생성
                   </button>
                 </div>
-
-                {/* 🆕 필드 선택 UI */}
-                {showFieldSelector && (
-                  <>
-                    <div className="flex gap-2 mb-2 w-full">
-                      <button
-                        type="button"
-                        onClick={handleAutoFillAIOnlySelected}
-                        disabled={autoFillLoading || selectedFields.length === 0}
-                        className="btn btn-success text-sm flex items-center gap-2"
-                        title={selectedFields.length === 0 ? '재생성할 필드를 선택하세요' : ''}
-                      >
-                        {autoFillLoading ? '🔄 AI 생성 중...' : '🤖 AI만으로 선택한 필드 재생성'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleAutoFillSelected}
-                        disabled={autoFillLoading || selectedFields.length === 0}
-                        className="btn btn-outline text-sm flex items-center gap-2"
-                        title={selectedFields.length === 0 ? '재생성할 필드를 선택하세요' : ''}
-                      >
-                        {autoFillLoading ? '🔄 분석 중...' : '🎯 선택한 필드만 재생성 (네이버 API)'}
-                      </button>
-                    </div>
-
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-2 w-full">
-                      <p className="text-sm font-semibold text-gray-700 mb-2">재생성할 필드 선택:</p>
-
-                      {/* 공통 필드 */}
-                      <div>
-                        <p className="text-xs font-medium text-gray-600 mb-1">📋 공통 필드</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { id: 'overview', label: '개요 (Overview)' },
-                            { id: 'derived_tags', label: '태그 (Tags)' },
-                            { id: 'opening_hours', label: '운영시간 (Hours)' },
-                            { id: 'external_links', label: '외부 링크 (Links)' },
-                            { id: 'price_min', label: '최소 가격' },
-                            { id: 'price_max', label: '최대 가격' },
-                            { id: 'venue', label: '장소 (Venue)' },
-                            { id: 'address', label: '주소 (Address)' },
-                          ].map((field) => (
-                            <label key={field.id} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={selectedFields.includes(field.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedFields([...selectedFields, field.id]);
-                                  } else {
-                                    setSelectedFields(selectedFields.filter((f) => f !== field.id));
-                                  }
-                                }}
-                                className="rounded"
-                              />
-                              <span>{field.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* 🆕 카테고리별 특화 필드 */}
-                      {formData.mainCategory === '전시' && (
-                        <div>
-                          <p className="text-xs font-medium text-gray-600 mb-1 mt-3">🎨 전시 특화 필드</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { id: 'metadata.display.exhibition.artists', label: '작가/아티스트' },
-                              { id: 'metadata.display.exhibition.genre', label: '장르' },
-                              { id: 'metadata.display.exhibition.type', label: '전시 유형' },
-                              { id: 'metadata.display.exhibition.duration_minutes', label: '관람 시간' },
-                              { id: 'metadata.display.exhibition.facilities', label: '편의시설' },
-                              { id: 'metadata.display.exhibition.docent_tour', label: '도슨트 투어' },
-                            ].map((field) => (
-                              <label key={field.id} className="flex items-center gap-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedFields.includes(field.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedFields([...selectedFields, field.id]);
-                                    } else {
-                                      setSelectedFields(selectedFields.filter((f) => f !== field.id));
-                                    }
-                                  }}
-                                  className="rounded"
-                                />
-                                <span>{field.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {formData.mainCategory === '공연' && (
-                        <div>
-                          <p className="text-xs font-medium text-gray-600 mb-1 mt-3">🎭 공연 특화 필드</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { id: 'metadata.display.performance.cast', label: '출연진' },
-                              { id: 'metadata.display.performance.genre', label: '장르' },
-                              { id: 'metadata.display.performance.duration_minutes', label: '공연 시간' },
-                              { id: 'metadata.display.performance.intermission', label: '인터미션' },
-                              { id: 'metadata.display.performance.age_limit', label: '연령 제한' },
-                              { id: 'metadata.display.performance.discounts', label: '할인 정보' },
-                            ].map((field) => (
-                              <label key={field.id} className="flex items-center gap-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedFields.includes(field.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedFields([...selectedFields, field.id]);
-                                    } else {
-                                      setSelectedFields(selectedFields.filter((f) => f !== field.id));
-                                    }
-                                  }}
-                                  className="rounded"
-                                />
-                                <span>{field.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* 🎪 축제 특화 필드 */}
-                      {formData.mainCategory === '축제' && (
-                        <div>
-                          <p className="text-xs font-medium text-gray-600 mb-1 mt-3">🎪 축제 특화 필드</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { id: 'metadata.display.festival.organizer', label: '주최/주관' },
-                              { id: 'metadata.display.festival.program_highlights', label: '주요 프로그램' },
-                              { id: 'metadata.display.festival.food_and_booths', label: '먹거리/부스' },
-                              { id: 'metadata.display.festival.scale_text', label: '규모' },
-                              { id: 'metadata.display.festival.parking_tips', label: '주차 정보' },
-                            ].map((field) => (
-                              <label key={field.id} className="flex items-center gap-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedFields.includes(field.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedFields([...selectedFields, field.id]);
-                                    } else {
-                                      setSelectedFields(selectedFields.filter((f) => f !== field.id));
-                                    }
-                                  }}
-                                  className="rounded"
-                                />
-                                <span>{field.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* 📅 행사 특화 필드 */}
-                      {formData.mainCategory === '행사' && (
-                        <div>
-                          <p className="text-xs font-medium text-gray-600 mb-1 mt-3">📅 행사 특화 필드</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { id: 'metadata.display.event.target_audience', label: '참가 대상' },
-                              { id: 'metadata.display.event.capacity', label: '정원' },
-                              { id: 'metadata.display.event.registration', label: '사전 등록 정보' },
-                            ].map((field) => (
-                              <label key={field.id} className="flex items-center gap-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedFields.includes(field.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedFields([...selectedFields, field.id]);
-                                    } else {
-                                      setSelectedFields(selectedFields.filter((f) => f !== field.id));
-                                    }
-                                  }}
-                                  className="rounded"
-                                />
-                                <span>{field.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* 🏪 팝업 특화 필드 */}
-                      {formData.mainCategory === '팝업' && (
-                        <div>
-                          <p className="text-xs font-medium text-gray-600 mb-1 mt-3">🏪 팝업 특화 필드</p>
-                          
-                          {/* 공통 필드 */}
-                          <div className="grid grid-cols-2 gap-2 mb-3">
-                            {[
-                              { id: 'metadata.display.popup.type', label: '팝업 타입' },
-                              { id: 'metadata.display.popup.brands', label: '브랜드' },
-                            ].map((field) => (
-                              <label key={field.id} className="flex items-center gap-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedFields.includes(field.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedFields([...selectedFields, field.id]);
-                                    } else {
-                                      setSelectedFields(selectedFields.filter((f) => f !== field.id));
-                                    }
-                                  }}
-                                  className="rounded"
-                                />
-                                <span>{field.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                          
-                          {/* 🍔 F&B (디저트/카페) 특화 필드 */}
-                          <div className="bg-yellow-50 p-2 rounded mb-2">
-                            <p className="text-xs font-medium text-yellow-800 mb-2">🍔 F&B 메뉴 정보</p>
-                            <div className="grid grid-cols-2 gap-2">
-                              {[
-                                { id: 'metadata.display.popup.fnb_items.signature_menu', label: '시그니처 메뉴' },
-                                { id: 'metadata.display.popup.fnb_items.menu_categories', label: '메뉴 카테고리' },
-                                { id: 'metadata.display.popup.fnb_items.price_range', label: '가격대' },
-                              ].map((field) => (
-                                <label key={field.id} className="flex items-center gap-2 text-sm">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedFields.includes(field.id)}
-                                    onChange={(e) => {
-                                      if (e.target.checked) {
-                                        setSelectedFields([...selectedFields, field.id]);
-                                      } else {
-                                        setSelectedFields(selectedFields.filter((f) => f !== field.id));
-                                      }
-                                    }}
-                                    className="rounded"
-                                  />
-                                  <span>{field.label}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                          
-                          {/* 🤝 콜라보 (브랜드 협업) 특화 필드 */}
-                          <div className="bg-purple-50 p-2 rounded mb-2">
-                            <p className="text-xs font-medium text-purple-800 mb-2">🤝 콜라보 설명</p>
-                            <label className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={selectedFields.includes('metadata.display.popup.collab_description')}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedFields([...selectedFields, 'metadata.display.popup.collab_description']);
-                                  } else {
-                                    setSelectedFields(selectedFields.filter((f) => f !== 'metadata.display.popup.collab_description'));
-                                  }
-                                }}
-                                className="rounded"
-                              />
-                              <span>콜라보 설명</span>
-                            </label>
-                          </div>
-                          
-                          {/* 일반 팝업 필드 */}
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { id: 'metadata.display.popup.goods_items', label: '굿즈' },
-                              { id: 'metadata.display.popup.photo_zone', label: '포토존 여부' },
-                              { id: 'metadata.display.popup.photo_zone_desc', label: '포토존 설명' },
-                              { id: 'metadata.display.popup.waiting_hint', label: '대기 시간' },
-                            ].map((field) => (
-                              <label key={field.id} className="flex items-center gap-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedFields.includes(field.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedFields([...selectedFields, field.id]);
-                                    } else {
-                                      setSelectedFields(selectedFields.filter((f) => f !== field.id));
-                                    }
-                                  }}
-                                  className="rounded"
-                                />
-                                <span>{field.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
 
                 {/* 🆕 AI 제안 섹션 */}
                 {aiSuggestions && Object.keys(aiSuggestions).length > 0 && (
@@ -1886,6 +1368,49 @@ export default function CreateEventPage() {
                 </div>
                 <p className="mt-2 text-sm text-gray-500">
                   AI 자동 채우기 후 수정 가능합니다
+                </p>
+              </div>
+
+              {/* 주차 정보 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  🚗 주차 정보 (선택)
+                </label>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">주차 가능 여부</label>
+                    <select
+                      value={
+                        formData.parkingAvailable === null || formData.parkingAvailable === undefined
+                          ? 'null'
+                          : formData.parkingAvailable
+                          ? 'true'
+                          : 'false'
+                      }
+                      onChange={(e) => {
+                        const value = e.target.value === 'null' ? null : e.target.value === 'true';
+                        setFormData({ ...formData, parkingAvailable: value });
+                      }}
+                      className="input text-sm"
+                    >
+                      <option value="null">정보 없음</option>
+                      <option value="true">가능</option>
+                      <option value="false">불가능</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">주차 상세 정보</label>
+                    <textarea
+                      value={formData.parkingInfo || ''}
+                      onChange={(e) => setFormData({ ...formData, parkingInfo: e.target.value })}
+                      className="input text-sm"
+                      rows={2}
+                      placeholder="예: 건물 지하 주차장 이용 가능, 1시간 무료"
+                    />
+                  </div>
+                </div>
+                <p className="mt-2 text-sm text-gray-500">
+                  AI가 분석한 주차 정보를 수동으로 수정할 수 있습니다
                 </p>
               </div>
             </div>
@@ -3194,6 +2719,18 @@ export default function CreateEventPage() {
           </div>
         </div>
       </form>
+
+      {/* Field Selector Modal */}
+      {showFieldSelectorModal && (
+        <FieldSelectorModal
+          category={formData.mainCategory}
+          onConfirm={(forceFields) => {
+            setShowFieldSelectorModal(false);
+            handleAIEnrichPreview(forceFields);
+          }}
+          onCancel={() => setShowFieldSelectorModal(false)}
+        />
+      )}
     </div>
   );
 }

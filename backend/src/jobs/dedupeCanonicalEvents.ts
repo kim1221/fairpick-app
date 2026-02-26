@@ -912,14 +912,16 @@ export async function dedupeCanonicalEvents() {
         console.log(`[Dedupe][CategoryProtect] fill missing: main=${categoryResult.mainCategory} sub=${categoryResult.subCategory}`);
       }
 
-      // is_free 병합: 하나라도 true면 true
-      const isFree = events.some((e: RawEventFromDB & { rawTable: string }) => e.is_free === true);
-
       // location 병합: 우선순위별 lat/lng, 가장 긴 address
       const location = mergeLocation(events);
-      
-      // Phase 1 공통 필드 추출
+
+      // Phase 1 공통 필드 추출 (priceMin/Max 포함) — is_free 교차검증 전에 먼저 실행
       const phase1Fields = extractPhase1Fields(events);
+
+      // is_free 병합: raw 테이블에서 하나라도 true면 true
+      // 단, priceMin > 0이면 유료이므로 false로 강제 (오염 방지)
+      const isFreeRaw = events.some((e: RawEventFromDB & { rawTable: string }) => e.is_free === true);
+      const isFree = isFreeRaw && !(phase1Fields.priceMin !== null && phase1Fields.priceMin > 0);
 
       // 🆕 field_sources 생성 (공공API 출처 추적)
       const fieldSources = buildFieldSources(winnerEvent, winnerSource, phase1Fields);
@@ -987,7 +989,7 @@ export async function dedupeCanonicalEvents() {
         priceMin: phase1Fields.priceMin,
         priceMax: phase1Fields.priceMax,
         sourceTags: phase1Fields.sourceTags,
-        derivedTags: [], // Phase 2에서 AI로 채울 예정
+        derivedTags: undefined, // AI 백필에서 채움 — dedupe가 초기화하지 않도록 undefined 유지
         qualityFlags,
         // 🆕 field_sources (공공API 출처 추적)
         fieldSources,

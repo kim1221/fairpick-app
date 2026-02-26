@@ -315,6 +315,58 @@ export async function searchEventInfo(eventTitle: string, venue?: string) {
 }
 
 /**
+ * 🆕 주변 주차장 검색 (공영주차장 우선)
+ * 주소 기반으로 도보 5-10분 거리 주차장 검색
+ */
+export async function searchNearbyParking(address: string, venueName?: string) {
+  console.log('[NaverAPI] Searching nearby parking:', { address, venueName });
+
+  // 여러 검색어로 시도 (공영주차장 > 유료주차장 > 주차장)
+  const searchQueries = [
+    `${address} 공영주차장`,
+    venueName ? `${venueName} 주차장` : `${address} 주차장`,
+    `${address} 근처 주차장`,
+  ];
+
+  const results: NaverPlaceItem[] = [];
+
+  for (const query of searchQueries) {
+    try {
+      const placeResult = await searchNaverPlace({ query, display: 5 });
+      if (placeResult && placeResult.items && placeResult.items.length > 0) {
+        // 주차장 관련 키워드가 포함된 결과만 필터링
+        const parkingItems = placeResult.items.filter(item => 
+          item.title.includes('주차') || 
+          item.title.includes('parking') ||
+          item.category.includes('주차')
+        );
+        results.push(...parkingItems);
+      }
+    } catch (error) {
+      console.warn(`[NaverAPI] Parking search failed for query: ${query}`, error);
+    }
+
+    // 결과가 3개 이상이면 충분하므로 중단
+    if (results.length >= 3) {
+      break;
+    }
+  }
+
+  // 중복 제거 (같은 제목)
+  const uniqueResults = results.reduce((acc, current) => {
+    const exists = acc.find(item => item.title === current.title);
+    if (!exists) {
+      acc.push(current);
+    }
+    return acc;
+  }, [] as NaverPlaceItem[]);
+
+  console.log(`[NaverAPI] Found ${uniqueResults.length} parking locations`);
+  
+  return uniqueResults.slice(0, 5); // 최대 5개
+}
+
+/**
  * 통합된 검색 결과 타입
  */
 export interface UnifiedSearchResult {
@@ -909,5 +961,116 @@ export async function getNaverBlogMentions(
     });
     return { total: 0 };
   }
+}
+
+/**
+ * 필드별 맞춤 검색 (venue-first 전략용)
+ *
+ * @param fieldKey - 검색 대상 필드 (예: 'address', 'parking_info')
+ * @param context - 이벤트 컨텍스트
+ * @returns place 검색 우선 결과
+ */
+export async function searchFieldSpecific(
+  fieldKey: string,
+  context: {
+    title: string;
+    venue?: string;
+    address?: string;
+    region?: string;
+  },
+  rid?: string  // 🆕 요청 ID 추가
+): Promise<UnifiedSearchResult[]> {
+  const { buildNaverQueryForField } = await import('./queryBuilder');
+  const { query, strategy } = buildNaverQueryForField(fieldKey, context);
+
+  console.log(`[NaverAPI][FIELD_SEARCH] fieldKey=${fieldKey} strategy=${strategy} query="${query}"`);
+
+  const results: UnifiedSearchResult[] = [];
+
+  if (strategy === 'venue-first') {
+    // venue-first: place 검색 우선
+    try {
+      // 🆕 DEV 로깅: 실제 API 호출 직전 query 기록
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[ENRICH][NAVER_QUERY] rid=${rid || 'n/a'} fieldKey=${fieldKey} strategy=venue-first queryString="${query}" apiType=place`);
+      }
+
+      const placeResult = await searchNaverPlace({ query, display: 5 });
+      if (placeResult && placeResult.items && placeResult.items.length > 0) {
+        results.push(...placeResult.items.map((item: NaverPlaceItem) => ({
+          title: stripHtmlTags(item.title),
+          link: item.link,
+          description: stripHtmlTags(item.description),
+          source: 'place' as const,
+          category: item.category,
+          address: item.address,
+          roadAddress: item.roadAddress,
+        })));
+      }
+      console.log(`[NaverAPI][FIELD_SEARCH] place count=${placeResult.items.length}`);
+    } catch (error: any) {
+      console.error(`[NaverAPI][FIELD_SEARCH] place search error:`, error.message);
+    }
+
+    // web 보조 검색 (venue + fieldKey)
+    try {
+      // 🆕 DEV 로깅
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[ENRICH][NAVER_QUERY] rid=${rid || 'n/a'} fieldKey=${fieldKey} strategy=venue-first queryString="${query}" apiType=web`);
+      }
+
+      const webResult = await searchNaverWeb({ query, display: 5 });
+      if (webResult && webResult.items && webResult.items.length > 0) {
+        results.push(...webResult.items.map((item: NaverWebItem) => ({
+          title: stripHtmlTags(item.title),
+          link: item.link,
+          description: stripHtmlTags(item.description),
+          source: 'web' as const,
+        })));
+      }
+      console.log(`[NaverAPI][FIELD_SEARCH] web count=${webResult.items.length}`);
+    } catch (error: any) {
+      console.error(`[NaverAPI][FIELD_SEARCH] web search error:`, error.message);
+    }
+  } else {
+    // title-first: web/blog 우선
+    try {
+      // 🆕 DEV 로깅
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[ENRICH][NAVER_QUERY] rid=${rid || 'n/a'} fieldKey=${fieldKey} strategy=title-first queryString="${query}" apiType=web,blog`);
+      }
+
+      const [webResult, blogResult] = await Promise.allSettled([
+        searchNaverWeb({ query, display: 10 }),
+        searchNaverBlog({ query, display: 10, sort: 'sim' }),
+      ]);
+
+      if (webResult.status === 'fulfilled' && webResult.value.items) {
+        results.push(...webResult.value.items.map((item: NaverWebItem) => ({
+          title: stripHtmlTags(item.title),
+          link: item.link,
+          description: stripHtmlTags(item.description),
+          source: 'web' as const,
+        })));
+      }
+
+      if (blogResult.status === 'fulfilled' && blogResult.value.items) {
+        results.push(...blogResult.value.items.map((item: NaverBlogItem) => ({
+          title: stripHtmlTags(item.title),
+          link: item.link,
+          description: stripHtmlTags(item.description),
+          source: 'blog' as const,
+          postdate: item.postdate,
+        })));
+      }
+
+      console.log(`[NaverAPI][FIELD_SEARCH] web count=${webResult.status === 'fulfilled' ? webResult.value.items.length : 0}, blog count=${blogResult.status === 'fulfilled' ? blogResult.value.items.length : 0}`);
+    } catch (error: any) {
+      console.error(`[NaverAPI][FIELD_SEARCH] web/blog search error:`, error.message);
+    }
+  }
+
+  console.log(`[NaverAPI][FIELD_SEARCH] total results=${results.length}`);
+  return results;
 }
 

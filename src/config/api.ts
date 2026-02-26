@@ -21,6 +21,9 @@ export const API_ENDPOINTS = {
     personalized: '/api/recommendations/v2/personalized',
     weekend: '/api/recommendations/v2/weekend',
     latest: '/api/recommendations/v2/latest',
+    endingSoon: '/api/recommendations/v2/ending-soon',
+    exhibition: '/api/recommendations/v2/exhibition',
+    free: '/api/recommendations/v2/free',
   },
   
   // 사용자 행동 로그

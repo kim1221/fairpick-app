@@ -15,21 +15,7 @@ export async function updateMetadata(): Promise<void> {
   console.log(`[UpdateMetadata] Log ID: ${logId}`);
 
   try {
-    // 1. is_free 업데이트 (무료 키워드 검색)
-    const freeResult = await pool.query(`
-      UPDATE canonical_events
-      SET is_free = (
-        sources::text ILIKE '%무료%'
-        OR sources::text ILIKE '%free%'
-        OR sources::text ILIKE '%0원%'
-      )
-      WHERE is_deleted = false
-      RETURNING id
-    `);
-
-    console.log(`[UpdateMetadata] Updated is_free: ${freeResult.rowCount} rows`);
-
-    // 2. is_ending_soon 업데이트
+    // 1. is_ending_soon 업데이트
     const endingSoonResult = await pool.query(`
       UPDATE canonical_events
       SET is_ending_soon = (

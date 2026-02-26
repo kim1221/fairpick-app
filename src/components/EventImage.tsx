@@ -4,6 +4,7 @@ import { getImageSource } from '../utils/imageHelpers';
 
 type Props = {
   uri?: string;
+  width?: number | string;
   height: number;
   borderRadius?: number;
   resizeMode?: ImageResizeMode;
@@ -18,7 +19,7 @@ type Props = {
  * - 유효한 이미지 URL이 있으면 해당 이미지를 표시
  * - 이미지가 없거나 로드 실패 시 카테고리별 3D 기본 이미지를 표시
  */
-export function EventImage({ uri, height, borderRadius = 16, resizeMode = 'cover', accessibilityLabel, style, category }: Props) {
+export function EventImage({ uri, width = '100%', height, borderRadius = 16, resizeMode = 'cover', accessibilityLabel, style, category }: Props) {
   const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
@@ -46,7 +47,7 @@ export function EventImage({ uri, height, borderRadius = 16, resizeMode = 'cover
       onError={() => setImageError(true)}
       style={[
         {
-          width: '100%',
+          width,
           height,
           borderRadius,
           backgroundColor: '#EFF2F5',

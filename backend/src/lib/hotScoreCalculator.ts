@@ -20,6 +20,11 @@ export interface Event {
   end_at: Date;
   source?: string;
   kopis_id?: string;
+  lat?: number | null;
+  lng?: number | null;
+  image_url?: string | null;
+  external_links?: Record<string, unknown> | null;
+  is_featured?: boolean | null;
 }
 
 export interface ConsensusComponents {
@@ -34,8 +39,16 @@ export interface StructuralComponents {
   venue_score: number;      // 장소 신뢰도 (0-100)
   duration_score: number;   // 기간 적절성 (0-100)
   source_score: number;     // 출처 신뢰도 (0-100)
+  geo_score: number;        // 좌표 유효성 (0-100)
+  link_score: number;       // 외부 링크 유효성 (0-100)
+  image_score: number;      // 이미지 품질 (0-100)
+  featured_score: number;   // 수동 featured 신호 (0-100)
   total: number;            // 가중평균
 }
+
+const CONSENSUS_TOP_SNIPPETS = 12;
+const CONSENSUS_PASS_THRESHOLD = 45;
+const CONSENSUS_SOURCE_CAP = 6;
 
 // ==================== Consensus 계산 ====================
 
@@ -47,19 +60,11 @@ export interface StructuralComponents {
  * Q3: "제목 + 카테고리 + 연도" (20%)
  */
 export async function calculateConsensusScore(event: Event): Promise<ConsensusComponents> {
-  const year = new Date().getFullYear();
-  const categoryKeyword = getCategoryKeyword(event.main_category);
-
-  // Q1: 제목 + 장소 + 연도
-  const q1 = `"${event.title}" ${event.venue || ''} ${year}`.trim();
+  const [q1, q2, q3] = buildConsensusQueries(event);
   const q1Score = await calculateConsensusForQuery(q1, event);
 
-  // Q2: 제목 + 지역 + 연도
-  const q2 = `"${event.title}" ${event.region || ''} ${year}`.trim();
   const q2Score = await calculateConsensusForQuery(q2, event);
 
-  // Q3: 제목 + 카테고리 + 연도
-  const q3 = `"${event.title}" ${categoryKeyword} ${year}`.trim();
   const q3Score = await calculateConsensusForQuery(q3, event);
 
   // 가중평균 계산
@@ -78,8 +83,7 @@ export async function calculateConsensusScore(event: Event): Promise<ConsensusCo
  * Consensus 라이트 계산 (Q1만, API 비용 절감)
  */
 export async function calculateConsensusLight(event: Event): Promise<number> {
-  const year = new Date().getFullYear();
-  const q1 = `"${event.title}" ${event.venue || ''} ${year}`.trim();
+  const [q1] = buildConsensusQueries(event);
   const q1Score = await calculateConsensusForQuery(q1, event);
   return Math.round(q1Score);
 }
@@ -98,24 +102,33 @@ async function calculateConsensusForQuery(query: string, event: Event): Promise<
     const blogItems = blogResult.status === 'fulfilled' ? blogResult.value.items : [];
     const webItems = webResult.status === 'fulfilled' ? webResult.value.items : [];
 
-    // 이벤트 관련 필터링
-    const relevantBlogItems = blogItems.filter(item => isEventLike(item, event));
-    const relevantWebItems = webItems.filter(item => isEventLike(item, event));
+    const allItems = [...blogItems, ...webItems];
+    if (allItems.length === 0) return 0;
 
-    const totalItems = blogItems.length + webItems.length;
-    const relevantItems = relevantBlogItems.length + relevantWebItems.length;
+    // 블로그/웹 concat 편향을 줄이기 위해 source 균형 샘플링
+    const topItems = buildBalancedSnippetSet(blogItems, webItems, CONSENSUS_TOP_SNIPPETS);
+    const snippetScores = topItems.map(item => scoreEventSnippet(item, event));
+    const passCount = snippetScores.filter(score => score >= CONSENSUS_PASS_THRESHOLD).length;
+    const passRatio = passCount / topItems.length;
+    const avgRuleScore = snippetScores.reduce((sum, score) => sum + score, 0) / topItems.length;
 
-    if (totalItems === 0) return 0;
-
-    // Event-like 비율 → 점수 변환
-    const eventLikeRatio = relevantItems / totalItems;
-    const score = eventLikeRatio * 100;
+    let score = avgRuleScore * 0.65 + passRatio * 100 * 0.35;
+    if (passCount === 0) {
+      score *= 0.4;
+    } else if (topItems.length < 4) {
+      score *= 0.8;
+    }
+    score = Math.max(0, Math.min(100, score));
 
     console.log('[Consensus]', {
       query: query.slice(0, 50),
-      totalItems,
-      relevantItems,
-      eventLikeRatio: (eventLikeRatio * 100).toFixed(1) + '%',
+      totalItems: allItems.length,
+      blogItems: blogItems.length,
+      webItems: webItems.length,
+      sampledItems: topItems.length,
+      passCount,
+      passRatio: (passRatio * 100).toFixed(1) + '%',
+      avgRuleScore: avgRuleScore.toFixed(1),
       score: Math.round(score),
     });
 
@@ -136,6 +149,25 @@ async function calculateConsensusForQuery(query: string, event: Event): Promise<
   }
 }
 
+function buildBalancedSnippetSet(
+  blogItems: any[],
+  webItems: any[],
+  maxItems: number
+): any[] {
+  const blogCapped = blogItems.slice(0, CONSENSUS_SOURCE_CAP);
+  const webCapped = webItems.slice(0, CONSENSUS_SOURCE_CAP);
+  const merged: any[] = [];
+
+  const maxLen = Math.max(blogCapped.length, webCapped.length);
+  for (let i = 0; i < maxLen && merged.length < maxItems; i += 1) {
+    if (i < blogCapped.length) merged.push(blogCapped[i]);
+    if (merged.length >= maxItems) break;
+    if (i < webCapped.length) merged.push(webCapped[i]);
+  }
+
+  return merged;
+}
+
 /**
  * 검색 결과가 이벤트 관련인지 판별
  * 
@@ -144,45 +176,122 @@ async function calculateConsensusForQuery(query: string, event: Event): Promise<
  * - Soft Penalty: 후기/리뷰 (-10점, 전시는 완화)
  * - Positive Signals: 예매/예약/전시/공연 키워드
  */
-function isEventLike(item: any, event: Event): boolean {
-  const title = stripHtmlTags(item.title || '').toLowerCase();
-  const description = stripHtmlTags(item.description || '').toLowerCase();
-  const text = title + ' ' + description;
+function scoreEventSnippet(item: any, event: Event): number {
+  const title = normalizeText(stripHtmlTags(item.title || ''));
+  const description = normalizeText(stripHtmlTags(item.description || ''));
+  const text = `${title} ${description}`.trim();
+
+  if (!text) return 0;
 
   // Hard Drop (즉시 제외)
   const hardDropKeywords = ['판매종료', '공연종료', '전시종료', '마감되었습니다', '종료되었습니다'];
   for (const keyword of hardDropKeywords) {
-    if (text.includes(keyword)) {
-      return false;
-    }
+    if (text.includes(keyword)) return 0;
   }
 
   let score = 0;
 
-  // Soft Penalty (후기/리뷰)
-  // GPT 제안: 전시는 -10으로 완화, 나머지는 -30
-  if (/후기|리뷰|다녀왔어요|다녀옴/.test(text)) {
-    if (event.main_category === '전시') {
-      score -= 10;
-    } else {
-      score -= 30;
-    }
+  const titleTokens = extractSearchTokens(event.title);
+  const titleMatched = titleTokens.filter(token => text.includes(token)).length;
+  if (titleTokens.length > 0) {
+    score += (titleMatched / titleTokens.length) * 40;
   }
 
-  // Positive Signals (카테고리별)
+  const yearTokens = getEventYears(event).map(String);
+  const yearMatched = yearTokens.filter(token => text.includes(token)).length;
+  score += Math.min(20, yearMatched * 10);
+
+  const placeTokens = extractSearchTokens(`${event.venue || ''} ${event.region || ''}`);
+  const placeMatched = placeTokens.filter(token => text.includes(token)).length;
+  if (placeTokens.length > 0) {
+    score += Math.min(20, (placeMatched / placeTokens.length) * 20);
+  }
+
   const positiveKeywords = getPositiveKeywords(event.main_category);
-  for (const keyword of positiveKeywords) {
-    if (text.includes(keyword)) {
-      score += 20;
-    }
+  const positiveMatched = positiveKeywords.filter(keyword => text.includes(keyword)).length;
+  score += Math.min(20, positiveMatched * 8);
+
+  const categoryKeyword = getCategoryKeyword(event.main_category);
+  if (text.includes(categoryKeyword)) {
+    score += 10;
   }
 
-  // 예매/예약 키워드 (강한 신호)
   if (/예매|예약|신청|티켓|입장권/.test(text)) {
-    score += 30;
+    score += 15;
   }
 
-  return score > 0;
+  // Soft Penalty (후기/리뷰)
+  if (/후기|리뷰|다녀왔어요|다녀옴/.test(text)) {
+    score -= event.main_category === '전시' ? 8 : 18;
+  }
+
+  // 노이즈성 문서 패턴
+  if (/중고|당근|부동산|구인|주식|환율|날씨|운세/.test(text)) {
+    score -= 30;
+  }
+
+  return Math.max(0, Math.min(100, score));
+}
+
+function buildConsensusQueries(event: Event): [string, string, string] {
+  const title = normalizeSearchTitle(event.title);
+  const quotedTitle = `"${title}"`;
+  const yearToken = getEventYears(event).slice(0, 2).join(' ');
+  const venueToken = getPrimaryVenueToken(event.venue || '');
+  const regionToken = (event.region || '').trim();
+  const categoryKeyword = getCategoryKeyword(event.main_category);
+
+  const q1 = [quotedTitle, venueToken, yearToken].filter(Boolean).join(' ').trim();
+  const q2 = [quotedTitle, regionToken, yearToken].filter(Boolean).join(' ').trim();
+  const q3 = [quotedTitle, categoryKeyword, yearToken].filter(Boolean).join(' ').trim();
+
+  return [q1 || quotedTitle, q2 || quotedTitle, q3 || quotedTitle];
+}
+
+function getEventYears(event: Event): number[] {
+  const years = [
+    new Date(event.start_at).getFullYear(),
+    new Date(event.end_at).getFullYear(),
+    new Date().getFullYear(),
+  ].filter(year => Number.isFinite(year));
+
+  return Array.from(new Set(years));
+}
+
+function normalizeSearchTitle(title: string): string {
+  return normalizeText(
+    title
+      .replace(/\s*\([^)]+\)\s*/g, ' ')  // (영문명/부제) 괄호째 제거 — normalizeText 전에 처리
+  )
+    .replace(/^\[[^\]]+\]\s*/g, '')
+    .replace(/\s*\[[^\]]+\]$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getPrimaryVenueToken(venue: string): string {
+  const tokens = extractSearchTokens(venue).filter(token => !/홀|관|점|층|로비/.test(token));
+  return tokens.slice(0, 2).join(' ');
+}
+
+function extractSearchTokens(value: string): string[] {
+  return normalizeText(value)
+    .split(' ')
+    .map(token => token.trim())
+    .filter(token => token.length >= 2);
+}
+
+function normalizeText(value: string): string {
+  return value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, '\'')
+    .toLowerCase()
+    .replace(/[^\w가-힣\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
@@ -250,15 +359,54 @@ export function calculateStructuralScore(event: Event): StructuralComponents {
   const venueScore = calculateVenueScore(event.venue || '');
   const durationScore = calculateDurationScore(event.start_at, event.end_at);
   const sourceScore = calculateSourceScore(event.source || '');
+  const geoScore = calculateGeoScore(event.lat, event.lng);
+  const linkScore = calculateLinkScore(event.external_links);
+  const imageScore = calculateImageScore(event.image_url);
+  const featuredScore = event.is_featured ? 100 : 60;
 
-  const total = venueScore * 0.4 + durationScore * 0.3 + sourceScore * 0.3;
+  const total =
+    venueScore * 0.22 +
+    durationScore * 0.22 +
+    sourceScore * 0.20 +
+    geoScore * 0.14 +
+    linkScore * 0.12 +
+    imageScore * 0.05 +
+    featuredScore * 0.05;
 
   return {
     venue_score: Math.round(venueScore),
     duration_score: Math.round(durationScore),
     source_score: Math.round(sourceScore),
+    geo_score: Math.round(geoScore),
+    link_score: Math.round(linkScore),
+    image_score: Math.round(imageScore),
+    featured_score: Math.round(featuredScore),
     total: Math.round(total),
   };
+}
+
+function calculateGeoScore(lat?: number | null, lng?: number | null): number {
+  if (typeof lat === 'number' && typeof lng === 'number') return 100;
+  return 40;
+}
+
+function calculateLinkScore(externalLinks?: Record<string, unknown> | null): number {
+  if (!externalLinks || typeof externalLinks !== 'object') return 50;
+
+  const links = externalLinks as Record<string, unknown>;
+  const hasOfficial = typeof links.official === 'string' && links.official.trim().length > 0;
+  const hasTicket = typeof links.ticket === 'string' && links.ticket.trim().length > 0;
+  const hasReservation = typeof links.reservation === 'string' && links.reservation.trim().length > 0;
+
+  if (hasOfficial && (hasTicket || hasReservation)) return 100;
+  if (hasOfficial || hasTicket || hasReservation) return 80;
+  return 50;
+}
+
+function calculateImageScore(imageUrl?: string | null): number {
+  if (!imageUrl) return 40;
+  if (imageUrl.includes('placeholder') || imageUrl.includes('/defaults/')) return 40;
+  return 100;
 }
 
 /**
@@ -456,4 +604,3 @@ export function calculateValidityScore(event: Event): number {
 
   return 100; // 유효함
 }
-

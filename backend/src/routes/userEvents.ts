@@ -72,28 +72,15 @@ async function logUserEvent(
       [internalUserId, eventId, actionType]
     );
 
-    // 2. events 테이블의 카운트 증가 (실시간 반영)
+    // 2. canonical_events 테이블의 카운트 증가 (실시간 반영)
+    // Note: canonical_events에는 view_count만 존재 (save_count, share_count 없음)
     if (actionType === 'view') {
       await client.query(
-        `UPDATE events SET view_count = view_count + 1 WHERE id = $1`,
-        [eventId]
-      );
-    } else if (actionType === 'save') {
-      await client.query(
-        `UPDATE events SET save_count = save_count + 1 WHERE id = $1`,
-        [eventId]
-      );
-    } else if (actionType === 'unsave') {
-      await client.query(
-        `UPDATE events SET save_count = GREATEST(save_count - 1, 0) WHERE id = $1`,
-        [eventId]
-      );
-    } else if (actionType === 'share') {
-      await client.query(
-        `UPDATE events SET share_count = share_count + 1 WHERE id = $1`,
+        `UPDATE canonical_events SET view_count = view_count + 1 WHERE id = $1`,
         [eventId]
       );
     }
+    // TODO: save_count, share_count를 canonical_events에 추가하거나 별도 테이블로 관리 필요
 
     console.log(`[UserEvents] Logged: ${actionType} for event ${eventId} by user ${internalUserId}`);
   } finally {
@@ -129,7 +116,7 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     // 3. 이벤트 존재 여부 확인
-    const eventCheck = await pool.query('SELECT id FROM events WHERE id = $1', [eventId]);
+    const eventCheck = await pool.query('SELECT id FROM canonical_events WHERE id = $1', [eventId]);
     if (eventCheck.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -297,12 +284,12 @@ router.get('/stats/:userId', async (req: Request, res: Response) => {
     );
 
     const recentEvents = await pool.query(
-      `SELECT 
+      `SELECT
          ue.action_type,
          ue.created_at,
          e.title as event_title
        FROM user_events ue
-       JOIN events e ON ue.event_id = e.id
+       JOIN canonical_events e ON ue.event_id = e.id
        WHERE ue.user_id = $1
        ORDER BY ue.created_at DESC
        LIMIT 10`,
