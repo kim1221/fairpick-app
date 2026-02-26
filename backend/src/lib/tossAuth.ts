@@ -7,38 +7,12 @@
  * 참고 문서: https://developers-apps-in-toss.toss.im/api/
  */
 
-import https from 'https';
-import fs from 'fs';
-import path from 'path';
 import axios from 'axios';
 import { config } from '../config';
 import { decryptTossValue } from './tossDecrypt';
+import { tossHttpAgent as mtlsAgent } from './tossHttpAgent';
 
 const BASE = config.toss.apiBaseUrl;
-
-// ─── mTLS Agent ──────────────────────────────────────────────────────────────
-// 앱인토스 파트너 API는 mTLS(mutual TLS) 필수예요.
-// TOSS_CERT_PATH / TOSS_KEY_PATH 가 설정되지 않으면 agent 없이 요청해요 (로컬 개발용).
-
-function buildMtlsAgent(): https.Agent | undefined {
-  const { certPath, keyPath } = config.toss;
-  if (!certPath || !keyPath) {
-    if (__DEV__) console.warn('[tossAuth] mTLS 인증서 미설정 — TOSS_CERT_PATH / TOSS_KEY_PATH 확인');
-    return undefined;
-  }
-  // 상대 경로면 backend/ 루트 기준으로 resolve해요 (process.cwd() 의존성 제거)
-  const backendRoot = path.resolve(__dirname, '../../');
-  const resolvedCert = path.isAbsolute(certPath) ? certPath : path.join(backendRoot, certPath);
-  const resolvedKey = path.isAbsolute(keyPath) ? keyPath : path.join(backendRoot, keyPath);
-
-  return new https.Agent({
-    cert: fs.readFileSync(resolvedCert),
-    key: fs.readFileSync(resolvedKey),
-  });
-}
-
-// 서버 시작 시 한 번만 생성해요.
-const mtlsAgent = buildMtlsAgent();
 
 // ─── Toss API 공통 응답 래퍼 ────────────────────────────────────────────────
 

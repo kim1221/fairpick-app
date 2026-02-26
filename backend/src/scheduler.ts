@@ -10,6 +10,8 @@ import { aiEnrichmentBackfill } from './jobs/aiEnrichmentBackfill';
 import { enrichInternalFields } from './jobs/enrichInternalFields';
 import { runPopupDiscovery } from './scripts/ai-popup-discovery';
 import { runHotRating } from './scripts/ai-hot-rating';
+import { embedNewEvents } from './jobs/embedNewEvents';
+import { sendEndSoonNotifications } from './jobs/sendEndSoonNotifications';
 
 /**
  * ============================================================
@@ -199,6 +201,14 @@ export function initScheduler() {
     });
     console.log('[Scheduler] registered: Auto-recommend update @ 04:30 KST');
 
+    // 매일 05:00 KST - 벡터 임베딩 (데이터 수집/AI 보완 완료 후 신규 이벤트 처리)
+    cron.schedule('0 5 * * *', async () => {
+      await runJobSafely('embed-new-events', embedNewEvents);
+    }, {
+      timezone: 'Asia/Seoul'
+    });
+    console.log('[Scheduler] registered: Embed new events @ 05:00 KST');
+
     // 매일 08:00 KST - AI Popup Discovery (팝업 신규 발굴 + DB 중복 체크)
     cron.schedule('0 8 * * *', async () => {
       await runJobSafely('ai-popup-discovery', runPopupDiscovery);
@@ -206,6 +216,14 @@ export function initScheduler() {
       timezone: 'Asia/Seoul'
     });
     console.log('[Scheduler] registered: AI Popup Discovery @ 08:00 KST');
+
+    // 매일 09:00 KST - 찜한 이벤트 종료 D-3 알림 발송
+    cron.schedule('0 9 * * *', async () => {
+      await runJobSafely('end-soon-notifications', sendEndSoonNotifications);
+    }, {
+      timezone: 'Asia/Seoul'
+    });
+    console.log('[Scheduler] registered: End-soon notifications @ 09:00 KST');
 
     // 매주 월요일 09:00 KST - AI Hot Rating (전시/공연/축제 핫함 평가)
     cron.schedule('0 9 * * 1', async () => {
@@ -236,7 +254,9 @@ export function initScheduler() {
     console.log('  - 03:30 KST: Price info backfill (extract from API payloads)');
     console.log('  - 04:15 KST: Phase 2 Internal Fields (metadata.internal generation)');
     console.log('  - 04:30 KST: Auto-recommend update');
+    console.log('  - 05:00 KST: Embed new events (벡터 임베딩 생성)');
     console.log('  - 08:00 KST: AI Popup Discovery (팝업 신규 발굴)');
+    console.log('  - 09:00 KST: End-soon notifications (찜한 이벤트 D-3 알림)');
     console.log('  - 09:00 KST (Mon): AI Hot Rating (전시/공연/축제 핫함 평가)');
     console.log('  - 15:00 KST: Geo refresh pipeline (collect + geoBackfill + venueBackfill + dedupe + AI enrichment)');
     console.log('  - 15:30 KST: Price info backfill (extract from API payloads)');
