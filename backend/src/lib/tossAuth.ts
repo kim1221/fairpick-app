@@ -9,6 +9,7 @@
 
 import https from 'https';
 import fs from 'fs';
+import path from 'path';
 import axios from 'axios';
 import { config } from '../config';
 import { decryptTossValue } from './tossDecrypt';
@@ -25,9 +26,14 @@ function buildMtlsAgent(): https.Agent | undefined {
     if (__DEV__) console.warn('[tossAuth] mTLS 인증서 미설정 — TOSS_CERT_PATH / TOSS_KEY_PATH 확인');
     return undefined;
   }
+  // 상대 경로면 backend/ 루트 기준으로 resolve해요 (process.cwd() 의존성 제거)
+  const backendRoot = path.resolve(__dirname, '../../');
+  const resolvedCert = path.isAbsolute(certPath) ? certPath : path.join(backendRoot, certPath);
+  const resolvedKey = path.isAbsolute(keyPath) ? keyPath : path.join(backendRoot, keyPath);
+
   return new https.Agent({
-    cert: fs.readFileSync(certPath),
-    key: fs.readFileSync(keyPath),
+    cert: fs.readFileSync(resolvedCert),
+    key: fs.readFileSync(resolvedKey),
   });
 }
 
