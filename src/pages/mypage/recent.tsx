@@ -12,6 +12,9 @@ import {
 import eventService from '../../services/eventService';
 import { isEventEnded, getTodayMidnight } from '../../utils/eventStatus';
 import { MyPageEventCard, RenderableEventItem } from '../../components/MyPageEventCard';
+import { useAuth } from '../../hooks/useAuth';
+import http from '../../lib/http';
+import type { GetRecentResponse } from '../../types/serverSync';
 
 export const Route = createRoute('/mypage/recent', {
   component: RecentPage,
@@ -23,6 +26,7 @@ type UndoInfo =
 
 function RecentPage() {
   const navigation = Route.useNavigation();
+  const { isLoggedIn } = useAuth();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [events, setEvents] = useState<RenderableEventItem[]>([]);
@@ -37,27 +41,43 @@ function RecentPage() {
     setLoading(true);
     setHasError(false);
     try {
+      // 로컬 데이터는 항상 로드 (snapshot 폴백용)
       const recentData = await getRecentV2();
-      const totalIds = recentData.items.length;
+      const localSnapshotMap = new Map(recentData.items.map((i) => [i.id, i.snapshot]));
 
-      if (totalIds === 0) {
+      // 로그인 시 서버를 ID 소스로 사용, 실패 시 로컬로 폴백
+      let orderedItems: Array<{ id: string; timestamp: string }>;
+      if (isLoggedIn) {
+        try {
+          const { data } = await http.get<GetRecentResponse>('/users/me/recent');
+          orderedItems = data.items.map((i) => ({ id: i.eventId, timestamp: i.viewedAt }));
+        } catch {
+          if (__DEV__) console.warn('[RecentPage] 서버 조회 실패, 로컬로 폴백');
+          orderedItems = recentData.items;
+        }
+      } else {
+        orderedItems = recentData.items;
+      }
+
+      if (orderedItems.length === 0) {
         setEvents([]);
         setLoading(false);
         return;
       }
 
       const results = await Promise.allSettled(
-        recentData.items.map((item) => eventService.getEventById(item.id))
+        orderedItems.map((item) => eventService.getEventById(item.id))
       );
 
       const renderableEvents: RenderableEventItem[] = [];
       const today = getTodayMidnight();
 
-      recentData.items.forEach((item, index) => {
+      orderedItems.forEach((item, index) => {
         const result = results[index];
+        if (!result) return;
 
         if (result.status === 'fulfilled' && result.value !== null) {
-          const eventData = result.value;
+          const eventData = (result as PromiseFulfilledResult<typeof result.value>).value!;
           const isEnded = isEventEnded(eventData.endAt, today);
 
           renderableEvents.push({
@@ -67,15 +87,14 @@ function RecentPage() {
             viewedAt: item.timestamp,
           });
         } else {
-          const snapshot = item.snapshot;
+          const snapshot = localSnapshotMap.get(item.id);
           renderableEvents.push({
             id: item.id,
             title: snapshot?.title || '(제목 없음)',
             venue: snapshot?.venue || '',
-            venueName: snapshot?.venue || '',
             region: (snapshot?.region as any) || '기타',
             category: (snapshot?.mainCategory as any) || '기타',
-            thumbnailUrl: snapshot?.imageUrl || undefined,
+            thumbnailUrl: snapshot?.imageUrl ?? '',
             startAt: snapshot?.startAt || '',
             endAt: snapshot?.endAt || '',
             periodText:
@@ -101,7 +120,7 @@ function RecentPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isLoggedIn]);
 
   useEffect(() => {
     loadRecent();
@@ -168,6 +187,12 @@ function RecentPage() {
     skipNextStorageReload.current = true;
     try {
       await removeRecentItem(eventId);
+      // 로그인 시 서버에도 삭제 (fire-and-forget)
+      if (isLoggedIn) {
+        http.delete(`/users/me/recent/${eventId}`).catch((e) => {
+          if (__DEV__) console.warn('[RecentPage][Remove][Server]', e.message);
+        });
+      }
     } catch (error) {
       skipNextStorageReload.current = false;
       setUndoInfo(null);
@@ -185,6 +210,12 @@ function RecentPage() {
     skipNextStorageReload.current = true;
     try {
       await clearRecent();
+      // 로그인 시 서버에도 전체 삭제 (fire-and-forget)
+      if (isLoggedIn) {
+        http.delete('/users/me/recent').catch((e) => {
+          if (__DEV__) console.warn('[RecentPage][ClearAll][Server]', e.message);
+        });
+      }
     } catch (error) {
       skipNextStorageReload.current = false;
       setUndoInfo(null);
@@ -223,7 +254,7 @@ function RecentPage() {
           lastKnownStatus: event.lastKnownStatus as any,
           snapshot: {
             title: event.title,
-            venue: event.venueName || event.venue || '',
+            venue: event.venue || '',
             imageUrl: event.thumbnailUrl,
             region: event.region as string,
             mainCategory: event.category as string,
@@ -233,6 +264,14 @@ function RecentPage() {
         });
         await writeRecentV2({ version: 2, items: restoredItems, totalCount: recentData.totalCount });
         emitStorageChangeEvent({ type: 'recent', action: 'update', count: restoredItems.length });
+        // 로그인 시 서버에도 복원 (fire-and-forget)
+        if (isLoggedIn) {
+          http.post('/users/me/recent/batch', {
+            items: [{ eventId: event.id, viewedAt: event.viewedAt || new Date().toISOString() }],
+          }).catch((e) => {
+            if (__DEV__) console.warn('[RecentPage][Undo][Server]', e.message);
+          });
+        }
       } catch (error) {
         skipNextStorageReload.current = false;
         loadRecent();
@@ -250,7 +289,7 @@ function RecentPage() {
           lastKnownStatus: event.lastKnownStatus as any,
           snapshot: {
             title: event.title,
-            venue: event.venueName || event.venue || '',
+            venue: event.venue || '',
             imageUrl: event.thumbnailUrl,
             region: event.region as string,
             mainCategory: event.category as string,
@@ -260,6 +299,17 @@ function RecentPage() {
         }));
         await writeRecentV2({ version: 2, items: restoredItems, totalCount: restoredItems.length });
         emitStorageChangeEvent({ type: 'recent', action: 'update', count: restoredItems.length });
+        // 로그인 시 서버에도 복원 (fire-and-forget)
+        if (isLoggedIn) {
+          http.post('/users/me/recent/batch', {
+            items: info.events.map((e) => ({
+              eventId: e.id,
+              viewedAt: e.viewedAt || new Date().toISOString(),
+            })),
+          }).catch((e) => {
+            if (__DEV__) console.warn('[RecentPage][UndoAll][Server]', e.message);
+          });
+        }
       } catch (error) {
         skipNextStorageReload.current = false;
         loadRecent();

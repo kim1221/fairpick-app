@@ -11,6 +11,9 @@ import {
 import eventService from '../../services/eventService';
 import { isEventEnded, isStoredItemActive, getTodayMidnight } from '../../utils/eventStatus';
 import { MyPageEventCard, RenderableEventItem } from '../../components/MyPageEventCard';
+import { useAuth } from '../../hooks/useAuth';
+import http from '../../lib/http';
+import type { GetLikesResponse } from '../../types/serverSync';
 
 export const Route = createRoute('/mypage/likes', {
   component: LikesPage,
@@ -18,6 +21,7 @@ export const Route = createRoute('/mypage/likes', {
 
 function LikesPage() {
   const navigation = Route.useNavigation();
+  const { isLoggedIn } = useAuth();
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState<RenderableEventItem[]>([]);
   const [activeCount, setActiveCount] = useState(0);
@@ -34,28 +38,43 @@ function LikesPage() {
     setLoading(true);
     setHasError(false);
     try {
+      // 로컬 데이터는 항상 로드 (snapshot 폴백용)
       const likesData = await getLikesV2();
-      const totalIds = likesData.items.length;
+      const localSnapshotMap = new Map(likesData.items.map((i) => [i.id, i.snapshot]));
 
-      if (totalIds === 0) {
+      // 로그인 시 서버를 ID 소스로 사용, 실패 시 로컬로 폴백
+      let orderedItems: Array<{ id: string; timestamp: string }>;
+      if (isLoggedIn) {
+        try {
+          const { data } = await http.get<GetLikesResponse>('/users/me/likes');
+          orderedItems = data.items.map((i) => ({ id: i.eventId, timestamp: i.likedAt }));
+        } catch {
+          if (__DEV__) console.warn('[LikesPage] 서버 조회 실패, 로컬로 폴백');
+          orderedItems = likesData.items;
+        }
+      } else {
+        orderedItems = likesData.items;
+      }
+
+      if (orderedItems.length === 0) {
         setEvents([]);
         setLoading(false);
         return;
       }
 
       const results = await Promise.allSettled(
-        likesData.items.map((item) => eventService.getEventById(item.id))
+        orderedItems.map((item) => eventService.getEventById(item.id))
       );
 
       const renderableEvents: RenderableEventItem[] = [];
       const today = getTodayMidnight();
 
-      likesData.items.forEach((item, index) => {
+      orderedItems.forEach((item, index) => {
         const result = results[index];
+        if (!result) return;
 
         if (result.status === 'fulfilled' && result.value !== null) {
-          const eventData = result.value;
-          // end_at 기반 종료 판정: API 성공이어도 이미 끝난 이벤트면 'ended'
+          const eventData = (result as PromiseFulfilledResult<typeof result.value>).value!;
           const isEnded = isEventEnded(eventData.endAt, today);
 
           renderableEvents.push({
@@ -64,19 +83,18 @@ function LikesPage() {
             lastKnownStatus: isEnded ? 'ended' : 'active',
           });
 
-          // storage의 lastKnownStatus 업데이트
-          item.lastKnownStatus = isEnded ? 'ended' : 'active';
+          const localItem = likesData.items.find((l) => l.id === item.id);
+          if (localItem) localItem.lastKnownStatus = isEnded ? 'ended' : 'active';
         } else {
-          // API 실패 → snapshot 기반 placeholder
-          const snapshot = item.snapshot;
+          // API 실패 → 로컬 snapshot 기반 placeholder
+          const snapshot = localSnapshotMap.get(item.id);
           renderableEvents.push({
             id: item.id,
             title: snapshot?.title || '(제목 없음)',
             venue: snapshot?.venue || '',
-            venueName: snapshot?.venue || '',
             region: (snapshot?.region as any) || '기타',
             category: (snapshot?.mainCategory as any) || '기타',
-            thumbnailUrl: snapshot?.imageUrl || undefined,
+            thumbnailUrl: snapshot?.imageUrl ?? '',
             startAt: snapshot?.startAt || '',
             endAt: snapshot?.endAt || '',
             periodText:
@@ -91,11 +109,15 @@ function LikesPage() {
             isPlaceholder: true,
             lastKnownStatus: 'deleted',
           });
-          item.lastKnownStatus = 'deleted';
+          const localItem = likesData.items.find((l) => l.id === item.id);
+          if (localItem) localItem.lastKnownStatus = 'deleted';
         }
       });
 
-      await writeLikesV2(likesData);
+      // 로컬 캐시 업데이트 (비로그인 시만 — 로그인 시 서버가 소스)
+      if (!isLoggedIn) {
+        await writeLikesV2(likesData);
+      }
 
       setEvents(renderableEvents);
     } catch (error) {
@@ -104,7 +126,7 @@ function LikesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isLoggedIn]);
 
   useEffect(() => {
     loadLikes();
@@ -179,6 +201,12 @@ function LikesPage() {
 
     try {
       await toggleLike(eventId);
+      // 로그인 시 서버에도 삭제 (fire-and-forget)
+      if (isLoggedIn) {
+        http.delete(`/users/me/likes/${eventId}`).catch((e) => {
+          if (__DEV__) console.warn('[LikesPage][Unlike][Server]', e.message);
+        });
+      }
     } catch (error) {
       skipNextStorageReload.current = false;
       setUndoItem(null);
@@ -210,13 +238,19 @@ function LikesPage() {
     try {
       await toggleLike(event.id, {
         title: event.title,
-        venue: event.venueName || event.venue,
+        venue: event.venue,
         imageUrl: event.thumbnailUrl,
         region: event.region as string,
         mainCategory: event.category as string,
         startAt: event.startAt,
         endAt: event.endAt,
       });
+      // 로그인 시 서버에도 복원 (fire-and-forget)
+      if (isLoggedIn) {
+        http.post(`/users/me/likes/${event.id}`).catch((e) => {
+          if (__DEV__) console.warn('[LikesPage][Undo][Server]', e.message);
+        });
+      }
     } catch (error) {
       skipNextStorageReload.current = false;
       loadLikes();
@@ -229,6 +263,18 @@ function LikesPage() {
     if (clearingEnded) return;
     setClearingEnded(true);
     try {
+      // 로그인 시 서버에서 종료된 항목 삭제 (fire-and-forget)
+      if (isLoggedIn) {
+        const endedIds = events
+          .filter((e) => e.lastKnownStatus !== 'active')
+          .map((e) => e.id);
+        endedIds.forEach((id) => {
+          http.delete(`/users/me/likes/${id}`).catch((e) => {
+            if (__DEV__) console.warn('[LikesPage][ClearEnded][Server]', e.message);
+          });
+        });
+      }
+
       const likesData = await getLikesV2();
       const today = getTodayMidnight();
       const activeItems = likesData.items.filter((item) => isStoredItemActive(item, today));
