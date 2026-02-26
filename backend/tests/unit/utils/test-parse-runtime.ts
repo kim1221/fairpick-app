@@ -2,7 +2,7 @@
  * parseRuntime 함수 테스트
  */
 
-import { parseRuntime } from '../../../src/lib/displayFieldsGenerator/utils/payloadReader';
+import { parseRuntime } from '../lib/displayFieldsGenerator/utils/payloadReader';
 
 function testParseRuntime() {
   console.log('[Test] Testing parseRuntime function...\n');
