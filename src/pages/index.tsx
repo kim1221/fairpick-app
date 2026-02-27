@@ -4,7 +4,8 @@
 
 import { createRoute } from '@granite-js/react-native';
 import React, { useEffect, useState, useRef } from 'react';
-import { ScrollView, StyleSheet, View, Text, ActivityIndicator, RefreshControl, Pressable } from 'react-native';
+import { ScrollView, StyleSheet, View, Text, Animated, RefreshControl, Pressable } from 'react-native';
+import { Icon } from '@toss/tds-react-native';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { EventCard } from '../components/EventCard';
 
@@ -15,6 +16,7 @@ import { Accuracy, getCurrentLocation, GetCurrentLocationPermissionError } from 
 import recommendationService from '../services/recommendationService';
 import userEventService from '../services/userEventService';
 import { getCurrentUserId } from '../utils/anonymousUser';
+import { getAiNoticeShown, setAiNoticeShown } from '../utils/storage';
 import { reverseGeocode } from '../utils/geocoding';
 
 // 타입
@@ -32,6 +34,130 @@ interface TodayPickData {
   loading: boolean;
 }
 
+// ==================== 스켈레톤 컴포넌트 ====================
+
+function useSkeletonOpacity() {
+  const opacity = useRef(new Animated.Value(0.4)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+  return opacity;
+}
+
+function TodayPickSkeleton() {
+  const opacity = useSkeletonOpacity();
+  return (
+    <Animated.View style={[skeletonStyles.largeCard, { opacity }]}>
+      <View style={skeletonStyles.largeImage} />
+      <View style={skeletonStyles.content}>
+        <View style={skeletonStyles.badge} />
+        <View style={skeletonStyles.titleLine1} />
+        <View style={skeletonStyles.titleLine2} />
+        <View style={skeletonStyles.meta} />
+      </View>
+    </Animated.View>
+  );
+}
+
+function HorizontalSectionSkeleton() {
+  const opacity = useSkeletonOpacity();
+  return (
+    <Animated.View style={{ opacity, flexDirection: 'row', paddingHorizontal: 20, gap: 12 }}>
+      {[0, 1, 2].map((i) => (
+        <View key={i} style={skeletonStyles.smallCard}>
+          <View style={skeletonStyles.smallImage} />
+          <View style={skeletonStyles.smallContent}>
+            <View style={skeletonStyles.smallBadge} />
+            <View style={skeletonStyles.smallTitle1} />
+            <View style={skeletonStyles.smallTitle2} />
+          </View>
+        </View>
+      ))}
+    </Animated.View>
+  );
+}
+
+const skeletonStyles = StyleSheet.create({
+  // 큰 카드 (오늘의 추천)
+  largeCard: {
+    marginHorizontal: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  largeImage: {
+    height: 200,
+    backgroundColor: '#E5E8EB',
+  },
+  content: {
+    padding: 16,
+    gap: 8,
+  },
+  badge: {
+    width: 48,
+    height: 20,
+    backgroundColor: '#E5E8EB',
+    borderRadius: 10,
+  },
+  titleLine1: {
+    height: 20,
+    backgroundColor: '#E5E8EB',
+    borderRadius: 4,
+    width: '85%',
+  },
+  titleLine2: {
+    height: 20,
+    backgroundColor: '#E5E8EB',
+    borderRadius: 4,
+    width: '60%',
+  },
+  meta: {
+    height: 14,
+    backgroundColor: '#E5E8EB',
+    borderRadius: 4,
+    width: '40%',
+    marginTop: 4,
+  },
+  // 작은 카드 (가로 스크롤 섹션)
+  smallCard: {
+    width: 160,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  smallImage: {
+    height: 100,
+    backgroundColor: '#E5E8EB',
+  },
+  smallContent: {
+    padding: 10,
+    gap: 6,
+  },
+  smallBadge: {
+    width: 36,
+    height: 16,
+    backgroundColor: '#E5E8EB',
+    borderRadius: 8,
+  },
+  smallTitle1: {
+    height: 14,
+    backgroundColor: '#E5E8EB',
+    borderRadius: 4,
+    width: '90%',
+  },
+  smallTitle2: {
+    height: 14,
+    backgroundColor: '#E5E8EB',
+    borderRadius: 4,
+    width: '65%',
+  },
+});
+
 // ==================== 홈 화면 컴포넌트 ====================
 
 function HomePage() {
@@ -39,23 +165,35 @@ function HomePage() {
   
   // 상태 관리
   const [todayPick, setTodayPick] = useState<TodayPickData>({ event: null, loading: true });
-  const [nearby, setNearby] = useState<ScoredEvent[]>([]); // 내 주변 이벤트
-  const [trending, setTrending] = useState<ScoredEvent[]>([]);
-  const [endingSoon, setEndingSoon] = useState<ScoredEvent[]>([]); // 곧 끝나요
-  const [exhibition, setExhibition] = useState<ScoredEvent[]>([]); // 전시 큐레이션
-  const [weekend, setWeekend] = useState<ScoredEvent[]>([]); // 이번 주말
-  const [freeEvents, setFreeEvents] = useState<ScoredEvent[]>([]); // 무료로 즐겨요
-  const [latest, setLatest] = useState<ScoredEvent[]>([]);
+  const [nearby, setNearby] = useState<ScoredEvent[] | null>(null); // null=로딩, []=없음
+  const [trending, setTrending] = useState<ScoredEvent[] | null>(null);
+  const [endingSoon, setEndingSoon] = useState<ScoredEvent[] | null>(null);
+  const [exhibition, setExhibition] = useState<ScoredEvent[] | null>(null);
+  const [weekend, setWeekend] = useState<ScoredEvent[] | null>(null);
+  const [freeEvents, setFreeEvents] = useState<ScoredEvent[] | null>(null);
+  const [latest, setLatest] = useState<ScoredEvent[] | null>(null);
   const [userId, setUserId] = useState<string>('');
   const [location, setLocation] = useState<Location | undefined>(undefined);
   const [currentAddress, setCurrentAddress] = useState<string>(''); // 행정동 표시
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [showAiNotice, setShowAiNotice] = useState<boolean>(false);
 
   const excludedIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     initializeUser();
+    checkAiNotice();
   }, []);
+
+  const checkAiNotice = async () => {
+    const shown = await getAiNoticeShown();
+    if (!shown) setShowAiNotice(true);
+  };
+
+  const handleAiNoticeConfirm = async () => {
+    await setAiNoticeShown();
+    setShowAiNotice(false);
+  };
 
   const initializeUser = async () => {
     try {
@@ -151,6 +289,8 @@ function HomePage() {
       // 2. 내 주변 이벤트 (위치 필수)
       if (loc) {
         await loadNearby(loc);
+      } else {
+        setNearby([]); // 위치 없음 → 스켈레톤 없이 바로 숨김
       }
       
       // 3. 지금 떠오르는 (위치 정보 전달)
@@ -376,6 +516,13 @@ function HomePage() {
       
       // 2. 새로운 위치로 추천 다시 로드
       excludedIds.current.clear();
+      setNearby(null);
+      setTrending(null);
+      setEndingSoon(null);
+      setExhibition(null);
+      setWeekend(null);
+      setFreeEvents(null);
+      setLatest(null);
       await loadRecommendations(userId, newLocation);
       
       console.log('[Home] Refresh completed with location:', newLocation);
@@ -393,9 +540,20 @@ function HomePage() {
 
   return (
     <View style={styles.container}>
-      <ScrollView 
-        style={styles.scrollView} 
+      {/* 생성형 AI 사전 고지 배너 (최초 1회) */}
+      {showAiNotice && (
+        <View style={styles.aiNoticeBanner}>
+          <Text style={styles.aiNoticeText}>페어픽은 AI를 활용해요</Text>
+          <Pressable onPress={handleAiNoticeConfirm} hitSlop={8}>
+            <Text style={styles.aiNoticeClose}>✕</Text>
+          </Pressable>
+        </View>
+      )}
+
+      <ScrollView
+        style={styles.scrollView}
         showsVerticalScrollIndicator={false}
+        onScrollBeginDrag={handleAiNoticeConfirm}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
         }
@@ -414,7 +572,7 @@ function HomePage() {
                 android_ripple={{ color: '#E5E7EB', radius: 20 }}
               >
                 <View style={styles.locationButtonContent}>
-                  <Text style={styles.locationIcon}>📍</Text>
+                  <Icon name="icon-pin-mono" size={14} color="#0369A1" />
                   <Text style={styles.locationButtonText}>{currentAddress}</Text>
                 </View>
               </Pressable>
@@ -425,14 +583,11 @@ function HomePage() {
         {/* 오늘의 추천 */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>✨ 오늘의 추천</Text>
+            <Text style={styles.sectionTitle}>오늘의 추천</Text>
           </View>
           
           {todayPick.loading ? (
-            <View style={styles.loadingCard}>
-              <ActivityIndicator size="large" color="#3182F6" />
-              <Text style={styles.loadingText}>로딩 중...</Text>
-            </View>
+            <TodayPickSkeleton />
           ) : todayPick.event ? (
             <View style={{ paddingHorizontal: 20 }}>
               <EventCard 
@@ -443,176 +598,204 @@ function HomePage() {
             </View>
           ) : (
             <View style={styles.emptyCard}>
-              <Text style={styles.emptyText}>추천할 이벤트가 없습니다</Text>
+              <Text style={styles.emptyText}>추천할 이벤트가 없어요</Text>
             </View>
           )}
         </View>
 
         {/* 내 주변 이벤트 */}
-        {nearby.length > 0 && (
+        {(nearby === null || nearby.length > 0) && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>📍 내 주변 이벤트</Text>
+              <Text style={styles.sectionTitle}>내 주변 이벤트</Text>
               <Text style={styles.sectionSubtitle}>가장 가까운 이벤트</Text>
             </View>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false} 
-              contentContainerStyle={styles.horizontalList}
-            >
-              {nearby.map((event) => (
-                <EventCard 
-                  key={event.id}
-                  event={event}
-                  onPress={handleEventPress}
-                  variant="small"
-                />
-              ))}
-            </ScrollView>
+            {nearby === null ? (
+              <HorizontalSectionSkeleton />
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalList}
+              >
+                {nearby.map((event) => (
+                  <EventCard
+                    key={event.id}
+                    event={event}
+                    onPress={handleEventPress}
+                    variant="small"
+                  />
+                ))}
+              </ScrollView>
+            )}
           </View>
         )}
 
         {/* 지금 떠오르는 */}
-        {trending.length > 0 && (
+        {(trending === null || trending.length > 0) && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>🔥 지금 떠오르는</Text>
+              <Text style={styles.sectionTitle}>지금 떠오르는</Text>
               <Text style={styles.sectionSubtitle}>24시간 인기 급상승</Text>
             </View>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false} 
-              contentContainerStyle={styles.horizontalList}
-            >
-              {trending.map((event) => (
-                <EventCard 
-                  key={event.id}
-                  event={event}
-                  onPress={handleEventPress}
-                  variant="small"
-                />
-              ))}
-            </ScrollView>
+            {trending === null ? (
+              <HorizontalSectionSkeleton />
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalList}
+              >
+                {trending.map((event) => (
+                  <EventCard
+                    key={event.id}
+                    event={event}
+                    onPress={handleEventPress}
+                    variant="small"
+                  />
+                ))}
+              </ScrollView>
+            )}
           </View>
         )}
 
         {/* 곧 끝나요 */}
-        {endingSoon.length >= 5 && (
+        {(endingSoon === null || endingSoon.length >= 5) && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>⏰ 곧 끝나요</Text>
+              <Text style={styles.sectionTitle}>곧 끝나요</Text>
               <Text style={styles.sectionSubtitle}>7일 안에 마감되는 이벤트</Text>
             </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-            >
-              {endingSoon.map((event) => (
-                <EventCard
-                  key={event.id}
-                  event={event}
-                  onPress={handleEventPress}
-                  variant="small"
-                />
-              ))}
-            </ScrollView>
+            {endingSoon === null ? (
+              <HorizontalSectionSkeleton />
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalList}
+              >
+                {endingSoon.map((event) => (
+                  <EventCard
+                    key={event.id}
+                    event={event}
+                    onPress={handleEventPress}
+                    variant="small"
+                  />
+                ))}
+              </ScrollView>
+            )}
           </View>
         )}
 
         {/* 전시 큐레이션 */}
-        {exhibition.length >= 3 && (
+        {(exhibition === null || exhibition.length >= 3) && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>🎨 전시 큐레이션</Text>
+              <Text style={styles.sectionTitle}>전시 큐레이션</Text>
               <Text style={styles.sectionSubtitle}>놓치면 아쉬운 전시</Text>
             </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-            >
-              {exhibition.map((event) => (
-                <EventCard
-                  key={event.id}
-                  event={event}
-                  onPress={handleEventPress}
-                  variant="small"
-                />
-              ))}
-            </ScrollView>
+            {exhibition === null ? (
+              <HorizontalSectionSkeleton />
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalList}
+              >
+                {exhibition.map((event) => (
+                  <EventCard
+                    key={event.id}
+                    event={event}
+                    onPress={handleEventPress}
+                    variant="small"
+                  />
+                ))}
+              </ScrollView>
+            )}
           </View>
         )}
 
         {/* 이번 주말 */}
-        {weekend.length > 0 && (
+        {(weekend === null || weekend.length > 0) && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>📅 이번 주말</Text>
+              <Text style={styles.sectionTitle}>이번 주말</Text>
               <Text style={styles.sectionSubtitle}>주말에 즐기기 좋은</Text>
             </View>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false} 
-              contentContainerStyle={styles.horizontalList}
-            >
-              {weekend.map((event) => (
-                <EventCard 
-                  key={event.id}
-                  event={event}
-                  onPress={handleEventPress}
-                  variant="small"
-                />
-              ))}
-            </ScrollView>
+            {weekend === null ? (
+              <HorizontalSectionSkeleton />
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalList}
+              >
+                {weekend.map((event) => (
+                  <EventCard
+                    key={event.id}
+                    event={event}
+                    onPress={handleEventPress}
+                    variant="small"
+                  />
+                ))}
+              </ScrollView>
+            )}
           </View>
         )}
 
         {/* 무료로 즐겨요 */}
-        {freeEvents.length >= 5 && (
+        {(freeEvents === null || freeEvents.length >= 5) && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>💸 무료로 즐겨요</Text>
+              <Text style={styles.sectionTitle}>무료로 즐겨요</Text>
               <Text style={styles.sectionSubtitle}>무료 입장 이벤트 모음</Text>
             </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-            >
-              {freeEvents.map((event) => (
-                <EventCard
-                  key={event.id}
-                  event={event}
-                  onPress={handleEventPress}
-                  variant="small"
-                />
-              ))}
-            </ScrollView>
+            {freeEvents === null ? (
+              <HorizontalSectionSkeleton />
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalList}
+              >
+                {freeEvents.map((event) => (
+                  <EventCard
+                    key={event.id}
+                    event={event}
+                    onPress={handleEventPress}
+                    variant="small"
+                  />
+                ))}
+              </ScrollView>
+            )}
           </View>
         )}
 
         {/* 새로 올라왔어요 */}
-        {latest.length > 0 && (
+        {(latest === null || latest.length > 0) && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>🆕 새로 올라왔어요</Text>
+              <Text style={styles.sectionTitle}>새로 올라왔어요</Text>
               <Text style={styles.sectionSubtitle}>최근 추가된 이벤트</Text>
             </View>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false} 
-              contentContainerStyle={styles.horizontalList}
-            >
-              {latest.map((event) => (
-                <EventCard 
-                  key={event.id}
-                  event={event}
-                  onPress={handleEventPress}
-                  variant="small"
-                />
-              ))}
-            </ScrollView>
+            {latest === null ? (
+              <HorizontalSectionSkeleton />
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.horizontalList}
+              >
+                {latest.map((event) => (
+                  <EventCard
+                    key={event.id}
+                    event={event}
+                    onPress={handleEventPress}
+                    variant="small"
+                  />
+                ))}
+              </ScrollView>
+            )}
           </View>
         )}
 
@@ -627,6 +810,27 @@ function HomePage() {
 // ==================== 스타일 ====================
 
 const styles = StyleSheet.create({
+  // AI 고지 배너
+  aiNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EEF4FF',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  aiNoticeText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#3182F6',
+    fontWeight: '500',
+  },
+  aiNoticeClose: {
+    fontSize: 14,
+    color: '#8B95A1',
+    marginLeft: 8,
+  },
+
   container: {
     flex: 1,
     backgroundColor: '#F2F4F6',
@@ -670,9 +874,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  locationIcon: {
-    fontSize: 16,
-  },
   locationButtonText: {
     fontSize: 13,
     color: '#0369A1',
@@ -702,20 +903,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     gap: 12,
   },
-  // 로딩/빈 상태
-  loadingCard: {
-    height: 300,
-    backgroundColor: '#F8F9FA',
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 20,
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#6B7280',
-  },
+  // 빈 상태
   emptyCard: {
     height: 300,
     backgroundColor: '#F8F9FA',

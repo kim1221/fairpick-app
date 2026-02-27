@@ -7,15 +7,15 @@ import {
   Text,
   Pressable,
   FlatList,
-  ActivityIndicator,
   StyleSheet,
 } from 'react-native';
-import { BottomSheet } from '@toss/tds-react-native';
+import { BottomSheet, Icon } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { EventCardData } from '../data/events';
 import { EventImage } from '../components/EventImage';
 import { API_BASE_URL } from '../config/api';
+import { useLike } from '../hooks/useLike';
 
 // ─────────────────────────────────────────────────
 // API 응답 타입
@@ -59,22 +59,22 @@ export const Route = createRoute('/explore', {
 const QUICK_FILTERS = [
   {
     id: 'ending_soon',
-    label: '⏰ 마감임박',
+    label: '마감임박',
     preset: { sort: 'end_at', order: 'asc', filters: { is_ending_soon: true } },
   },
   {
     id: 'new',
-    label: '🆕 신규',
+    label: '신규',
     preset: { sort: 'created_at', order: 'desc', filters: { created_after: '7d' } },
   },
   {
     id: 'free',
-    label: '💰 무료',
+    label: '무료',
     preset: { sort: 'buzz_score', order: 'desc', filters: { is_free: true } },
   },
   {
     id: 'hot',
-    label: '🔥 인기',
+    label: '인기',
     preset: { sort: 'buzz_score', order: 'desc', filters: { buzz_min: 30 } },
   },
 ] as const;
@@ -120,6 +120,149 @@ interface ActiveFilters {
   category: string | null;
 }
 
+// ─────────────────────────────────────────────────
+// 스켈레톤 컴포넌트
+// ─────────────────────────────────────────────────
+function useSkeletonOpacity() {
+  const opacity = useRef(new Animated.Value(0.4)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+  return opacity;
+}
+
+function GridSkeletonCard() {
+  return (
+    <View style={gridSkeletonStyles.card}>
+      <View style={gridSkeletonStyles.image} />
+      <View style={gridSkeletonStyles.content}>
+        <View style={gridSkeletonStyles.titleLine1} />
+        <View style={gridSkeletonStyles.titleLine2} />
+        <View style={gridSkeletonStyles.metaLine} />
+        <View style={gridSkeletonStyles.metaLine} />
+      </View>
+    </View>
+  );
+}
+
+function GridSkeleton({ filterHeight }: { filterHeight: number }) {
+  const opacity = useSkeletonOpacity();
+  return (
+    <Animated.View style={[gridSkeletonStyles.grid, { opacity, paddingTop: filterHeight }]}>
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <GridSkeletonCard key={i} />
+      ))}
+    </Animated.View>
+  );
+}
+
+function GridFooterSkeleton() {
+  const opacity = useSkeletonOpacity();
+  return (
+    <Animated.View style={[gridSkeletonStyles.grid, { opacity }]}>
+      {[0, 1].map((i) => (
+        <GridSkeletonCard key={i} />
+      ))}
+    </Animated.View>
+  );
+}
+
+const gridSkeletonStyles = StyleSheet.create({
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+  },
+  card: {
+    width: '48%',
+    marginVertical: 6,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  image: {
+    height: 180,
+    backgroundColor: '#E5E8EB',
+  },
+  content: {
+    padding: 8,
+    gap: 6,
+  },
+  titleLine1: {
+    height: 14,
+    backgroundColor: '#E5E8EB',
+    borderRadius: 4,
+    width: '90%',
+  },
+  titleLine2: {
+    height: 14,
+    backgroundColor: '#E5E8EB',
+    borderRadius: 4,
+    width: '70%',
+  },
+  metaLine: {
+    height: 11,
+    backgroundColor: '#E5E8EB',
+    borderRadius: 4,
+    width: '55%',
+  },
+});
+
+// ─────────────────────────────────────────────────
+// 그리드 카드 — useLike 훅 사용을 위해 별도 컴포넌트
+// ─────────────────────────────────────────────────
+function GridCard({ item, onPress }: { item: EventCardData; onPress: (id: string) => void }) {
+  const { isLiked, toggle } = useLike({ eventId: item.id });
+
+  const badges: { text: string }[] = [];
+  if (item.isFree) badges.push({ text: '무료' });
+  if (item.isEndingSoon) badges.push({ text: '마감임박' });
+  if ((item.buzzScore ?? 0) >= 70 && badges.length === 0) badges.push({ text: '인기' });
+  const visibleBadges = badges.slice(0, 2);
+
+  return (
+    <Pressable style={styles.gridCard} onPress={() => onPress(item.id)}>
+      <View style={styles.cardImageWrapper}>
+        <EventImage uri={item.thumbnailUrl} category={item.category} height={180} borderRadius={12} />
+        {visibleBadges.length > 0 && (
+          <View style={styles.cardBadgeContainer}>
+            {visibleBadges.map((badge, i) => (
+              <View key={i} style={styles.cardBadge}>
+                <Text style={styles.cardBadgeText}>{badge.text}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+        {/* 찜 버튼 */}
+        <Pressable style={styles.likeButton} onPress={toggle} hitSlop={8}>
+          <Icon
+            name="icon-heart-mono"
+            size={15}
+            color={isLiked ? '#F04452' : '#B0B8C1'}
+          />
+        </Pressable>
+      </View>
+      <View style={styles.cardInfo}>
+        <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
+        <View style={styles.cardMetaRow}>
+          <Icon name="icon-pin-mono" size={11} color="#8B95A1" />
+          <Text style={[styles.cardMeta, { flex: 1 }]} numberOfLines={1}>{item.venue || item.region}</Text>
+        </View>
+        <View style={styles.cardMetaRow}>
+          <Icon name="icon-today-mono" size={11} color="#8B95A1" />
+          <Text style={[styles.cardMeta, { flex: 1 }]} numberOfLines={1}>{item.periodText}</Text>
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
 function ExplorePage() {
   const adaptive = useAdaptive();
   const navigation = Route.useNavigation();
@@ -140,6 +283,7 @@ function ExplorePage() {
   // ── 스크롤 반응형 헤더 (translateY + useNativeDriver) ──────────────
   const filterTranslateY = useRef(new Animated.Value(0)).current;
   const filterHeightRef = useRef(108); // onLayout으로 실제 값 갱신
+  const isFetchingRef = useRef(false); // 중복 fetch 방지 (동기 락)
   const [filterHeight, setFilterHeight] = useState(108);
   const lastScrollY = useRef(0);
   const filterVisible = useRef(true);
@@ -259,7 +403,8 @@ function ExplorePage() {
 
   // ─── 데이터 로딩 ────────────────────────────────
   const loadEvents = async (targetPage: number, reset = false) => {
-    if (loading && !reset) return;
+    if (!reset && isFetchingRef.current) return;
+    isFetchingRef.current = true;
     setLoading(true);
     try {
       const url = buildApiUrl();
@@ -275,13 +420,18 @@ function ExplorePage() {
         setEvents(newEvents);
         setTotalCount(data.pageInfo.totalCount);
       } else {
-        setEvents(prev => [...prev, ...newEvents]);
+        setEvents(prev => {
+          const existingIds = new Set(prev.map(item => item.id));
+          const deduped = newEvents.filter(item => !existingIds.has(item.id));
+          return [...prev, ...deduped];
+        });
       }
       setHasMore(newEvents.length >= 20);
     } catch (error) {
       console.error('[Explore] Load error:', error);
       if (reset) { setEvents([]); setHasMore(false); }
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
   };
@@ -325,47 +475,12 @@ function ExplorePage() {
   };
 
   // ─── 카드 렌더링 ────────────────────────────────
-  const renderCard = ({ item }: { item: EventCardData }) => {
-    // 배지 우선순위: 무료 > 마감임박 > 인기 (최대 2개)
-    const badges: { text: string }[] = [];
-    if (item.isFree) badges.push({ text: '💰 무료' });
-    if (item.isEndingSoon) badges.push({ text: '⏰ 마감' });
-    if ((item.buzzScore ?? 0) >= 70 && badges.length === 0) badges.push({ text: '🔥 인기' });
-    const visibleBadges = badges.slice(0, 2);
-
-    return (
-      <Pressable
-        style={styles.gridCard}
-        onPress={() => navigation.navigate('/events/:id', { id: item.id })}
-      >
-        {/* 이미지 + 배지 오버레이 */}
-        <View style={styles.cardImageWrapper}>
-          <EventImage
-            uri={item.thumbnailUrl}
-            category={item.category}
-            height={180}
-            borderRadius={12}
-          />
-          {visibleBadges.length > 0 && (
-            <View style={styles.cardBadgeContainer}>
-              {visibleBadges.map((badge, i) => (
-                <View key={i} style={styles.cardBadge}>
-                  <Text style={styles.cardBadgeText}>{badge.text}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-
-        {/* 카드 텍스트 */}
-        <View style={styles.cardInfo}>
-          <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
-          <Text style={styles.cardMeta} numberOfLines={1}>📍 {item.venue || item.region}</Text>
-          <Text style={styles.cardMeta} numberOfLines={1}>📅 {item.periodText}</Text>
-        </View>
-      </Pressable>
-    );
-  };
+  const renderCard = ({ item }: { item: EventCardData }) => (
+    <GridCard
+      item={item}
+      onPress={(id) => navigation.navigate('/events/:id', { id })}
+    />
+  );
 
   // ─── FlatList 헤더: 결과 카운트만 ───────────────
   const renderCountRow = () => (
@@ -380,7 +495,9 @@ function ExplorePage() {
     const hasFilter = activeFilters.quickFilter || activeFilters.region || activeFilters.category;
     return (
       <View style={styles.emptyState}>
-        <Text style={styles.emptyIcon}>🔍</Text>
+        <View style={styles.emptyIconWrapper}>
+          <Icon name="icon-search-bold-mono" size={36} color="#B0B8C1" />
+        </View>
         <Text style={styles.emptyText}>
           {activeFilters.region ? `${activeFilters.region}에 ` : ''}
           {activeFilters.category ? `${activeFilters.category} ` : ''}
@@ -406,7 +523,8 @@ function ExplorePage() {
             quickFilter: activeFilters.quickFilter,
           })}
         >
-          <Text style={styles.searchPlaceholder}>🔍 이벤트, 장소, 키워드 검색</Text>
+          <Icon name="icon-search-bold-mono" size={16} color="#B0B8C1" />
+          <Text style={styles.searchPlaceholder}>이벤트, 장소, 키워드 검색</Text>
         </Pressable>
       </View>
 
@@ -448,8 +566,9 @@ function ExplorePage() {
             </ScrollView>
 
             <Pressable style={styles.regionPill} onPress={() => setShowRegionSheet(true)}>
+              <Icon name="icon-pin-mono" size={12} color="#4E5968" />
               <Text style={styles.regionPillText}>
-                📍 {activeFilters.region ?? '전국'} ▾
+                {activeFilters.region ?? '전국'} ▾
               </Text>
             </Pressable>
           </View>
@@ -485,7 +604,7 @@ function ExplorePage() {
 
         {/* 이벤트 목록 — paddingTop으로 필터 헤더 아래부터 시작 */}
         {loading && page === 0 ? (
-          <ActivityIndicator size="large" style={[styles.loader, { marginTop: filterHeight }]} />
+          <GridSkeleton filterHeight={filterHeight} />
         ) : (
           <FlatList
             data={events}
@@ -500,7 +619,7 @@ function ExplorePage() {
             scrollEventThrottle={16}
             ListFooterComponent={
               loading && page > 0
-                ? <ActivityIndicator size="small" style={styles.footerLoader} />
+                ? <GridFooterSkeleton />
                 : null
             }
             contentContainerStyle={[styles.flatListContent, { paddingTop: filterHeight }]}
@@ -533,7 +652,7 @@ function ExplorePage() {
             onPress={() => handleRegionSelect(null)}
           >
             <Text style={[styles.regionSheetText, !activeFilters.region && styles.regionSheetTextActive]}>
-              🗺️ 전국 전체
+              전국 전체
             </Text>
             {!activeFilters.region && <Text style={styles.regionCheckmark}>✓</Text>}
           </Pressable>
@@ -579,11 +698,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
     borderRadius: 12,
     paddingHorizontal: 16,
-    justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   searchPlaceholder: {
     fontSize: 15,
-    color: '#999',
+    color: '#B0B8C1',
   },
 
   // ── 콘텐츠 영역 (FlatList + absolute 필터 헤더) ─
@@ -641,6 +762,9 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     backgroundColor: '#F2F4F6',
     borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   regionPillText: {
     fontSize: 13,
@@ -722,6 +846,17 @@ const styles = StyleSheet.create({
   cardInfo: {
     padding: 8,
   },
+  likeButton: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 16,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   cardTitle: {
     fontSize: 14,
     fontWeight: '700',
@@ -729,20 +864,15 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     lineHeight: 20,
   },
+  cardMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
   cardMeta: {
     fontSize: 12,
     color: '#6B7684',
-    marginTop: 2,
-  },
-
-  // ── 로더 ─────────────────────────────────────────
-  loader: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  footerLoader: {
-    marginVertical: 20,
   },
 
   // ── Empty State ──────────────────────────────────
@@ -751,8 +881,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 80,
   },
-  emptyIcon: {
-    fontSize: 40,
+  emptyIconWrapper: {
     marginBottom: 16,
   },
   emptyText: {
