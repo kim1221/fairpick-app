@@ -294,6 +294,22 @@ async function runBackfill(options: { dryRun?: boolean } = {}): Promise<PriceInf
   console.log('[PriceInfoBackfill] Starting...');
   console.log(`[PriceInfoBackfill] Mode: ${dryRun ? 'DRY-RUN' : 'LIVE'}`);
 
+  // geoRefreshPipeline이 아직 실행 중이면 이번 회차 skip (잡 겹침 방지)
+  const geoRunning = await pool.query(`
+    SELECT id FROM collection_logs
+    WHERE type IN ('geo_refresh', 'collection')
+      AND status = 'running'
+      AND started_at >= NOW() - INTERVAL '2 hours'
+    LIMIT 1
+  `);
+  if (geoRunning.rowCount! > 0) {
+    console.log('[PriceInfoBackfill] geoRefreshPipeline 실행 중 — 이번 회차 skip (다음 스케줄에서 처리)');
+    return {
+      totalEvents: 0, alreadyFilled: 0, targetCount: 0,
+      attempted: 0, succeeded: 0, failed: 0, newlyFilled: 0,
+    };
+  }
+
   const stats: PriceInfoStats = {
     totalEvents: 0,
     alreadyFilled: 0,

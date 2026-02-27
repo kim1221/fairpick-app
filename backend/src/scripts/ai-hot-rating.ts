@@ -16,12 +16,6 @@ import * as dotenv from 'dotenv';
 // .env 파일 로드
 dotenv.config();
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-
-if (!GEMINI_API_KEY) {
-  console.error('[HotRating] GEMINI_API_KEY not set');
-  process.exit(1);
-}
 
 interface HotRating {
   index: number;
@@ -33,25 +27,34 @@ interface HotRating {
  * Gemini API 호출 (Grounding 사용)
  */
 async function callGeminiWithGrounding(prompt: string): Promise<string> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          role: 'user',
-          parts: [{ text: prompt }]
-        }],
-        tools: [{
-          google_search: {}
-        }],
-        generationConfig: {
-          temperature: 0.3,
-        }
-      })
-    }
-  );
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60_000); // 60초 타임아웃
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{
+            role: 'user',
+            parts: [{ text: prompt }]
+          }],
+          tools: [{
+            google_search: {}
+          }],
+          generationConfig: {
+            temperature: 0.3,
+          }
+        })
+      }
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     throw new Error(`Gemini API error: ${response.statusText}`);
@@ -71,6 +74,11 @@ async function callGeminiWithGrounding(prompt: string): Promise<string> {
  * 핫 이벤트 평가 메인 함수
  */
 export async function runHotRating() {
+  if (!process.env.GEMINI_API_KEY) {
+    console.log('[HotRating] GEMINI_API_KEY not set — skipping');
+    return;
+  }
+
   console.log('[HotRating] 🚀 Starting AI hot event rating...');
 
   // 1. 진행 중인 전시/공연/축제 조회 (100개)
@@ -148,7 +156,19 @@ ${eventList}
     }
 
     const jsonText = jsonMatch[1] || jsonMatch[0];
-    const ratings: HotRating[] = JSON.parse(jsonText);
+    let ratings: HotRating[];
+    try {
+      const parsed = JSON.parse(jsonText);
+      if (!Array.isArray(parsed)) {
+        console.warn(`[HotRating] Unexpected JSON shape (not array): ${jsonText.substring(0, 200)}`);
+        return;
+      }
+      ratings = parsed;
+    } catch (parseErr: any) {
+      console.warn(`[HotRating] JSON parse failed: ${parseErr.message}`);
+      console.warn(`[HotRating] Raw text: ${jsonText.substring(0, 200)}`);
+      return;
+    }
 
     console.log(`[HotRating] AI rated ${ratings.length} events as hot (70+ score)`);
 

@@ -1,7 +1,6 @@
 import * as cron from 'node-cron';
 import { runGeoRefreshPipeline } from './jobs/geoRefreshPipeline';
 import { runCleanupJob } from './jobs/cleanup';
-import { updateAutoRecommend } from './jobs/recommend';
 import { updateMetadata } from './jobs/updateMetadata';
 import { updateBuzzScore } from './jobs/updateBuzzScore';
 import { runBackfill as runPriceInfoBackfill } from './jobs/priceInfoBackfill';
@@ -32,7 +31,6 @@ import { sendEndSoonNotifications } from './jobs/sendEndSoonNotifications';
  * - 03:30, 15:30: Price Info 백필 (API payload에서 가격 추출)
  * - 04:00: AI Enrichment (신규 이벤트 자동 보완 - 네이버 API + Gemini AI)
  * - 04:15: Phase 2 Internal Fields 생성 (추천 알고리즘용 metadata.internal)
- * - 04:30: 추천 로직 업데이트 (Quality score 재계산 등)
  */
 
 // ============================================================
@@ -93,7 +91,7 @@ export function initScheduler() {
   const nodeEnv = process.env.NODE_ENV || 'undefined';
   const enableScheduler = process.env.ENABLE_SCHEDULER || 'undefined';
   const enableFailSafe = process.env.ENABLE_FAILSAFE;
-  const failSafeCron = process.env.FAILSAFE_CRON || '*/10 * * * *';
+  const failSafeCron = process.env.FAILSAFE_CRON || '*/30 * * * *';
 
   console.log(`[Scheduler] initScheduler (NODE_ENV=${nodeEnv}, ENABLE_SCHEDULER=${enableScheduler})`);
 
@@ -193,14 +191,6 @@ export function initScheduler() {
     });
     console.log('[Scheduler] registered: Phase 2 Internal Fields @ 04:15 KST');
 
-    // 매일 04:30 KST - 추천 업데이트
-    cron.schedule('30 4 * * *', async () => {
-      await runJobSafely('recommend', updateAutoRecommend);
-    }, {
-      timezone: 'Asia/Seoul'
-    });
-    console.log('[Scheduler] registered: Auto-recommend update @ 04:30 KST');
-
     // 매일 05:00 KST - 벡터 임베딩 (데이터 수집/AI 보완 완료 후 신규 이벤트 처리)
     cron.schedule('0 5 * * *', async () => {
       await runJobSafely('embed-new-events', embedNewEvents);
@@ -253,7 +243,6 @@ export function initScheduler() {
     console.log('  - 03:00 KST: Geo refresh pipeline (collect + geoBackfill + venueBackfill + dedupe + AI enrichment)');
     console.log('  - 03:30 KST: Price info backfill (extract from API payloads)');
     console.log('  - 04:15 KST: Phase 2 Internal Fields (metadata.internal generation)');
-    console.log('  - 04:30 KST: Auto-recommend update');
     console.log('  - 05:00 KST: Embed new events (벡터 임베딩 생성)');
     console.log('  - 08:00 KST: AI Popup Discovery (팝업 신규 발굴)');
     console.log('  - 09:00 KST: End-soon notifications (찜한 이벤트 D-3 알림)');

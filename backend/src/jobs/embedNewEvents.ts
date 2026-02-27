@@ -38,9 +38,13 @@ export async function embedNewEvents(): Promise<number> {
 
   let processed = 0;
   let errors = 0;
-  let offset = 0;
+  // total + 여유분으로 무한루프 방지 (에러로 인해 같은 이벤트가 반복 등장해도 안전하게 종료)
+  const maxBatches = Math.ceil(total / BATCH_SIZE) + 10;
+  let batchCount = 0;
 
-  while (offset < total) {
+  while (batchCount < maxBatches) {
+    batchCount++;
+
     const batchRes = await pool.query<{
       id: string;
       title: string;
@@ -93,11 +97,7 @@ export async function embedNewEvents(): Promise<number> {
       }
     }
 
-    offset += batch.length;
-
-    if (offset < total) {
-      await sleep(DELAY_MS);
-    }
+    await sleep(DELAY_MS);
   }
 
   console.log(`[embedNewEvents] Done — processed=${processed}, errors=${errors}`);

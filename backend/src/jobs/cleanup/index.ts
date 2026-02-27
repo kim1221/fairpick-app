@@ -34,6 +34,13 @@ export async function runCleanupJob(): Promise<void> {
   let finalStatus = 'success';
 
   try {
+    // collection_logs 오래된 기록 정리 (90일 초과)
+    const cleanedLogs = await pool.query(`
+      DELETE FROM collection_logs
+      WHERE started_at < NOW() - INTERVAL '90 days'
+    `);
+    console.log(`[CleanupJob] Deleted ${cleanedLogs.rowCount || 0} old collection_logs`);
+
     // Soft delete 실행
     const result = await pool.query(`
       UPDATE canonical_events
@@ -92,7 +99,7 @@ export async function runCleanupJob(): Promise<void> {
       completedAt,
       finalStatus,
       deletedCount,
-      finalStatus === 'success' ? 1 : 0,
+      finalStatus === 'success' ? deletedCount : 0,
       finalStatus === 'failed' ? 1 : 0,
       errorMessage,
       logId

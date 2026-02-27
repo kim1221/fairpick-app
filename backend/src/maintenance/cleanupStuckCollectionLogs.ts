@@ -18,7 +18,8 @@ export async function cleanupStuckCollectionLogs(): Promise<number> {
       SET
         status = 'failed',
         completed_at = NOW(),
-        failed_count = GREATEST(COALESCE(items_count, 0) - COALESCE(success_count, 0), 0)
+        failed_count = GREATEST(COALESCE(items_count, 0) - COALESCE(success_count, 0), 0),
+        error_message = 'Job stuck: terminated by failsafe'
       WHERE
         status = 'running'
         AND started_at IS NOT NULL

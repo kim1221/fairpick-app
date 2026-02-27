@@ -16,12 +16,6 @@ import * as dotenv from 'dotenv';
 // .env 파일 로드
 dotenv.config();
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-
-if (!GEMINI_API_KEY) {
-  console.error('[PopupDiscovery] GEMINI_API_KEY not set');
-  process.exit(1);
-}
 
 interface PopupData {
   title: string;
@@ -35,13 +29,13 @@ interface PopupData {
 }
 
 // 포괄적 질문 풀 (커버리지 최대화)
-const POPUP_QUERIES = [
+const POPUP_QUERIES_STATIC = [
   // 🧪 테스트용: 3개만 (전체 15개는 주석 처리)
   "서울 성수동 홍대 강남에서 지금 진행 중이거나 곧 오픈하는 모든 팝업스토어 리스트",
   "더현대 서울 롯데백화점 코엑스몰 현재 진행 중인 모든 팝업",
-  "2026년 2월 3월 오픈 예정인 서울 모든 팝업 전체",
   
   // TODO: 테스트 완료 후 아래 주석 해제
+  // "이번 달 + 다음 달 오픈 예정인 서울 모든 팝업 전체",  ← 동적 쿼리로 자동 추가됨 (아래 참고)
   // "한남동 이태원 경리단길 모든 팝업",
   // "현대백화점 압구정본점 모든 팝업",
   // "무신사 올리브영 팝업 전체",
@@ -51,6 +45,17 @@ const POPUP_QUERIES = [
   // "서울 패션 브랜드 팝업 전체",
   // "서울 F&B 팝업 모든 것",
 ];
+
+function buildPopupQueries(now: Date): string[] {
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  return [
+    ...POPUP_QUERIES_STATIC,
+    `${year}년 ${month}월 ${nextYear}년 ${nextMonth}월 오픈 예정인 서울 모든 팝업 전체`,
+  ];
+}
 
 /**
  * 내 DB (canonical_events)에 이미 있는지 체크
@@ -92,25 +97,34 @@ async function isAlreadySuggested(title: string): Promise<boolean> {
  * Gemini API 호출 (Grounding 사용)
  */
 async function callGeminiWithGrounding(prompt: string): Promise<string> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          role: 'user',
-          parts: [{ text: prompt }]
-        }],
-        tools: [{
-          google_search: {}
-        }],
-        generationConfig: {
-          temperature: 0.2, // 낮은 temperature = 환각 감소
-        }
-      })
-    }
-  );
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60_000); // 60초 타임아웃
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{
+            role: 'user',
+            parts: [{ text: prompt }]
+          }],
+          tools: [{
+            google_search: {}
+          }],
+          generationConfig: {
+            temperature: 0.2, // 낮은 temperature = 환각 감소
+          }
+        })
+      }
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
@@ -132,13 +146,20 @@ async function callGeminiWithGrounding(prompt: string): Promise<string> {
  * 팝업 발굴 메인 함수
  */
 export async function runPopupDiscovery() {
+  if (!process.env.GEMINI_API_KEY) {
+    console.log('[PopupDiscovery] GEMINI_API_KEY not set — skipping');
+    return;
+  }
+
   console.log('[PopupDiscovery] 🚀 Starting AI popup discovery...');
 
-  const today = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
   const allPopups: Map<string, PopupData> = new Map();
+  const queries = buildPopupQueries(now);
 
   // 각 질문마다 팝업 수집
-  for (const query of POPUP_QUERIES) {
+  for (const query of queries) {
     console.log(`[PopupDiscovery] Querying: ${query}`);
 
     const prompt = `당신은 팝업스토어 수집 전문가입니다. 오늘은 ${today}입니다.
@@ -147,7 +168,7 @@ export async function runPopupDiscovery() {
 
 # 중요 조건
 - **실제로 존재하는 팝업**만 알려주세요
-- **2026년 2월 이후** 진행되는 것만
+- **${today} 이후** 진행되는 것만
 - 과거 종료된 것은 절대 포함하지 마세요
 - 유명한 것뿐만 아니라 **작은 팝업도 포함**
 - **최대한 많이** (30-50개 목표)
@@ -192,7 +213,19 @@ export async function runPopupDiscovery() {
       }
 
       const jsonText = jsonMatch[1] || jsonMatch[0];
-      const popups: PopupData[] = JSON.parse(jsonText);
+      let popups: PopupData[];
+      try {
+        const parsed = JSON.parse(jsonText);
+        if (!Array.isArray(parsed)) {
+          console.warn(`[PopupDiscovery] Unexpected JSON shape (not array): ${jsonText.substring(0, 200)}`);
+          continue;
+        }
+        popups = parsed;
+      } catch (parseErr: any) {
+        console.warn(`[PopupDiscovery] JSON parse failed: ${parseErr.message}`);
+        console.warn(`[PopupDiscovery] Raw text: ${jsonText.substring(0, 200)}`);
+        continue;
+      }
 
       console.log(`[PopupDiscovery] Found ${popups.length} popups`);
 

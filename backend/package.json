@@ -58,7 +58,9 @@
     "backfill:ai-enrich:tags": "ts-node -r dotenv/config src/jobs/aiEnrichmentBackfill.ts --tags-only",
     "enrich:phase2": "ts-node -r dotenv/config scripts/run-phase2-enrichment.ts",
     "enrich:phase2:stats": "ts-node -r dotenv/config -e \"import { getInternalFieldsStats } from './src/jobs/enrichInternalFields'; getInternalFieldsStats();\"",
-    "enrich:display": "ts-node -r dotenv/config src/scripts/run-display-fields-backfill.ts"
+    "enrich:display": "ts-node -r dotenv/config src/scripts/run-display-fields-backfill.ts",
+    "backfill:overview:haeyoche": "ts-node -r dotenv/config src/scripts/backfill-overview-haeyoche.ts",
+    "backfill:overview:haeyoche:dry": "ts-node -r dotenv/config src/scripts/backfill-overview-haeyoche.ts --dry-run"
   },
   "keywords": [],
   "author": "",

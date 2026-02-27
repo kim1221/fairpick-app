@@ -82,20 +82,36 @@ export async function enrichSingleEvent(eventId: string): Promise<boolean> {
 }
 
 /**
- * 메인 함수: 모든 이벤트의 internal fields 생성
+ * 메인 함수: internal fields 생성 (incremental)
+ * - metadata.internal이 없는 이벤트 (신규)
+ * - 최근 25시간 내 updated_at이 변경된 이벤트 (소스 데이터 변경)
+ * - enrichInternalFields 자체는 updated_at을 수정하지 않음
  */
 export async function enrichInternalFields() {
-  console.log('[Phase 2] Starting enrichInternalFields job...');
-  
+  console.log('[Phase 2] Starting enrichInternalFields job (incremental)...');
+
   const startTime = Date.now();
   let processedCount = 0;
   let updatedCount = 0;
   let errorCount = 0;
 
   try {
-    // 1. Live 이벤트 가져오기 (is_deleted = false, end_at >= today)
+    // 1. 마지막 성공한 수집 파이프라인 시각 조회 (없으면 25시간 전 폴백)
+    const lastRunRes = await pool.query(`
+      SELECT started_at FROM collection_logs
+      WHERE type IN ('geo_refresh', 'collection')
+        AND status = 'success'
+      ORDER BY started_at DESC
+      LIMIT 1
+    `);
+    const cutoff: string = lastRunRes.rows.length > 0
+      ? lastRunRes.rows[0].started_at.toISOString()
+      : new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    console.log(`[Phase 2] Using cutoff: ${cutoff}`);
+
+    // 2. 처리 대상: 미처리 또는 마지막 수집 이후 변경된 이벤트만
     const result = await pool.query<CanonicalEventRow>(`
-      SELECT 
+      SELECT
         id, title, main_category,
         derived_tags, opening_hours,
         lat, lng, address, region,
@@ -103,11 +119,15 @@ export async function enrichInternalFields() {
       FROM canonical_events
       WHERE is_deleted = false
         AND end_at >= CURRENT_DATE
+        AND (
+          metadata->'internal' IS NULL
+          OR updated_at >= $1::timestamptz
+        )
       ORDER BY created_at DESC
-    `);
+    `, [cutoff]);
 
     const events = result.rows;
-    console.log(`[Phase 2] Found ${events.length} live events`);
+    console.log(`[Phase 2] Found ${events.length} events to process (new or recently updated)`);
 
     // 2. 각 이벤트에 대해 internal fields 생성
     for (const event of events) {
@@ -131,10 +151,10 @@ export async function enrichInternalFields() {
           internal,
         };
 
-        // DB 업데이트
+        // DB 업데이트 (updated_at은 건드리지 않음 — 소스 데이터 변경 시각 보존)
         await pool.query(
-          `UPDATE canonical_events 
-           SET metadata = $1, updated_at = NOW()
+          `UPDATE canonical_events
+           SET metadata = $1
            WHERE id = $2`,
           [JSON.stringify(updatedMetadata), event.id]
         );

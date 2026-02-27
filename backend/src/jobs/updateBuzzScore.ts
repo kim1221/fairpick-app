@@ -16,12 +16,11 @@ import {
  * 
  * 구성:
  * - Internal Buzz: 사용자 행동 (조회/찜/공유)
- * - KOPIS: 박스오피스 순위 (공연만)
- * - Consensus: 네이버 검색 합의 (전시/축제/행사)
+ * - Consensus: 네이버 검색 합의 (전시/축제/행사/공연)
  * - Structural: 구조적 특징 (모든 카테고리)
- * 
+ *
  * 카테고리별 공식:
- * - 공연: internal*0.3 + kopis*0.4 + structural*0.3
+ * - 공연: internal*0.3 + consensus*0.4 + structural*0.3  (KOPIS 비활성화로 consensus 대체)
  * - 전시: internal*0.25 + consensus*0.40 + structural*0.25 + time_boost
  * - 축제: internal*0.20 + consensus*0.35 + structural*0.30
  * - 행사: validity*0.40 + consensus*0.25 + structural*0.15 + internal*0.20
@@ -274,7 +273,7 @@ export async function updateBuzzScore(): Promise<void> {
           event_id,
           COUNT(*) as views_7d
         FROM event_views
-        WHERE viewed_at >= NOW() - INTERVAL '${CONFIG.LOOKBACK_DAYS} days'
+        WHERE viewed_at >= NOW() - ($1::int * INTERVAL '1 day')
         GROUP BY event_id
       ) view_stats ON ce.id = view_stats.event_id
 
@@ -286,14 +285,14 @@ export async function updateBuzzScore(): Promise<void> {
           COUNT(*) FILTER (WHERE action_type = 'share') as shares_7d,
           COUNT(*) FILTER (WHERE action_type = 'ticket_click') as ticket_clicks_7d
         FROM event_actions
-        WHERE created_at >= NOW() - INTERVAL '${CONFIG.LOOKBACK_DAYS} days'
+        WHERE created_at >= NOW() - ($1::int * INTERVAL '1 day')
         GROUP BY event_id
       ) action_stats ON ce.id = action_stats.event_id
 
       WHERE ce.is_deleted = false
         AND ce.end_at >= NOW()  -- 종료되지 않은 이벤트만
       ORDER BY ce.created_at DESC
-    `);
+    `, [CONFIG.LOOKBACK_DAYS]);
 
     console.log(`[UpdateBuzzScore] Collected data for ${aggregatedData.rowCount} events`);
 
@@ -309,16 +308,10 @@ export async function updateBuzzScore(): Promise<void> {
       // 3-1. 기존: 내부 buzz_score (사용자 행동)
       const { score: internalBuzz, components: internalComponents } = calculateBuzzScore(event);
 
-      // 3-2. 새로 추가: 외부 hot score 컴포넌트들
-      let kopisScore = 0;
+      // 3-2. 외부 hot score 컴포넌트
       let consensusScore = 0;
       const structuralScore = calculateStructural(event);
 
-      // KOPIS/Consensus는 병렬 처리 (API 호출 최적화)
-      // ⚠️ KOPIS 임시 비활성화: 7일치 조회가 너무 느림
-      // if (event.main_category === '공연' && event.kopis_id) {
-      //   kopisScore = await calculateKopisScore(event);
-      // }
       if (['전시', '축제', '행사', '공연'].includes(event.main_category)) {
         consensusScore = await calculateConsensus(event);
       }
@@ -327,7 +320,6 @@ export async function updateBuzzScore(): Promise<void> {
       let finalScore = internalBuzz;
       const hotComponents: any = {
         ...internalComponents,
-        kopis: kopisScore,
         consensus: consensusScore,
         structural: structuralScore,
         internal: internalBuzz,
