@@ -1,6 +1,8 @@
 import { createRoute } from '@granite-js/react-native';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View, Text, Pressable, ActivityIndicator, Image, Alert } from 'react-native';
+import { ScrollView, StyleSheet, View, Text, Pressable, Image, Alert } from 'react-native';
+import { Loader, Icon } from '@toss/tds-react-native';
+import { useAdaptive } from '@toss/tds-react-native/private';
 import { Accuracy, getCurrentLocation, GetCurrentLocationPermissionError } from '@apps-in-toss/framework';
 import eventService from '../services/eventService';
 import { EventCardData } from '../data/events';
@@ -30,14 +32,161 @@ const DEFAULT_LOCATION = {
   name: '서울',
 };
 
+type Adaptive = ReturnType<typeof useAdaptive>;
+
+function createStyles(a: Adaptive) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: a.grey100,
+    },
+    scrollView: {
+      flex: 1,
+    },
+    header: {
+      backgroundColor: a.background,
+      paddingHorizontal: 20,
+      paddingTop: 50,
+      paddingBottom: 16,
+    },
+    headerTop: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    headerTitle: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: a.grey900,
+    },
+    refreshButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: a.grey100,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    locationRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    locationText: {
+      fontSize: 14,
+      color: a.blue500,
+      fontWeight: '600',
+    },
+    venueRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    radiusText: {
+      fontSize: 13,
+      color: a.grey500,
+      fontWeight: '500',
+    },
+    eventsContainer: {
+      paddingHorizontal: 20,
+      paddingTop: 16,
+    },
+    loadingContainer: {
+      paddingVertical: 60,
+      alignItems: 'center',
+    },
+    loadingText: {
+      marginTop: 16,
+      fontSize: 14,
+      color: a.grey500,
+    },
+    eventCard: {
+      flexDirection: 'row',
+      backgroundColor: a.background,
+      borderRadius: 12,
+      marginBottom: 12,
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOpacity: 0.05,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+    },
+    eventImage: {
+      width: 100,
+      height: 100,
+    },
+    eventInfo: {
+      flex: 1,
+      padding: 12,
+    },
+    eventBadges: {
+      flexDirection: 'row',
+      marginBottom: 6,
+    },
+    distanceBadge: {
+      backgroundColor: a.blue50,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 4,
+      marginRight: 6,
+    },
+    distanceBadgeText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: a.blue500,
+    },
+    badge: {
+      backgroundColor: a.grey100,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 4,
+      marginRight: 6,
+    },
+    badgeText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: a.grey700,
+    },
+    eventTitle: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: a.grey900,
+      marginBottom: 4,
+      lineHeight: 20,
+    },
+    eventMeta: {
+      fontSize: 13,
+      color: a.grey600,
+      marginBottom: 4,
+    },
+    eventVenue: {
+      fontSize: 13,
+      color: a.grey500,
+      flex: 1,
+    },
+    emptyContainer: {
+      paddingVertical: 60,
+      alignItems: 'center',
+    },
+    emptyText: {
+      fontSize: 15,
+      color: a.grey400,
+      textAlign: 'center',
+    },
+  });
+}
+
 function NearbyPage() {
   const navigation = Route.useNavigation();
   const [events, setEvents] = useState<EventWithDistance[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [locationText, setLocationText] = useState(DEFAULT_LOCATION.name);
-  const [userLat, setUserLat] = useState<number>(DEFAULT_LOCATION.lat);
-  const [userLng, setUserLng] = useState<number>(DEFAULT_LOCATION.lng);
+  const [_userLat, setUserLat] = useState<number>(DEFAULT_LOCATION.lat);
+  const [_userLng, setUserLng] = useState<number>(DEFAULT_LOCATION.lng);
+
+  const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   useEffect(() => {
     // 앱 진입 시 위치 자동 감지 1회
@@ -86,7 +235,7 @@ function NearbyPage() {
           console.warn('[GPS] 위치 권한 거부 - 기본 위치 사용');
           Alert.alert(
             '위치 권한 필요',
-            '주변 이벤트를 보려면 위치 권한이 필요합니다. 기본 위치(서울)로 표시됩니다.',
+            '주변 이벤트를 보려면 위치 권한이 필요해요. 지금은 서울 기준으로 표시할게요.',
             [{ text: '확인' }]
           );
         } else {
@@ -116,15 +265,15 @@ function NearbyPage() {
     // 권한 상태 확인
     try {
       const permission = await getCurrentLocation.getPermission();
-      
+
       if (permission === 'denied') {
         // 권한이 거부된 경우 다이얼로그 표시
         const newPermission = await getCurrentLocation.openPermissionDialog();
-        
+
         if (newPermission === 'denied') {
           Alert.alert(
             '위치 권한 필요',
-            '주변 이벤트를 보려면 위치 권한이 필요합니다.',
+            '주변 이벤트를 보려면 위치 권한이 필요해요.',
             [{ text: '확인' }]
           );
           setRefreshing(false);
@@ -188,7 +337,7 @@ function NearbyPage() {
       setEvents(within5km);
     } catch (error) {
       console.error('Failed to load nearby events:', error);
-      Alert.alert('오류', '주변 이벤트를 불러오는 데 실패했습니다.');
+      Alert.alert('오류', '주변 이벤트를 불러오지 못했어요. 잠시 후 다시 시도해주세요.');
     } finally {
       setLoading(false);
     }
@@ -227,12 +376,13 @@ function NearbyPage() {
               onPress={handleRefresh}
               disabled={refreshing}
             >
-              <Text style={styles.refreshButtonText}>
-                {refreshing ? '⏳' : '🔄'}
-              </Text>
+              <Icon name="icon-refresh-mono" size={20} color={adaptive.grey700} />
             </Pressable>
           </View>
-          <Text style={styles.locationText}>📍 {locationText}</Text>
+          <View style={styles.locationRow}>
+            <Icon name="icon-pin-mono" size={12} color={adaptive.blue500} style={{ marginRight: 4 }} />
+            <Text style={styles.locationText}>{locationText}</Text>
+          </View>
           <Text style={styles.radiusText}>반경 5km · {events.length}개</Text>
         </View>
 
@@ -240,7 +390,7 @@ function NearbyPage() {
         <View style={styles.eventsContainer}>
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#3182F6" />
+              <Loader size="large" type="primary" />
               <Text style={styles.loadingText}>주변 이벤트 검색 중...</Text>
             </View>
           ) : events.length > 0 ? (
@@ -249,7 +399,6 @@ function NearbyPage() {
                 key={`${event.id}-${index}`}
                 style={styles.eventCard}
                 onPress={() => navigation.navigate('/events/:id', { id: event.id })}
-                activeOpacity={0.7}
               >
                 <Image
                   source={getImageSource(event.thumbnailUrl, event.category)}
@@ -272,9 +421,10 @@ function NearbyPage() {
                   </Text>
                   <Text style={styles.eventMeta}>{event.periodText}</Text>
                   {event.venue && (
-                    <Text style={styles.eventVenue} numberOfLines={1}>
-                      📍 {event.venue}
-                    </Text>
+                    <View style={styles.venueRow}>
+                      <Icon name="icon-pin-mono" size={11} color={adaptive.grey500} style={{ marginRight: 3 }} />
+                      <Text style={styles.eventVenue} numberOfLines={1}>{event.venue}</Text>
+                    </View>
                   )}
                 </View>
               </Pressable>
@@ -282,7 +432,7 @@ function NearbyPage() {
           ) : (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>
-                주변에 진행 중인 이벤트가 없습니다
+                주변에 진행 중인 이벤트가 없어요
               </Text>
             </View>
           )}
@@ -292,141 +442,7 @@ function NearbyPage() {
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      <BottomTabBar currentTab="nearby" />
+      <BottomTabBar currentTab={"explore" as any} />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F2F4F6',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  header: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 16,
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#191F28',
-  },
-  refreshButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F2F4F6',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  refreshButtonText: {
-    fontSize: 20,
-  },
-  locationText: {
-    fontSize: 14,
-    color: '#3182F6',
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  radiusText: {
-    fontSize: 13,
-    color: '#8B95A1',
-    fontWeight: '500',
-  },
-  eventsContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-  },
-  loadingContainer: {
-    paddingVertical: 60,
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 14,
-    color: '#8B95A1',
-  },
-  eventCard: {
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    marginBottom: 12,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-  },
-  eventImage: {
-    width: 100,
-    height: 100,
-  },
-  eventInfo: {
-    flex: 1,
-    padding: 12,
-  },
-  eventBadges: {
-    flexDirection: 'row',
-    marginBottom: 6,
-  },
-  distanceBadge: {
-    backgroundColor: '#E5EDFF',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  distanceBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#3182F6',
-  },
-  badge: {
-    backgroundColor: '#F2F4F6',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#4E5968',
-  },
-  eventTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#191F28',
-    marginBottom: 4,
-    lineHeight: 20,
-  },
-  eventMeta: {
-    fontSize: 13,
-    color: '#6B7684',
-    marginBottom: 4,
-  },
-  eventVenue: {
-    fontSize: 13,
-    color: '#8B95A1',
-  },
-  emptyContainer: {
-    paddingVertical: 60,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 15,
-    color: '#B0B8C1',
-    textAlign: 'center',
-  },
-});

@@ -6,7 +6,6 @@ import {
   StyleSheet,
   View,
   Alert,
-  ActivityIndicator,
   Dimensions,
   TouchableOpacity,
   Text,
@@ -14,14 +13,21 @@ import {
   Platform,
   Pressable
 } from 'react-native';
-import { Txt, Badge, Post, BottomSheet } from '@toss/tds-react-native';
+import { Txt, Badge, Post, BottomSheet, Loader, Button, Icon, IconButton } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
+
+type Adaptive = ReturnType<typeof useAdaptive>;
+type EventStyles = ReturnType<typeof createStyles>;
+
 import eventService from '../../src/services/eventService';
 import { EventCardData } from '../../src/data/events';
 import { EventImage } from '../../src/components/EventImage';
-import { pushRecent, toggleLike, getLikes } from '../../src/utils/storage';
+import { pushRecent } from '../../src/utils/storage';
 import { updateProfileOnView, updateProfileOnAction } from '../../src/utils/userProfile';
 import { computePersonalScoreForEvent, formatPersonalScoreDebug } from '../../src/utils/personalScore';
+import { useLike } from '../../src/hooks/useLike';
+import { useAuth } from '../../src/hooks/useAuth';
+import http from '../../src/lib/http';
 
 type EventDetailParams = {
   id?: string;
@@ -159,13 +165,13 @@ function getRelatedLinks(
   };
 
   if (links.ticket) {
-    add(links.ticket, isKopisUrl(links.ticket) ? 'ℹ️ KOPIS 상세 정보' : '🎫 티켓 예매처', 'ticket');
+    add(links.ticket, isKopisUrl(links.ticket) ? 'KOPIS 상세 정보' : '티켓 예매처', 'ticket');
   }
-  add(links.reservation, '📋 사전 예약 페이지', 'reservation');
+  add(links.reservation, '사전 예약 페이지', 'reservation');
   if (links.official) {
-    add(links.official, isKopisUrl(links.official) ? 'ℹ️ KOPIS 상세 정보' : '🌐 공식 홈페이지', 'official');
+    add(links.official, isKopisUrl(links.official) ? 'KOPIS 상세 정보' : '공식 홈페이지', 'official');
   }
-  add(links.instagram, '📸 공식 인스타그램', 'instagram');
+  add(links.instagram, '공식 인스타그램', 'instagram');
 
   return result;
 }
@@ -173,7 +179,7 @@ function getRelatedLinks(
 // ─────────────────────────────────────────────────
 // Tier 1: 크리티컬 정보 — 경고 스타일 배지
 // ─────────────────────────────────────────────────
-function renderTier1Alerts(event: EventCardData): React.ReactNode {
+function renderTier1Alerts(event: EventCardData, styles: EventStyles): React.ReactNode {
   const chips: { icon: string; text: string }[] = [];
 
   // 행사: 사전 등록
@@ -198,7 +204,7 @@ function renderTier1Alerts(event: EventCardData): React.ReactNode {
     <View style={styles.tier1Row}>
       {chips.map((chip, i) => (
         <View key={i} style={styles.tier1Chip}>
-          <Text style={styles.tier1ChipText}>{chip.icon} {chip.text}</Text>
+          <Text style={styles.tier1ChipText}>{chip.text}</Text>
         </View>
       ))}
     </View>
@@ -207,11 +213,13 @@ function renderTier1Alerts(event: EventCardData): React.ReactNode {
 
 function EventDetailPage() {
   const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
   const params = Route.useParams() as EventDetailParams | undefined;
   const [event, setEvent] = useState<EventCardData | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [isLiked, setIsLiked] = useState<boolean>(false);
   const [activeSheet, setActiveSheet] = useState<'price' | 'hours' | 'overview' | null>(null);
+  const { isLiked, toggle: toggleLikeWithSync } = useLike({ eventId: params?.id });
+  const { isLoggedIn } = useAuth();
 
   useEffect(() => {
     let mounted = true;
@@ -239,9 +247,14 @@ function EventDetailPage() {
             console.log('[EventDetail] priceText:', data.priceText);
           }
 
-          // 최근 본 이벤트에 추가
+          // 최근 본 이벤트에 추가 (로컬 + 서버 fire-and-forget)
           try {
             await pushRecent(data.id);
+            if (isLoggedIn) {
+              http.post('/users/me/recent/batch', {
+                items: [{ eventId: data.id, viewedAt: new Date().toISOString() }],
+              }).catch(() => {});
+            }
           } catch (error) {
             console.error('[EventDetail] Failed to add to recent:', error);
           }
@@ -276,13 +289,6 @@ function EventDetailPage() {
             }
           }
 
-          // 찜 상태 로드
-          try {
-            const likes = await getLikes();
-            setIsLiked(likes.includes(data.id));
-          } catch (error) {
-            console.error('[EventDetail] Failed to load like status:', error);
-          }
         } else {
           setStatus('error');
         }
@@ -303,7 +309,7 @@ function EventDetailPage() {
   const handleOpenLink = async (url?: string) => {
     const targetUrl = url ?? getPrimaryCTALink(event!)?.url;
     if (!targetUrl) {
-      Alert.alert('링크 없음', '상세 페이지 링크가 제공되지 않았습니다.');
+      Alert.alert('링크 없음', '연결된 링크가 없어요.');
       return;
     }
 
@@ -314,7 +320,7 @@ function EventDetailPage() {
       }
       await Linking.openURL(targetUrl);
     } catch {
-      Alert.alert('열기 실패', '외부 페이지를 열 수 없습니다. 잠시 후 다시 시도해 주세요.');
+      Alert.alert('열기 실패', '외부 페이지를 열 수 없어요. 잠시 후 다시 시도해주세요.');
     }
   };
 
@@ -322,8 +328,7 @@ function EventDetailPage() {
     if (!event) return;
 
     try {
-      const result = await toggleLike(event.id);
-      setIsLiked(result.liked);
+      const result = await toggleLikeWithSync();
 
       // 사용자 프로필 업데이트 (찜 추가 시에만)
       if (result.liked) {
@@ -342,7 +347,7 @@ function EventDetailPage() {
       }
     } catch (error) {
       console.error('[EventDetail] Failed to toggle like:', error);
-      Alert.alert('오류', '찜하기에 실패했습니다. 다시 시도해 주세요.');
+      Alert.alert('오류', '찜하기에 실패했어요. 다시 시도해주세요.');
     }
   };
 
@@ -363,7 +368,7 @@ function EventDetailPage() {
   if (status === 'loading') {
     return (
       <View style={[styles.page, styles.centered, { backgroundColor: adaptive.background }]}>
-        <ActivityIndicator color={adaptive.grey600} />
+        <Loader customStrokeColor={adaptive.grey600} />
       </View>
     );
   }
@@ -403,19 +408,43 @@ function EventDetailPage() {
           <View style={styles.heroBadgeContainer}>
             {event.isFree && (
               <View style={styles.heroBadge}>
-                <Text style={styles.heroBadgeText}>💰 무료</Text>
+                <Text style={styles.heroBadgeText}>무료</Text>
               </View>
             )}
             {event.isEndingSoon && (
               <View style={styles.heroBadge}>
-                <Text style={styles.heroBadgeText}>⏰ 마감임박</Text>
+                <Text style={styles.heroBadgeText}>마감임박</Text>
               </View>
             )}
             {(event.buzzScore ?? 0) >= 70 && (
               <View style={styles.heroBadge}>
-                <Text style={styles.heroBadgeText}>🔥 인기</Text>
+                <Text style={styles.heroBadgeText}>인기</Text>
               </View>
             )}
+          </View>
+
+          {/* Hero Action Buttons (우상단) */}
+          <View style={styles.heroActionsContainer}>
+            <IconButton
+              name="icon-share-dots-mono"
+              variant="fill"
+              bgColor="rgba(0,0,0,0.45)"
+              color="#FFFFFF"
+              iconSize={20}
+              style={styles.heroActionBtn}
+              onPress={handleShare}
+              accessibilityLabel="공유하기"
+            />
+            <IconButton
+              name="icon-heart-mono"
+              variant="fill"
+              bgColor="rgba(0,0,0,0.45)"
+              color={isLiked ? adaptive.red500 : '#FFFFFF'}
+              iconSize={20}
+              style={styles.heroActionBtn}
+              onPress={handleToggleLike}
+              accessibilityLabel={isLiked ? '찜 해제하기' : '찜하기'}
+            />
           </View>
         </View>
 
@@ -443,7 +472,7 @@ function EventDetailPage() {
           <Post.H2 paddingBottom={16}>{event.title}</Post.H2>
 
           {/* Tier 1: 크리티컬 알림 (사전 등록, 대기, 마지막 입장) */}
-          {renderTier1Alerts(event)}
+          {renderTier1Alerts(event, styles)}
 
           {/* 상세정보 판단 */}
           {(() => {
@@ -481,15 +510,15 @@ function EventDetailPage() {
                 {/* Key Info Grid (2x2) */}
           <View style={styles.keyInfoGrid}>
             <View style={styles.keyInfoCard}>
-              <Text style={styles.keyInfoIcon}>📅</Text>
+              <Icon name="icon-calendar-check-mono" size={20} color={adaptive.grey600} />
               <Text style={styles.keyInfoLabel}>기간</Text>
               <Text style={styles.keyInfoValue} numberOfLines={2}>
-                {event.periodText || '정보 없음'}
+                {event.periodText || '날짜를 모으고 있어요'}
               </Text>
             </View>
 
             <View style={styles.keyInfoCard}>
-              <Text style={styles.keyInfoIcon}>📍</Text>
+              <Icon name="icon-pin-mono" size={20} color={adaptive.grey600} />
               <Text style={styles.keyInfoLabel}>장소</Text>
               <Text style={styles.keyInfoValue} numberOfLines={2}>
                 {event.venue || event.region}
@@ -503,7 +532,7 @@ function EventDetailPage() {
                 onPress={() => hasPriceDetail && setActiveSheet('price')}
                 disabled={!hasPriceDetail}
               >
-                <Text style={styles.keyInfoIcon}>💰</Text>
+                <Icon name="icon-won-mono" size={20} color={adaptive.grey600} />
                 <View style={styles.keyInfoContent}>
                   <Text style={styles.keyInfoLabel}>가격</Text>
                   <Text style={styles.keyInfoValue} numberOfLines={2} ellipsizeMode="tail">
@@ -525,7 +554,7 @@ function EventDetailPage() {
                 style={[styles.keyInfoCard, isOddGrid && styles.keyInfoCardFull]}
                 onPress={() => setActiveSheet('hours')}
               >
-                <Text style={styles.keyInfoIcon}>🕐</Text>
+                <Icon name="icon-clock-mono" size={20} color={adaptive.grey600} />
                 <View style={styles.keyInfoContent}>
                   <Text style={styles.keyInfoLabel}>운영시간</Text>
                   <Text style={styles.keyInfoValue} numberOfLines={2} ellipsizeMode="tail">
@@ -546,9 +575,14 @@ function EventDetailPage() {
               style={styles.overviewCard}
               onPress={() => setActiveSheet('overview')}
             >
-              <Text style={styles.overviewCardIcon}>📝</Text>
+              <Icon name="icon-star-mono" size={20} color={adaptive.grey600} style={{ marginRight: 12, marginTop: 2 }} />
               <View style={styles.overviewCardContent}>
-                <Text style={styles.overviewCardTitle}>이 이벤트는요</Text>
+                <View style={styles.overviewCardTitleRow}>
+                  <Text style={styles.overviewCardTitle}>이 이벤트는요</Text>
+                  <View style={styles.aiLabel}>
+                    <Text style={styles.aiLabelText}>AI 요약</Text>
+                  </View>
+                </View>
                 <Text style={styles.overviewCardValue} numberOfLines={3} ellipsizeMode="tail">
                   {event.overview}
                 </Text>
@@ -564,7 +598,7 @@ function EventDetailPage() {
           })()}
 
           {/* 카테고리별 상세 정보 */}
-          {renderCategoryMeta(event)}
+          {renderCategoryMeta(event, styles)}
 
           {/* 교통 / 주차 섹션 */}
           {(event.publicTransportInfo || event.parkingAvailable !== undefined || event.parkingInfo) && (
@@ -572,7 +606,7 @@ function EventDetailPage() {
               <Text style={styles.infoSectionTitle}>교통 · 주차</Text>
               {event.publicTransportInfo ? (
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoRowIcon}>🚇</Text>
+                  <Icon name="icon-subway-mono" size={16} color={adaptive.grey600} style={styles.infoRowIconStyle} />
                   <View style={styles.infoRowContent}>
                     <Text style={styles.infoRowLabel}>대중교통</Text>
                     <Text style={styles.infoRowValue}>{event.publicTransportInfo}</Text>
@@ -581,7 +615,7 @@ function EventDetailPage() {
               ) : null}
               {event.parkingAvailable !== undefined && (
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoRowIcon}>🅿️</Text>
+                  <Icon name="icon-car-mono" size={16} color={adaptive.grey600} style={styles.infoRowIconStyle} />
                   <View style={styles.infoRowContent}>
                     <Text style={styles.infoRowLabel}>주차</Text>
                     <Text style={styles.infoRowValue}>
@@ -633,11 +667,11 @@ function EventDetailPage() {
                     onPress={() => {
                       const url = `https://map.kakao.com/link/map/${encodeURIComponent(event.venue || '')},${event.lat},${event.lng}`;
                       Linking.openURL(url).catch(() =>
-                        Alert.alert('오류', '지도를 열 수 없습니다.')
+                        Alert.alert('오류', '지도를 열 수 없어요.')
                       );
                     }}
                   >
-                    <Text style={styles.mapButtonText}>🗺️ 지도에서 보기</Text>
+                    <Text style={styles.mapButtonText}>지도에서 보기</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -646,67 +680,23 @@ function EventDetailPage() {
 
         </View>
 
-        {/* Bottom Spacer */}
-        <View style={styles.bottomSpacer} />
+        {/* Bottom Spacer — 링크 있을 때만 바텀바 높이만큼 여백 */}
+        <View style={{ height: primaryCTALink ? 90 : 20 }} />
       </ScrollView>
 
-      {/* Sticky Bottom Action Bar */}
-      <View style={[styles.stickyBar, { backgroundColor: adaptive.background }]}>
-        {primaryCTALink ? (
-          <>
-            {/* 찜 버튼 (아이콘 원형) */}
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={handleToggleLike}
-              activeOpacity={0.7}
-              accessibilityLabel={isLiked ? '찜 해제하기' : '찜하기'}
-            >
-              <Text style={styles.actionIcon}>{isLiked ? '❤️' : '🤍'}</Text>
-            </TouchableOpacity>
-
-            {/* 공유 버튼 (아이콘 원형) */}
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={handleShare}
-              activeOpacity={0.7}
-              accessibilityLabel="공유하기"
-            >
-              <Text style={styles.actionIcon}>🔗</Text>
-            </TouchableOpacity>
-
-            {/* Primary CTA */}
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={() => handleOpenLink(primaryCTALink.url)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.primaryButtonText}>
-                {primaryCTALink.label}
-              </Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <>
-            {/* 링크 없음: 찜+공유 50:50 full-width */}
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={handleToggleLike}
-              activeOpacity={0.7}
-              accessibilityLabel={isLiked ? '찜 해제하기' : '찜하기'}
-            >
-              <Text style={styles.secondaryButtonText}>{isLiked ? '❤️ 찜 해제' : '🤍 찜하기'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={handleShare}
-              activeOpacity={0.7}
-              accessibilityLabel="공유하기"
-            >
-              <Text style={styles.secondaryButtonText}>🔗 공유하기</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
+      {/* Sticky Bottom Action Bar — 링크 있을 때만 표시 */}
+      {primaryCTALink && (
+        <View style={[styles.stickyBar, { backgroundColor: adaptive.background }]}>
+          <Button
+            type="primary"
+            size="big"
+            viewStyle={{ width: '100%' }}
+            onPress={() => handleOpenLink(primaryCTALink.url)}
+          >
+            {primaryCTALink.label}
+          </Button>
+        </View>
+      )}
 
       {/* TDS BottomSheet */}
       <BottomSheet.Root
@@ -716,11 +706,11 @@ function EventDetailPage() {
       >
         {activeSheet === 'price' && (
           <>
-            <BottomSheet.Header title="가격 정보" />
+            <BottomSheet.Header>가격 정보</BottomSheet.Header>
             <View style={styles.sheetContent}>
               {event?.isFree && (
                 <View style={styles.sheetSection}>
-                  <Text style={styles.sheetText}>💰 무료로 즐길 수 있어요</Text>
+                  <Text style={styles.sheetText}>무료로 즐길 수 있어요</Text>
                 </View>
               )}
               {event?.priceMin != null && event?.priceMax != null && event.priceMin !== event.priceMax && (
@@ -748,7 +738,7 @@ function EventDetailPage() {
 
         {activeSheet === 'hours' && (
           <>
-            <BottomSheet.Header title="운영 시간" />
+            <BottomSheet.Header>운영 시간</BottomSheet.Header>
             <View style={styles.sheetContent}>
               {event?.openingHours?.weekday && (
                 <View style={styles.sheetSection}>
@@ -796,7 +786,7 @@ function EventDetailPage() {
           event &&
           (event.overview?.trim() || event.crewDirector || event.crewWriter || event.crewComposer) && (
           <>
-            <BottomSheet.Header title="이 이벤트는요" />
+            <BottomSheet.Header>이 이벤트는요</BottomSheet.Header>
             <View style={styles.sheetContent}>
               {event.overview?.trim() && (
                 <View style={styles.sheetSection}>
@@ -808,7 +798,7 @@ function EventDetailPage() {
                 <>
                   {event.overview?.trim() && <View style={styles.sheetDivider} />}
                   <View style={styles.sheetSection}>
-                    <Text style={styles.sheetLabel}>🎬 스태프</Text>
+                    <Text style={styles.sheetLabel}>스태프</Text>
                   </View>
                   {event.crewDirector && (
                     <View style={styles.sheetSection}>
@@ -841,7 +831,7 @@ function EventDetailPage() {
 // ─────────────────────────────────────────────────
 // 카테고리별 상세 메타데이터 렌더링 (Tier 2)
 // ─────────────────────────────────────────────────
-function renderCategoryMeta(event: EventCardData): React.ReactNode {
+function renderCategoryMeta(event: EventCardData, styles: EventStyles): React.ReactNode {
   const rows: { icon: string; label: string; value: string }[] = [];
   const featureChips: { icon: string; text: string; negative?: boolean }[] = [];
 
@@ -904,7 +894,6 @@ function renderCategoryMeta(event: EventCardData): React.ReactNode {
       <Text style={styles.infoSectionTitle}>상세 정보</Text>
       {rows.map((row, i) => (
         <View key={i} style={styles.infoRow}>
-          <Text style={styles.infoRowIcon}>{row.icon}</Text>
           <View style={styles.infoRowContent}>
             <Text style={styles.infoRowLabel}>{row.label}</Text>
             <Text style={styles.infoRowValue}>{row.value}</Text>
@@ -916,7 +905,7 @@ function renderCategoryMeta(event: EventCardData): React.ReactNode {
           {featureChips.map((chip, i) => (
             <View key={i} style={[styles.featureChip, chip.negative && styles.featureChipNeg]}>
               <Text style={[styles.featureChipText, chip.negative && styles.featureChipTextNeg]}>
-                {chip.icon} {chip.text}
+                {chip.text}
               </Text>
             </View>
           ))}
@@ -951,7 +940,7 @@ function getDisplayTagsForDetail(event: EventCardData): string[] {
   return [...new Set(filtered)];
 }
 
-const styles = StyleSheet.create({
+const createStyles = (a: Adaptive) => StyleSheet.create({
   page: {
     flex: 1,
   },
@@ -1009,7 +998,7 @@ const styles = StyleSheet.create({
   keyInfoCard: {
     width: '48%',
     minHeight: 100,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: a.grey50,
     borderRadius: 12,
     padding: 16,
     position: 'relative',
@@ -1032,13 +1021,13 @@ const styles = StyleSheet.create({
   },
   keyInfoLabel: {
     fontSize: 12,
-    color: '#6B7684',
+    color: a.grey600,
     marginBottom: 4,
     fontWeight: '600',
   },
   keyInfoValue: {
     fontSize: 14,
-    color: '#191F28',
+    color: a.grey900,
     fontWeight: '600',
     flexShrink: 1,
     lineHeight: 20,
@@ -1053,17 +1042,17 @@ const styles = StyleSheet.create({
   },
   actionLabel: {
     fontSize: 12,
-    color: '#3182F6',
+    color: a.blue500,
     fontWeight: '600',
   },
   actionChevron: {
     fontSize: 16,
-    color: '#3182F6',
+    color: a.blue500,
     fontWeight: '700',
   },
   mapSection: {
     marginTop: 20,
-    backgroundColor: '#FFF',
+    backgroundColor: a.background,
     borderRadius: 12,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -1073,7 +1062,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   addressCard: {
-    backgroundColor: '#F8F9FA',
+    backgroundColor: a.grey50,
     padding: 16,
   },
   addressInfo: {
@@ -1082,23 +1071,23 @@ const styles = StyleSheet.create({
   venueTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#191F28',
+    color: a.grey900,
     marginBottom: 4,
   },
   addressText: {
     fontSize: 13,
-    color: '#6B7684',
+    color: a.grey600,
     lineHeight: 18,
   },
   divider: {
     height: 1,
-    backgroundColor: '#E5E8EB',
+    backgroundColor: a.grey200,
   },
   mapButtons: {
     padding: 16,
   },
   mapButton: {
-    backgroundColor: '#F2F4F6',
+    backgroundColor: a.grey100,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -1107,13 +1096,13 @@ const styles = StyleSheet.create({
   mapButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#191F28',
+    color: a.grey900,
   },
   overviewSection: {
     marginTop: 24,
     paddingTop: 20,
     borderTopWidth: 1,
-    borderTopColor: '#E5E8EB',
+    borderTopColor: a.grey200,
   },
   overviewTitle: {
     marginBottom: 12,
@@ -1129,59 +1118,35 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 12,
     borderTopWidth: 1,
-    borderTopColor: '#E5E8EB',
+    borderTopColor: a.grey200,
     zIndex: 10,
     elevation: 10,
   },
-  actionButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#F2F4F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
+  heroActionsContainer: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    flexDirection: 'row',
+    gap: 8,
   },
-  actionIcon: {
-    fontSize: 24,
-  },
-  primaryButton: {
-    flex: 1,
-    height: 48,
-    backgroundColor: '#3182F6',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  secondaryButton: {
-    flex: 1,
-    height: 48,
-    backgroundColor: '#F2F4F6',
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 4,
+  heroActionBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   secondaryButtonText: {
-    color: '#4E5968',
+    color: a.grey700,
     fontSize: 15,
     fontWeight: '600',
   },
   // Overview Card
   overviewCard: {
     marginTop: 20,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: a.grey50,
     borderRadius: 12,
     padding: 16,
     flexDirection: 'row',
@@ -1199,15 +1164,31 @@ const styles = StyleSheet.create({
   overviewCardContent: {
     flex: 1,
   },
+  overviewCardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
   overviewCardTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#191F28',
-    marginBottom: 8,
+    color: a.grey900,
+  },
+  aiLabel: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: a.blue50,
+    borderRadius: 4,
+  },
+  aiLabelText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: a.blue500,
   },
   overviewCardValue: {
     fontSize: 14,
-    color: '#6B7684',
+    color: a.grey600,
     lineHeight: 20,
   },
   overviewCardAction: {
@@ -1221,7 +1202,7 @@ const styles = StyleSheet.create({
   // 카테고리별 메타 + 교통/주차
   infoSection: {
     marginTop: 20,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: a.grey50,
     borderRadius: 12,
     padding: 16,
     shadowColor: '#000',
@@ -1233,7 +1214,7 @@ const styles = StyleSheet.create({
   infoSectionTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#191F28',
+    color: a.grey900,
     marginBottom: 12,
   },
   infoRow: {
@@ -1246,18 +1227,22 @@ const styles = StyleSheet.create({
     marginRight: 10,
     lineHeight: 22,
   },
+  infoRowIconStyle: {
+    marginRight: 10,
+    marginTop: 2,
+  },
   infoRowContent: {
     flex: 1,
   },
   infoRowLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#6B7684',
+    color: a.grey600,
     marginBottom: 2,
   },
   infoRowValue: {
     fontSize: 14,
-    color: '#191F28',
+    color: a.grey900,
     lineHeight: 20,
   },
   linkRow: {
@@ -1266,16 +1251,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: '#E5E8EB',
+    borderTopColor: a.grey200,
   },
   linkRowText: {
     fontSize: 15,
-    color: '#3182F6',
+    color: a.blue500,
     fontWeight: '600',
   },
   linkRowChevron: {
     fontSize: 18,
-    color: '#3182F6',
+    color: a.blue500,
     fontWeight: '700',
   },
   // Tier 1: 크리티컬 경고 칩
@@ -1310,7 +1295,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#E5E8EB',
+    borderTopColor: a.grey200,
   },
   featureChip: {
     backgroundColor: '#EFF6FF',
@@ -1343,18 +1328,18 @@ const styles = StyleSheet.create({
   },
   sheetDivider: {
     height: 1,
-    backgroundColor: '#E5E8EB',
+    backgroundColor: a.grey200,
     marginVertical: 16,
   },
   sheetLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#6B7684',
+    color: a.grey600,
     marginBottom: 8,
   },
   sheetText: {
     fontSize: 15,
-    color: '#191F28',
+    color: a.grey900,
     lineHeight: 24,
   },
 });

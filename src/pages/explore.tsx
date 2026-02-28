@@ -9,8 +9,9 @@ import {
   FlatList,
   StyleSheet,
 } from 'react-native';
-import { BottomSheet, Icon } from '@toss/tds-react-native';
+import { BottomSheet, Icon, IconButton, AnimateSkeleton, Tab } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
+type Adaptive = ReturnType<typeof useAdaptive>;
 import { BottomTabBar } from '../components/BottomTabBar';
 import { EventCardData } from '../data/events';
 import { EventImage } from '../components/EventImage';
@@ -121,22 +122,292 @@ interface ActiveFilters {
 }
 
 // ─────────────────────────────────────────────────
-// 스켈레톤 컴포넌트
+// 스타일 팩토리
 // ─────────────────────────────────────────────────
-function useSkeletonOpacity() {
-  const opacity = useRef(new Animated.Value(0.4)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0.4, duration: 700, useNativeDriver: true }),
-      ])
-    ).start();
-  }, []);
-  return opacity;
+function createStyles(a: Adaptive) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+    },
+
+    // ── 고정 검색바 ──────────────────────────────────
+    fixedSearchBar: {
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      paddingBottom: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: a.grey100,
+    },
+    fakeSearchInput: {
+      height: 48,
+      backgroundColor: a.grey100,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    searchPlaceholder: {
+      fontSize: 15,
+      color: a.grey400,
+    },
+
+    // ── 콘텐츠 영역 (FlatList + absolute 필터 헤더) ─
+    contentArea: {
+      flex: 1,
+      overflow: 'hidden',
+    },
+
+    // ── 스크롤 반응형 필터 헤더 ──────────────────────
+    filterHeader: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      zIndex: 10,
+      elevation: 3,
+      borderBottomWidth: 1,
+      borderBottomColor: a.grey100,
+    },
+
+    // ── 카테고리 언더라인 탭 ─────────────────────────
+    categoryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    // ── 지역 필터 pill ──────────────────────────────
+    regionPill: {
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      marginRight: 16,
+      marginLeft: 4,
+      backgroundColor: a.grey100,
+      borderRadius: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    regionPillText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: a.grey700,
+    },
+
+    // ── 퀵 필터 칩 ──────────────────────────────────
+    quickFiltersRow: {
+      paddingVertical: 10,
+    },
+    quickFiltersContent: {
+      paddingHorizontal: 16,
+    },
+    quickFilterChip: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 20,
+      borderWidth: 1,
+      marginRight: 8,
+    },
+    quickFilterText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: a.grey700,
+    },
+
+    // ── 결과 카운트 ──────────────────────────────────
+    countRow: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: a.grey100,
+    },
+    countText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: a.grey500,
+    },
+
+    // ── FlatList ─────────────────────────────────────
+    flatListContent: {
+      paddingHorizontal: 10,
+      paddingBottom: 100,
+    },
+    columnWrapper: {
+      justifyContent: 'space-between',
+    },
+
+    // ── 그리드 카드 ──────────────────────────────────
+    gridCard: {
+      width: '48%',
+      marginVertical: 6,
+      backgroundColor: a.background,
+      borderRadius: 12,
+      overflow: 'hidden',
+    },
+    cardImageWrapper: {
+      position: 'relative',
+    },
+    cardBadgeContainer: {
+      position: 'absolute',
+      top: 8,
+      left: 8,
+      flexDirection: 'row',
+      gap: 4,
+    },
+    cardBadge: {
+      backgroundColor: 'rgba(0, 0, 0, 0.60)',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 10,
+    },
+    cardBadgeText: {
+      color: a.background,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    cardInfo: {
+      padding: 8,
+    },
+    likeButton: {
+      position: 'absolute',
+      bottom: 8,
+      right: 8,
+      backgroundColor: 'rgba(255,255,255,0.92)',
+      borderRadius: 16,
+      width: 32,
+      height: 32,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cardTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: a.grey900,
+      marginBottom: 4,
+      lineHeight: 20,
+    },
+    cardMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      marginTop: 2,
+    },
+    cardMeta: {
+      fontSize: 12,
+      color: a.grey600,
+    },
+
+    // ── Empty State ──────────────────────────────────
+    emptyState: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 80,
+    },
+    emptyIconWrapper: {
+      marginBottom: 16,
+    },
+    emptyText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: a.grey800,
+      marginBottom: 8,
+      textAlign: 'center',
+    },
+    emptyHint: {
+      fontSize: 14,
+      color: a.grey500,
+      textAlign: 'center',
+    },
+
+    // ── 지역 BottomSheet ─────────────────────────────
+    regionSheetList: {
+      paddingHorizontal: 20,
+      maxHeight: 460,
+    },
+    regionSheetItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: a.grey100,
+    },
+    regionSheetText: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: a.grey600,
+    },
+    regionSheetTextActive: {
+      color: a.grey900,
+      fontWeight: '700',
+    },
+    regionSheetRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    regionCountText: {
+      fontSize: 13,
+      color: a.grey500,
+    },
+    regionCheckmark: {
+      fontSize: 16,
+      color: a.blue500,
+      fontWeight: '700',
+    },
+  });
 }
 
+function createGridSkeletonStyles(a: Adaptive) {
+  return StyleSheet.create({
+    grid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'space-between',
+      paddingHorizontal: 10,
+    },
+    card: {
+      width: '48%',
+      marginVertical: 6,
+      backgroundColor: a.background,
+      borderRadius: 12,
+      overflow: 'hidden',
+    },
+    image: {
+      height: 180,
+      backgroundColor: a.grey200,
+    },
+    content: {
+      padding: 8,
+      gap: 6,
+    },
+    titleLine1: {
+      height: 14,
+      backgroundColor: a.grey200,
+      borderRadius: 4,
+      width: '90%',
+    },
+    titleLine2: {
+      height: 14,
+      backgroundColor: a.grey200,
+      borderRadius: 4,
+      width: '70%',
+    },
+    metaLine: {
+      height: 11,
+      backgroundColor: a.grey200,
+      borderRadius: 4,
+      width: '55%',
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────
+// 스켈레톤 컴포넌트
+// ─────────────────────────────────────────────────
 function GridSkeletonCard() {
+  const adaptive = useAdaptive();
+  const gridSkeletonStyles = React.useMemo(() => createGridSkeletonStyles(adaptive), [adaptive]);
+
   return (
     <View style={gridSkeletonStyles.card}>
       <View style={gridSkeletonStyles.image} />
@@ -151,74 +422,42 @@ function GridSkeletonCard() {
 }
 
 function GridSkeleton({ filterHeight }: { filterHeight: number }) {
-  const opacity = useSkeletonOpacity();
+  const adaptive = useAdaptive();
+  const gridSkeletonStyles = React.useMemo(() => createGridSkeletonStyles(adaptive), [adaptive]);
+
   return (
-    <Animated.View style={[gridSkeletonStyles.grid, { opacity, paddingTop: filterHeight }]}>
-      {[0, 1, 2, 3, 4, 5].map((i) => (
-        <GridSkeletonCard key={i} />
-      ))}
-    </Animated.View>
+    <AnimateSkeleton delay={0} withGradient={false} withShimmer={true}>
+      <View style={[gridSkeletonStyles.grid, { paddingTop: filterHeight }]}>
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <GridSkeletonCard key={i} />
+        ))}
+      </View>
+    </AnimateSkeleton>
   );
 }
 
 function GridFooterSkeleton() {
-  const opacity = useSkeletonOpacity();
+  const adaptive = useAdaptive();
+  const gridSkeletonStyles = React.useMemo(() => createGridSkeletonStyles(adaptive), [adaptive]);
+
   return (
-    <Animated.View style={[gridSkeletonStyles.grid, { opacity }]}>
-      {[0, 1].map((i) => (
-        <GridSkeletonCard key={i} />
-      ))}
-    </Animated.View>
+    <AnimateSkeleton delay={0} withGradient={false} withShimmer={true}>
+      <View style={gridSkeletonStyles.grid}>
+        {[0, 1].map((i) => (
+          <GridSkeletonCard key={i} />
+        ))}
+      </View>
+    </AnimateSkeleton>
   );
 }
-
-const gridSkeletonStyles = StyleSheet.create({
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    paddingHorizontal: 10,
-  },
-  card: {
-    width: '48%',
-    marginVertical: 6,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  image: {
-    height: 180,
-    backgroundColor: '#E5E8EB',
-  },
-  content: {
-    padding: 8,
-    gap: 6,
-  },
-  titleLine1: {
-    height: 14,
-    backgroundColor: '#E5E8EB',
-    borderRadius: 4,
-    width: '90%',
-  },
-  titleLine2: {
-    height: 14,
-    backgroundColor: '#E5E8EB',
-    borderRadius: 4,
-    width: '70%',
-  },
-  metaLine: {
-    height: 11,
-    backgroundColor: '#E5E8EB',
-    borderRadius: 4,
-    width: '55%',
-  },
-});
 
 // ─────────────────────────────────────────────────
 // 그리드 카드 — useLike 훅 사용을 위해 별도 컴포넌트
 // ─────────────────────────────────────────────────
 function GridCard({ item, onPress }: { item: EventCardData; onPress: (id: string) => void }) {
   const { isLiked, toggle } = useLike({ eventId: item.id });
+  const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   const badges: { text: string }[] = [];
   if (item.isFree) badges.push({ text: '무료' });
@@ -240,22 +479,24 @@ function GridCard({ item, onPress }: { item: EventCardData; onPress: (id: string
           </View>
         )}
         {/* 찜 버튼 */}
-        <Pressable style={styles.likeButton} onPress={toggle} hitSlop={8}>
-          <Icon
-            name="icon-heart-mono"
-            size={15}
-            color={isLiked ? '#F04452' : '#B0B8C1'}
-          />
-        </Pressable>
+        <IconButton
+          name="icon-heart-mono"
+          variant="clear"
+          iconSize={15}
+          color={isLiked ? adaptive.red500 : adaptive.grey400}
+          style={styles.likeButton}
+          onPress={toggle}
+          hitSlop={8}
+        />
       </View>
       <View style={styles.cardInfo}>
         <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
         <View style={styles.cardMetaRow}>
-          <Icon name="icon-pin-mono" size={11} color="#8B95A1" />
+          <Icon name="icon-pin-mono" size={11} color={adaptive.grey500} />
           <Text style={[styles.cardMeta, { flex: 1 }]} numberOfLines={1}>{item.venue || item.region}</Text>
         </View>
         <View style={styles.cardMetaRow}>
-          <Icon name="icon-today-mono" size={11} color="#8B95A1" />
+          <Icon name="icon-calendar-check-mono" size={11} color={adaptive.grey500} />
           <Text style={[styles.cardMeta, { flex: 1 }]} numberOfLines={1}>{item.periodText}</Text>
         </View>
       </View>
@@ -265,6 +506,7 @@ function GridCard({ item, onPress }: { item: EventCardData; onPress: (id: string
 
 function ExplorePage() {
   const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
   const navigation = Route.useNavigation();
 
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({
@@ -402,7 +644,7 @@ function ExplorePage() {
   };
 
   // ─── 데이터 로딩 ────────────────────────────────
-  const loadEvents = async (targetPage: number, reset = false) => {
+  const loadEvents = async (_targetPage: number, reset = false) => {
     if (!reset && isFetchingRef.current) return;
     isFetchingRef.current = true;
     setLoading(true);
@@ -496,7 +738,7 @@ function ExplorePage() {
     return (
       <View style={styles.emptyState}>
         <View style={styles.emptyIconWrapper}>
-          <Icon name="icon-search-bold-mono" size={36} color="#B0B8C1" />
+          <Icon name="icon-search-bold-mono" size={36} color={adaptive.grey400} />
         </View>
         <Text style={styles.emptyText}>
           {activeFilters.region ? `${activeFilters.region}에 ` : ''}
@@ -523,7 +765,7 @@ function ExplorePage() {
             quickFilter: activeFilters.quickFilter,
           })}
         >
-          <Icon name="icon-search-bold-mono" size={16} color="#B0B8C1" />
+          <Icon name="icon-search-bold-mono" size={16} color={adaptive.grey400} />
           <Text style={styles.searchPlaceholder}>이벤트, 장소, 키워드 검색</Text>
         </Pressable>
       </View>
@@ -543,30 +785,21 @@ function ExplorePage() {
         >
           {/* 카테고리 언더라인 탭 + 지역 버튼 */}
           <View style={styles.categoryRow}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
+            <Tab
+              fluid
+              value={activeFilters.category ?? 'all'}
+              onChange={(val) => handleCategoryPress(val === 'all' ? null : val as string)}
               style={{ flex: 1 }}
-              contentContainerStyle={styles.categoryTabsContent}
             >
-              {CATEGORIES.map((cat) => {
-                const isActive = activeFilters.category === cat.value;
-                return (
-                  <Pressable
-                    key={cat.id}
-                    style={[styles.categoryTab, isActive && styles.categoryTabActive]}
-                    onPress={() => handleCategoryPress(cat.value)}
-                  >
-                    <Text style={[styles.categoryTabText, isActive && styles.categoryTabTextActive]}>
-                      {cat.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+              {CATEGORIES.map((cat) => (
+                <Tab.Item key={cat.id} value={cat.value ?? 'all'}>
+                  {cat.label}
+                </Tab.Item>
+              ))}
+            </Tab>
 
             <Pressable style={styles.regionPill} onPress={() => setShowRegionSheet(true)}>
-              <Icon name="icon-pin-mono" size={12} color="#4E5968" />
+              <Icon name="icon-pin-mono" size={12} color={adaptive.grey700} />
               <Text style={styles.regionPillText}>
                 {activeFilters.region ?? '전국'} ▾
               </Text>
@@ -592,7 +825,7 @@ function ExplorePage() {
                     ]}
                     onPress={() => handleQuickFilterPress(filter.id)}
                   >
-                    <Text style={[styles.quickFilterText, isActive && { color: '#FFFFFF' }]}>
+                    <Text style={[styles.quickFilterText, isActive && { color: adaptive.background }]}>
                       {filter.label}
                     </Text>
                   </Pressable>
@@ -641,7 +874,7 @@ function ExplorePage() {
         onClose={() => setShowRegionSheet(false)}
         onDimmerClick={() => setShowRegionSheet(false)}
       >
-        <BottomSheet.Header title="지역 선택" />
+        <BottomSheet.Header>지역 선택</BottomSheet.Header>
         <ScrollView
           style={styles.regionSheetList}
           contentContainerStyle={{ paddingBottom: 48 }}
@@ -654,7 +887,7 @@ function ExplorePage() {
             <Text style={[styles.regionSheetText, !activeFilters.region && styles.regionSheetTextActive]}>
               전국 전체
             </Text>
-            {!activeFilters.region && <Text style={styles.regionCheckmark}>✓</Text>}
+            {!activeFilters.region && <Icon name="icon-check-mono" size={16} color={adaptive.blue500} />}
           </Pressable>
 
           {REGION_LIST.map(({ value, count }) => (
@@ -669,7 +902,7 @@ function ExplorePage() {
               <View style={styles.regionSheetRight}>
                 <Text style={styles.regionCountText}>{count.toLocaleString()}개</Text>
                 {activeFilters.region === value && (
-                  <Text style={styles.regionCheckmark}>✓</Text>
+                  <Icon name="icon-check-mono" size={16} color={adaptive.blue500} />
                 )}
               </View>
             </Pressable>
@@ -679,258 +912,3 @@ function ExplorePage() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-
-  // ── 고정 검색바 ──────────────────────────────────
-  fixedSearchBar: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F2F4F6',
-  },
-  fakeSearchInput: {
-    height: 48,
-    backgroundColor: '#F5F5F5',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  searchPlaceholder: {
-    fontSize: 15,
-    color: '#B0B8C1',
-  },
-
-  // ── 콘텐츠 영역 (FlatList + absolute 필터 헤더) ─
-  contentArea: {
-    flex: 1,
-    overflow: 'hidden',
-  },
-
-  // ── 스크롤 반응형 필터 헤더 ──────────────────────
-  filterHeader: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    elevation: 3,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F2F4F6',
-  },
-
-  // ── 카테고리 언더라인 탭 ─────────────────────────
-  categoryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E8EB',
-  },
-  categoryTabsContent: {
-    paddingLeft: 16,
-  },
-  categoryTab: {
-    paddingHorizontal: 4,
-    paddingVertical: 14,
-    marginRight: 20,
-  },
-  categoryTabActive: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#191F28',
-  },
-  categoryTabText: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#8B95A1',
-  },
-  categoryTabTextActive: {
-    color: '#191F28',
-    fontWeight: '700',
-  },
-
-  // ── 지역 필터 pill ──────────────────────────────
-  regionPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    marginRight: 16,
-    marginLeft: 4,
-    backgroundColor: '#F2F4F6',
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  regionPillText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#4E5968',
-  },
-
-  // ── 퀵 필터 칩 ──────────────────────────────────
-  quickFiltersRow: {
-    paddingVertical: 10,
-  },
-  quickFiltersContent: {
-    paddingHorizontal: 16,
-  },
-  quickFilterChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    marginRight: 8,
-  },
-  quickFilterText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4E5968',
-  },
-
-  // ── 결과 카운트 ──────────────────────────────────
-  countRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F2F4F6',
-  },
-  countText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#8B95A1',
-  },
-
-  // ── FlatList ─────────────────────────────────────
-  flatListContent: {
-    paddingHorizontal: 10,
-    paddingBottom: 100,
-  },
-  columnWrapper: {
-    justifyContent: 'space-between',
-  },
-
-  // ── 그리드 카드 ──────────────────────────────────
-  gridCard: {
-    width: '48%',
-    marginVertical: 6,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  cardImageWrapper: {
-    position: 'relative',
-  },
-  cardBadgeContainer: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    flexDirection: 'row',
-    gap: 4,
-  },
-  cardBadge: {
-    backgroundColor: 'rgba(0, 0, 0, 0.60)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 10,
-  },
-  cardBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  cardInfo: {
-    padding: 8,
-  },
-  likeButton: {
-    position: 'absolute',
-    bottom: 8,
-    right: 8,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderRadius: 16,
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#191F28',
-    marginBottom: 4,
-    lineHeight: 20,
-  },
-  cardMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  cardMeta: {
-    fontSize: 12,
-    color: '#6B7684',
-  },
-
-  // ── Empty State ──────────────────────────────────
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 80,
-  },
-  emptyIconWrapper: {
-    marginBottom: 16,
-  },
-  emptyText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  emptyHint: {
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
-  },
-
-  // ── 지역 BottomSheet ─────────────────────────────
-  regionSheetList: {
-    paddingHorizontal: 20,
-    maxHeight: 460,
-  },
-  regionSheetItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F2F4F6',
-  },
-  regionSheetText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#6B7684',
-  },
-  regionSheetTextActive: {
-    color: '#191F28',
-    fontWeight: '700',
-  },
-  regionSheetRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  regionCountText: {
-    fontSize: 13,
-    color: '#8B95A1',
-  },
-  regionCheckmark: {
-    fontSize: 16,
-    color: '#3182F6',
-    fontWeight: '700',
-  },
-});

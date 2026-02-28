@@ -1,6 +1,8 @@
 import { createRoute } from '@granite-js/react-native';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { ScrollView, StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl, Alert } from 'react-native';
+import { Loader, Icon } from '@toss/tds-react-native';
+import { useAdaptive } from '@toss/tds-react-native/private';
 import { useAuth } from '../hooks/useAuth';
 import { BottomTabBar } from '../components/BottomTabBar';
 import {
@@ -18,15 +20,19 @@ export const Route = createRoute('/mypage', {
   component: MyPage,
 });
 
+type Adaptive = ReturnType<typeof useAdaptive>;
+
 /**
  * 썸네일 리스트 아이템 (미리보기용 — 50×50 compact)
  */
 function ThumbnailListItem({
   event,
   onPress,
+  styles,
 }: {
   event: EventCardData;
   onPress: () => void;
+  styles: ReturnType<typeof createStyles>;
 }) {
   return (
     <TouchableOpacity style={styles.listItem} onPress={onPress} activeOpacity={0.7}>
@@ -58,6 +64,9 @@ function MyPage() {
   const { isLoggedIn, isLoading: authLoading, login, logout } = useAuth();
   const [loginLoading, setLoginLoading] = useState(false);
 
+  const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
+
   const handleLogin = async () => {
     setLoginLoading(true);
     try {
@@ -70,7 +79,7 @@ function MyPage() {
   };
 
   const handleLogout = () => {
-    Alert.alert('로그아웃', '로그아웃 하시겠어요?', [
+    Alert.alert('로그아웃', '로그아웃할까요?', [
       { text: '취소', style: 'cancel' },
       { text: '로그아웃', style: 'destructive', onPress: logout },
     ]);
@@ -111,8 +120,8 @@ function MyPage() {
         );
         const likes = previewItems
           .map((item, i) => {
-            const result = results[i];
-            if (result.status === 'fulfilled' && result.value !== null) return result.value;
+            const result = results[i]!;
+            if (result.status === 'fulfilled' && result.value != null) return result.value;
             // API 실패 → snapshot 폴백
             const snap = item.snapshot;
             if (!snap) return null;
@@ -158,8 +167,8 @@ function MyPage() {
         );
         const recents = previewItems
           .map((item, i) => {
-            const result = results[i];
-            if (result.status === 'fulfilled' && result.value !== null) return result.value;
+            const result = results[i]!;
+            if (result.status === 'fulfilled' && result.value != null) return result.value;
             // API 실패 → snapshot 폴백
             const snap = item.snapshot;
             if (!snap) return null;
@@ -236,11 +245,11 @@ function MyPage() {
         {/* 프로필 섹션 */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
-            <Text style={styles.avatarIcon}>👤</Text>
+            <Icon name="icon-user-mono" size={40} color={adaptive.grey400} />
           </View>
 
           {authLoading ? (
-            <ActivityIndicator size="small" color="#8B95A1" style={{ marginTop: 8 }} />
+            <Loader size="small" customStrokeColor={adaptive.grey500} style={{ marginTop: 8 }} />
           ) : isLoggedIn ? (
             <>
               <Text style={styles.welcomeText}>반가워요!</Text>
@@ -262,7 +271,7 @@ function MyPage() {
                 disabled={loginLoading}
               >
                 {loginLoading ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <Loader size="small" type="light" />
                 ) : (
                   <Text style={styles.loginButtonText}>토스로 로그인</Text>
                 )}
@@ -272,12 +281,22 @@ function MyPage() {
           )}
         </View>
 
+        {/* 비로그인 안내 배너 */}
+        {!isLoggedIn && !authLoading && (
+          <View style={styles.loginNoticeBanner}>
+            <Text style={styles.loginNoticeText}>지금은 이 기기에만 저장돼요</Text>
+            <TouchableOpacity onPress={handleLogin} disabled={loginLoading} activeOpacity={0.7}>
+              <Text style={styles.loginNoticeLink}>로그인하면 어디서든 확인 가능 →</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {isEmpty && !likesLoading && !recentLoading ? (
           /* Empty State */
           <View style={styles.emptyStateContainer}>
-            <Text style={styles.emptyStateIcon}>📭</Text>
+            <Icon name="icon-bookmark-mono" size={48} color={adaptive.grey300} />
             <Text style={styles.emptyStateText}>
-              아직 활동 기록이 없어요.{'\n'}축제를 구경해보러 갈까요?
+              아직 활동 기록이 없어요.{'\n'}이벤트를 구경해보러 갈까요?
             </Text>
             <TouchableOpacity
               style={styles.goHomeButton}
@@ -312,7 +331,7 @@ function MyPage() {
             {/* 찜한 목록 미리보기 */}
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>❤️ 찜한 목록</Text>
+                <Text style={styles.sectionTitle}>찜한 목록</Text>
                 {likesCount > 0 && (
                   <TouchableOpacity
                     onPress={() => navigation.navigate('/mypage/likes')}
@@ -325,7 +344,7 @@ function MyPage() {
 
               {likesLoading ? (
                 <View style={styles.sectionLoading}>
-                  <ActivityIndicator size="small" color="#8B95A1" />
+                  <Loader size="small" customStrokeColor={adaptive.grey500} />
                   <Text style={styles.loadingText}>불러오는 중...</Text>
                 </View>
               ) : likesError ? (
@@ -341,15 +360,16 @@ function MyPage() {
                     <ThumbnailListItem
                       key={event.id}
                       event={event}
+                      styles={styles}
                       onPress={() => navigation.navigate('/events/:id', { id: event.id })}
                     />
                   ))}
                 </View>
               ) : likesCount > 0 ? (
                 <View style={styles.emptyListContainer}>
-                  <Text style={styles.emptyListIcon}>📭</Text>
+                  <Icon name="icon-bookmark-mono" size={40} color={adaptive.grey300} />
                   <Text style={styles.emptyListText}>
-                    찜한 목록 중 종료된 이벤트만 있습니다.
+                    찜한 목록 중 종료된 이벤트만 있어요.
                   </Text>
                   <TouchableOpacity
                     style={styles.viewAllButtonSecondary}
@@ -361,9 +381,9 @@ function MyPage() {
                 </View>
               ) : (
                 <View style={styles.emptyListContainer}>
-                  <Text style={styles.emptyListIcon}>💝</Text>
+                  <Icon name="icon-heart-mono" size={40} color={adaptive.grey300} />
                   <Text style={styles.emptyListText}>
-                    찜한 행사가 없어요.{'\n'}마음에 드는 축제를 찜해보세요!
+                    찜한 이벤트가 없어요.{'\n'}마음에 드는 이벤트를 찜해보세요!
                   </Text>
                 </View>
               )}
@@ -372,7 +392,7 @@ function MyPage() {
             {/* 최근 본 이벤트 미리보기 */}
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>🕒 최근 본 이벤트</Text>
+                <Text style={styles.sectionTitle}>최근 본 이벤트</Text>
                 {recentCount > 0 && (
                   <TouchableOpacity
                     onPress={() => navigation.navigate('/mypage/recent')}
@@ -385,7 +405,7 @@ function MyPage() {
 
               {recentLoading ? (
                 <View style={styles.sectionLoading}>
-                  <ActivityIndicator size="small" color="#8B95A1" />
+                  <Loader size="small" customStrokeColor={adaptive.grey500} />
                   <Text style={styles.loadingText}>불러오는 중...</Text>
                 </View>
               ) : recentError ? (
@@ -401,15 +421,16 @@ function MyPage() {
                     <ThumbnailListItem
                       key={event.id}
                       event={event}
+                      styles={styles}
                       onPress={() => navigation.navigate('/events/:id', { id: event.id })}
                     />
                   ))}
                 </View>
               ) : (
                 <View style={styles.emptyListContainer}>
-                  <Text style={styles.emptyListIcon}>🕒</Text>
+                  <Icon name="icon-clock-mono" size={40} color={adaptive.grey300} />
                   <Text style={styles.emptyListText}>
-                    최근 본 이벤트가 없어요.{'\n'}축제를 둘러보고 기록을 남겨보세요!
+                    최근 본 이벤트가 없어요.{'\n'}이벤트를 둘러보고 기록을 남겨보세요!
                   </Text>
                 </View>
               )}
@@ -425,29 +446,29 @@ function MyPage() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (a: Adaptive) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F2F4F6',
+    backgroundColor: a.grey100,
   },
   scrollView: {
     flex: 1,
   },
   header: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     paddingHorizontal: 20,
     paddingVertical: 16,
     paddingTop: 50,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E8EB',
+    borderBottomColor: a.grey200,
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#191F28',
+    color: a.grey900,
   },
   profileSection: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     paddingVertical: 32,
     paddingHorizontal: 20,
     alignItems: 'center',
@@ -456,7 +477,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#F2F4F6',
+    backgroundColor: a.grey100,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
@@ -467,19 +488,19 @@ const styles = StyleSheet.create({
   welcomeText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#191F28',
+    color: a.grey900,
     marginBottom: 8,
     textAlign: 'center',
   },
   infoText: {
     fontSize: 13,
-    color: '#8B95A1',
+    color: a.grey500,
     textAlign: 'center',
     lineHeight: 18,
   },
   loginButton: {
     marginTop: 20,
-    backgroundColor: '#0064FF',
+    backgroundColor: a.blue500,
     paddingVertical: 14,
     paddingHorizontal: 40,
     borderRadius: 10,
@@ -497,7 +518,7 @@ const styles = StyleSheet.create({
   loginSubText: {
     marginTop: 12,
     fontSize: 12,
-    color: '#B0B8C1',
+    color: a.grey400,
     textAlign: 'center',
   },
   logoutButton: {
@@ -506,15 +527,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E5E8EB',
+    borderColor: a.grey200,
   },
   logoutButtonText: {
     fontSize: 13,
-    color: '#8B95A1',
+    color: a.grey500,
     fontWeight: '500',
   },
   emptyStateContainer: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     marginTop: 24,
     marginHorizontal: 20,
     borderRadius: 12,
@@ -533,13 +554,13 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     fontSize: 16,
-    color: '#6B7684',
+    color: a.grey600,
     textAlign: 'center',
     lineHeight: 24,
     marginBottom: 24,
   },
   goHomeButton: {
-    backgroundColor: '#0064FF',
+    backgroundColor: a.blue500,
     paddingVertical: 14,
     paddingHorizontal: 32,
     borderRadius: 8,
@@ -550,7 +571,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   statsSection: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     marginTop: 24,
     marginHorizontal: 20,
     borderRadius: 12,
@@ -569,22 +590,22 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: 32,
     fontWeight: '700',
-    color: '#0064FF',
+    color: a.blue500,
     marginBottom: 6,
   },
   statLabel: {
     fontSize: 14,
-    color: '#6B7684',
+    color: a.grey600,
     fontWeight: '500',
   },
   statDetail: {
     fontSize: 12,
-    color: '#8B95A1',
+    color: a.grey500,
     marginTop: 4,
   },
   statDivider: {
     width: 1,
-    backgroundColor: '#E5E8EB',
+    backgroundColor: a.grey200,
     opacity: 0.5,
   },
   section: {
@@ -600,15 +621,15 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#191F28',
+    color: a.grey900,
   },
   viewAllButton: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#0064FF',
+    color: a.blue500,
   },
   listContainer: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     borderRadius: 12,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -623,7 +644,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#F2F4F6',
+    borderBottomColor: a.grey100,
   },
   thumbnail: {
     width: 50,
@@ -639,20 +660,20 @@ const styles = StyleSheet.create({
   listTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#191F28',
+    color: a.grey900,
     marginBottom: 4,
     lineHeight: 20,
   },
   listMeta: {
     fontSize: 13,
-    color: '#6B7684',
+    color: a.grey600,
   },
   listChevron: {
     fontSize: 24,
-    color: '#B0B8C1',
+    color: a.grey400,
   },
   sectionLoading: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     borderRadius: 12,
     paddingVertical: 32,
     alignItems: 'center',
@@ -662,7 +683,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: '#8B95A1',
+    color: a.grey500,
   },
   emptyListContainer: {
     backgroundColor: '#F8F9FA',
@@ -677,7 +698,7 @@ const styles = StyleSheet.create({
   },
   emptyListText: {
     fontSize: 14,
-    color: '#8B95A1',
+    color: a.grey500,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -692,23 +713,44 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 14,
-    color: '#6B7684',
+    color: a.grey600,
   },
   retryText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#0064FF',
+    color: a.blue500,
   },
   viewAllButtonSecondary: {
     marginTop: 12,
     paddingVertical: 8,
     paddingHorizontal: 16,
-    backgroundColor: '#F2F4F6',
+    backgroundColor: a.grey100,
     borderRadius: 6,
   },
   viewAllButtonSecondaryText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#0064FF',
+    color: a.blue500,
+  },
+  loginNoticeBanner: {
+    marginTop: 12,
+    marginHorizontal: 20,
+    backgroundColor: a.blue50,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  loginNoticeText: {
+    fontSize: 13,
+    color: a.grey700,
+    fontWeight: '500',
+  },
+  loginNoticeLink: {
+    fontSize: 13,
+    color: a.blue500,
+    fontWeight: '600',
   },
 });

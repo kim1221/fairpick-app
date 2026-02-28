@@ -3,9 +3,10 @@
  */
 
 import { createRoute } from '@granite-js/react-native';
-import React, { useEffect, useState, useRef } from 'react';
-import { ScrollView, StyleSheet, View, Text, Animated, RefreshControl, Pressable } from 'react-native';
-import { Icon } from '@toss/tds-react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
+import { Icon, AnimateSkeleton } from '@toss/tds-react-native';
+import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { EventCard } from '../components/EventCard';
 
@@ -34,65 +35,20 @@ interface TodayPickData {
   loading: boolean;
 }
 
-// ==================== 스켈레톤 컴포넌트 ====================
+// ==================== 색상 토큰 ====================
 
-function useSkeletonOpacity() {
-  const opacity = useRef(new Animated.Value(0.4)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0.4, duration: 700, useNativeDriver: true }),
-      ])
-    ).start();
-  }, []);
-  return opacity;
-}
+type Adaptive = ReturnType<typeof useAdaptive>;
 
-function TodayPickSkeleton() {
-  const opacity = useSkeletonOpacity();
-  return (
-    <Animated.View style={[skeletonStyles.largeCard, { opacity }]}>
-      <View style={skeletonStyles.largeImage} />
-      <View style={skeletonStyles.content}>
-        <View style={skeletonStyles.badge} />
-        <View style={skeletonStyles.titleLine1} />
-        <View style={skeletonStyles.titleLine2} />
-        <View style={skeletonStyles.meta} />
-      </View>
-    </Animated.View>
-  );
-}
-
-function HorizontalSectionSkeleton() {
-  const opacity = useSkeletonOpacity();
-  return (
-    <Animated.View style={{ opacity, flexDirection: 'row', paddingHorizontal: 20, gap: 12 }}>
-      {[0, 1, 2].map((i) => (
-        <View key={i} style={skeletonStyles.smallCard}>
-          <View style={skeletonStyles.smallImage} />
-          <View style={skeletonStyles.smallContent}>
-            <View style={skeletonStyles.smallBadge} />
-            <View style={skeletonStyles.smallTitle1} />
-            <View style={skeletonStyles.smallTitle2} />
-          </View>
-        </View>
-      ))}
-    </Animated.View>
-  );
-}
-
-const skeletonStyles = StyleSheet.create({
-  // 큰 카드 (오늘의 추천)
+const createSkeletonStyles = (a: Adaptive) => StyleSheet.create({
   largeCard: {
     marginHorizontal: 20,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     borderRadius: 16,
     overflow: 'hidden',
   },
   largeImage: {
     height: 200,
-    backgroundColor: '#E5E8EB',
+    backgroundColor: a.grey200,
   },
   content: {
     padding: 16,
@@ -101,38 +57,37 @@ const skeletonStyles = StyleSheet.create({
   badge: {
     width: 48,
     height: 20,
-    backgroundColor: '#E5E8EB',
+    backgroundColor: a.grey200,
     borderRadius: 10,
   },
   titleLine1: {
     height: 20,
-    backgroundColor: '#E5E8EB',
+    backgroundColor: a.grey200,
     borderRadius: 4,
     width: '85%',
   },
   titleLine2: {
     height: 20,
-    backgroundColor: '#E5E8EB',
+    backgroundColor: a.grey200,
     borderRadius: 4,
     width: '60%',
   },
   meta: {
     height: 14,
-    backgroundColor: '#E5E8EB',
+    backgroundColor: a.grey200,
     borderRadius: 4,
     width: '40%',
     marginTop: 4,
   },
-  // 작은 카드 (가로 스크롤 섹션)
   smallCard: {
     width: 160,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     borderRadius: 12,
     overflow: 'hidden',
   },
   smallImage: {
     height: 100,
-    backgroundColor: '#E5E8EB',
+    backgroundColor: a.grey200,
   },
   smallContent: {
     padding: 10,
@@ -141,28 +96,177 @@ const skeletonStyles = StyleSheet.create({
   smallBadge: {
     width: 36,
     height: 16,
-    backgroundColor: '#E5E8EB',
+    backgroundColor: a.grey200,
     borderRadius: 8,
   },
   smallTitle1: {
     height: 14,
-    backgroundColor: '#E5E8EB',
+    backgroundColor: a.grey200,
     borderRadius: 4,
     width: '90%',
   },
   smallTitle2: {
     height: 14,
-    backgroundColor: '#E5E8EB',
+    backgroundColor: a.grey200,
     borderRadius: 4,
     width: '65%',
   },
 });
 
+const createStyles = (a: Adaptive) => StyleSheet.create({
+  aiNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: a.blue50,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  aiNoticeText: {
+    flex: 1,
+    fontSize: 13,
+    color: a.blue500,
+    fontWeight: '500',
+  },
+  aiNoticeClose: {
+    fontSize: 14,
+    color: a.grey500,
+    marginLeft: 8,
+  },
+  container: {
+    flex: 1,
+    backgroundColor: a.grey100,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  header: {
+    backgroundColor: a.background,
+    paddingHorizontal: 20,
+    paddingTop: 50,
+    paddingBottom: 16,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: a.grey900,
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: a.grey600,
+    fontWeight: '500',
+  },
+  locationButton: {
+    height: 36,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    backgroundColor: a.blue50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  locationButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  locationButtonText: {
+    fontSize: 13,
+    color: a.blue600,
+    fontWeight: '600',
+  },
+  section: {
+    marginTop: 24,
+    marginBottom: 8,
+  },
+  sectionHeader: {
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: a.grey900,
+    letterSpacing: -0.3,
+  },
+  sectionSubtitle: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: a.grey500,
+    marginTop: 4,
+  },
+  horizontalList: {
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  emptyCard: {
+    height: 300,
+    backgroundColor: a.grey50,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 20,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: a.grey600,
+  },
+});
+
+// ==================== 스켈레톤 컴포넌트 ====================
+
+function TodayPickSkeleton() {
+  const adaptive = useAdaptive();
+  const skeletonStyles = React.useMemo(() => createSkeletonStyles(adaptive), [adaptive]);
+  return (
+    <AnimateSkeleton delay={0} withGradient={false} withShimmer={true}>
+      <View style={skeletonStyles.largeCard}>
+        <View style={skeletonStyles.largeImage} />
+        <View style={skeletonStyles.content}>
+          <View style={skeletonStyles.badge} />
+          <View style={skeletonStyles.titleLine1} />
+          <View style={skeletonStyles.titleLine2} />
+          <View style={skeletonStyles.meta} />
+        </View>
+      </View>
+    </AnimateSkeleton>
+  );
+}
+
+function HorizontalSectionSkeleton() {
+  const adaptive = useAdaptive();
+  const skeletonStyles = React.useMemo(() => createSkeletonStyles(adaptive), [adaptive]);
+  return (
+    <AnimateSkeleton delay={0} withGradient={false} withShimmer={true}>
+      <View style={{ flexDirection: 'row', paddingHorizontal: 20, gap: 12 }}>
+        {[0, 1, 2].map((i) => (
+          <View key={i} style={skeletonStyles.smallCard}>
+            <View style={skeletonStyles.smallImage} />
+            <View style={skeletonStyles.smallContent}>
+              <View style={skeletonStyles.smallBadge} />
+              <View style={skeletonStyles.smallTitle1} />
+              <View style={skeletonStyles.smallTitle2} />
+            </View>
+          </View>
+        ))}
+      </View>
+    </AnimateSkeleton>
+  );
+}
+
 // ==================== 홈 화면 컴포넌트 ====================
 
 function HomePage() {
   const navigation = Route.useNavigation();
-  
+  const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
+
   // 상태 관리
   const [todayPick, setTodayPick] = useState<TodayPickData>({ event: null, loading: true });
   const [nearby, setNearby] = useState<ScoredEvent[] | null>(null); // null=로딩, []=없음
@@ -199,12 +303,12 @@ function HomePage() {
     try {
       const currentUserId = await getCurrentUserId();
       setUserId(currentUserId);
-      
+
       console.log('[Home] User initialized:', { userId: currentUserId });
-      
+
       // 위치 정보 요청 (반환값 사용)
       const userLocation = await requestLocation();
-      
+
       // 사용자 정보 로드 후 추천 로드 (위치 정보 전달)
       await loadRecommendations(currentUserId, userLocation);
     } catch (error) {
@@ -220,41 +324,41 @@ function HomePage() {
   const requestLocation = async (): Promise<Location | undefined> => {
     try {
       console.log('[Home/Location] Requesting location permission...');
-      
+
       // 1. 현재 권한 상태 확인
       const permission = await getCurrentLocation.getPermission();
       console.log('[Home/Location] Current permission:', permission);
-      
-      if (permission === 'denied' || permission === 'osPermissionDenied') {
+
+      if ((permission as string) === 'denied' || (permission as string) === 'osPermissionDenied') {
         console.log('[Home/Location] Location permission denied');
         return undefined;
       }
-      
+
       // 2. 권한이 없으면 요청
       if (permission === 'notDetermined') {
         console.log('[Home/Location] Requesting permission...');
         const dialogResult = await getCurrentLocation.openPermissionDialog();
-        
+
         if (dialogResult === 'denied') {
           console.log('[Home/Location] User denied permission');
           return undefined;
         }
       }
-      
+
       // 3. 위치 정보 가져오기
       console.log('[Home/Location] Getting current location...');
-      const locationData = await getCurrentLocation({ 
-        accuracy: Accuracy.Balanced 
+      const locationData = await getCurrentLocation({
+        accuracy: Accuracy.Balanced
       });
-      
+
       const userLocation: Location = {
         lat: locationData.coords.latitude,
         lng: locationData.coords.longitude,
       };
-      
+
       setLocation(userLocation);
       console.log('[Home/Location] Location acquired:', userLocation);
-      
+
       // 역지오코딩: 좌표 → 행정동
       const geocodeResult = await reverseGeocode(userLocation.lat, userLocation.lng);
       if (geocodeResult.success && geocodeResult.address) {
@@ -264,9 +368,9 @@ function HomePage() {
         setCurrentAddress('위치 정보');
         console.log('[Home/Location] Geocoding failed:', geocodeResult.error);
       }
-      
+
       return userLocation;
-      
+
     } catch (error) {
       if (error instanceof GetCurrentLocationPermissionError) {
         console.log('[Home/Location] Permission error:', error.message);
@@ -282,17 +386,17 @@ function HomePage() {
     try {
       const uid = currentUserId || userId;
       const loc = userLocation || location;
-      
+
       // 1. 오늘의 추천 (위치 정보 전달)
       await loadTodayPick(uid, loc);
-      
+
       // 2. 내 주변 이벤트 (위치 필수)
       if (loc) {
         await loadNearby(loc);
       } else {
         setNearby([]); // 위치 없음 → 스켈레톤 없이 바로 숨김
       }
-      
+
       // 3. 지금 떠오르는 (위치 정보 전달)
       await loadTrending(loc);
 
@@ -310,7 +414,7 @@ function HomePage() {
 
       // 8. 새로 올라왔어요 (위치 정보 전달)
       await loadLatest(loc);
-      
+
     } catch (error) {
       console.error('[Home] Failed to load recommendations:', error);
     }
@@ -318,27 +422,27 @@ function HomePage() {
 
   const loadTodayPick = async (currentUserId?: string, userLocation?: Location) => {
     try {
-      console.log('[Home/TodayPick] Starting to load today pick...', { 
-        userId: currentUserId, 
+      console.log('[Home/TodayPick] Starting to load today pick...', {
+        userId: currentUserId,
         hasLocation: !!userLocation,
-        location: userLocation 
+        location: userLocation
       });
       setTodayPick({ event: null, loading: true });
-      
+
       const response = await recommendationService.getTodayPick(
         currentUserId,
         userLocation // 위치 정보 전달
       );
-      
+
       if (response.success && response.data) {
         setTodayPick({
           event: response.data,
           loading: false,
         });
-        
+
         // 중복 제거 리스트에 추가
         excludedIds.current.add(response.data.id);
-        
+
         console.log('[Home/TodayPick] Loaded:', response.data.title);
       } else {
         setTodayPick({ event: null, loading: false });
@@ -494,7 +598,7 @@ function HomePage() {
 
   const handleEventPress = async (eventId: string) => {
     console.log('[Home] Event pressed:', eventId);
-    
+
     // 사용자 행동 로그 기록 (비동기, 실패해도 진행)
     try {
       await userEventService.logEventClick(eventId, 'home_card');
@@ -510,10 +614,10 @@ function HomePage() {
     setRefreshing(true);
     try {
       console.log('[Home] Refreshing with new location...');
-      
+
       // 1. 위치 정보 다시 가져오기
       const newLocation = await requestLocation();
-      
+
       // 2. 새로운 위치로 추천 다시 로드
       excludedIds.current.clear();
       setNearby(null);
@@ -524,7 +628,7 @@ function HomePage() {
       setFreeEvents(null);
       setLatest(null);
       await loadRecommendations(userId, newLocation);
-      
+
       console.log('[Home] Refresh completed with location:', newLocation);
     } catch (error) {
       console.error('[Home] Refresh failed:', error);
@@ -566,13 +670,13 @@ function HomePage() {
               <Text style={styles.subtitle}>오늘의 재미를 찾아볼까요?</Text>
             </View>
             {location && currentAddress && (
-              <Pressable 
+              <Pressable
                 onPress={handleLocationRefresh}
                 style={styles.locationButton}
-                android_ripple={{ color: '#E5E7EB', radius: 20 }}
+                android_ripple={{ color: adaptive.grey200, radius: 20 }}
               >
                 <View style={styles.locationButtonContent}>
-                  <Icon name="icon-pin-mono" size={14} color="#0369A1" />
+                  <Icon name="icon-pin-mono" size={14} color={adaptive.blue600} />
                   <Text style={styles.locationButtonText}>{currentAddress}</Text>
                 </View>
               </Pressable>
@@ -585,12 +689,12 @@ function HomePage() {
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>오늘의 추천</Text>
           </View>
-          
+
           {todayPick.loading ? (
             <TodayPickSkeleton />
           ) : todayPick.event ? (
             <View style={{ paddingHorizontal: 20 }}>
-              <EventCard 
+              <EventCard
                 event={todayPick.event}
                 onPress={handleEventPress}
                 variant="large"
@@ -806,116 +910,5 @@ function HomePage() {
     </View>
   );
 }
-
-// ==================== 스타일 ====================
-
-const styles = StyleSheet.create({
-  // AI 고지 배너
-  aiNoticeBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#EEF4FF',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  aiNoticeText: {
-    flex: 1,
-    fontSize: 13,
-    color: '#3182F6',
-    fontWeight: '500',
-  },
-  aiNoticeClose: {
-    fontSize: 14,
-    color: '#8B95A1',
-    marginLeft: 8,
-  },
-
-  container: {
-    flex: 1,
-    backgroundColor: '#F2F4F6',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  header: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 16,
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#191F28',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#6B7684',
-    fontWeight: '500',
-  },
-  locationButton: {
-    height: 36,
-    paddingHorizontal: 12,
-    borderRadius: 18,
-    backgroundColor: '#F0F9FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 4,
-  },
-  locationButtonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  locationButtonText: {
-    fontSize: 13,
-    color: '#0369A1',
-    fontWeight: '600',
-  },
-  section: {
-    marginTop: 24,
-    marginBottom: 8,
-  },
-  sectionHeader: {
-    paddingHorizontal: 20,
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    letterSpacing: -0.3,
-  },
-  sectionSubtitle: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: '#9CA3AF',
-    marginTop: 4,
-  },
-  horizontalList: {
-    paddingHorizontal: 20,
-    gap: 12,
-  },
-  // 빈 상태
-  emptyCard: {
-    height: 300,
-    backgroundColor: '#F8F9FA',
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 20,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-});
 
 export default HomePage;

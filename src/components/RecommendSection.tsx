@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View, Pressable, ActivityIndicator, Dimensions } from 'react-native';
-import { Txt, Post, Badge } from '@toss/tds-react-native';
+import { ScrollView, StyleSheet, View, Pressable, Dimensions } from 'react-native';
+import { Txt, Post, Badge, Loader } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import eventService from '../services/eventService';
 import { EventCardData } from '../data/events';
@@ -50,12 +50,12 @@ export function RecommendSection({ onSelectEvent }: RecommendSectionProps) {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <Txt typography="h3" fontWeight="bold" color={adaptive.grey900}>
+          <Txt typography="t4" fontWeight="bold" color={adaptive.grey900}>
             지금 주목할 만한 일정
           </Txt>
         </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator color={adaptive.grey600} />
+          <Loader customStrokeColor={adaptive.grey600} />
         </View>
       </View>
     );
@@ -69,7 +69,7 @@ export function RecommendSection({ onSelectEvent }: RecommendSectionProps) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Txt typography="h3" fontWeight="bold" color={adaptive.grey900}>
+        <Txt typography="t4" fontWeight="bold" color={adaptive.grey900}>
           지금 주목할 만한 일정
         </Txt>
         <Txt typography="t6" color={adaptive.grey600} style={styles.subtitle}>
@@ -108,7 +108,6 @@ interface RecommendCardProps {
 
 function RecommendCard({ event, adaptive, onPress, isFirst, isLast }: RecommendCardProps) {
   // badge 속성은 EventCardData에 없으므로 제거
-  const badgeColor = '#4D96FF'; // 기본 색상
 
   return (
     <Pressable
@@ -126,7 +125,7 @@ function RecommendCard({ event, adaptive, onPress, isFirst, isLast }: RecommendC
       {(event.isFree || event.isEndingSoon) && (
         <View style={styles.badgeContainer}>
           <View style={[styles.badgePill, { backgroundColor: event.isFree ? '#52C41A' : '#FF6B6B' }]}>
-            <Txt typography="t8" fontWeight="bold" color="#FFFFFF">
+            <Txt typography="t7" fontWeight="bold" color="#FFFFFF">
               {event.isFree ? '무료' : '마감임박'}
             </Txt>
           </View>
@@ -159,7 +158,7 @@ function RecommendCard({ event, adaptive, onPress, isFirst, isLast }: RecommendC
 
         {/* Venue */}
         {event.venue ? (
-          <Post.Paragraph typography="t8" color={adaptive.grey600} numberOfLines={1}>
+          <Post.Paragraph typography="t7" color={adaptive.grey600} numberOfLines={1}>
             {event.venue}
           </Post.Paragraph>
         ) : null}

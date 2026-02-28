@@ -1,32 +1,33 @@
 /**
  * 이벤트 상세 페이지
- * 
+ *
  * 이벤트의 상세 정보를 표시하고 사용자 행동(저장, 공유)을 처리합니다.
  */
 
 import { createRoute } from '@granite-js/react-native';
 import React, { useEffect, useState } from 'react';
-import { 
-  ScrollView, 
-  StyleSheet, 
-  View, 
-  Text, 
-  Image, 
-  Pressable, 
-  ActivityIndicator,
+import {
+  ScrollView,
+  StyleSheet,
+  View,
+  Text,
+  Image,
+  Pressable,
   Share,
   Alert,
 } from 'react-native';
+import { Loader } from '@toss/tds-react-native';
+import { useAdaptive } from '@toss/tds-react-native/private';
 
 // API 서비스
 import recommendationService from '../services/recommendationService';
 import userEventService from '../services/userEventService';
-import { getCurrentUserId } from '../utils/anonymousUser';
 
 // 타입
 import type { ScoredEvent } from '../types/recommendation';
 
-export const Route = createRoute('/event-detail', {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const Route = (createRoute as any)('/event-detail', {
   component: EventDetailPage,
 });
 
@@ -34,19 +35,25 @@ interface RouteParams {
   id: string;
 }
 
+type Adaptive = ReturnType<typeof useAdaptive>;
+type EventStyles = ReturnType<typeof createStyles>;
+
 // ==================== 메인 컴포넌트 ====================
 
 function EventDetailPage() {
   console.log('❌ LEGACY event-detail.tsx HIT - 이 파일은 렌더링되면 안 됨!');
 
   const navigation = Route.useNavigation();
-  const params = Route.useParams<RouteParams>();
+  const params = (Route.useParams as () => RouteParams)();
   const eventId = params?.id;
+
+  const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   // 상태 관리
   const [event, setEvent] = useState<ScoredEvent | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [saved, setSaved] = useState<boolean>(false);
+  const [loading, setLoading] = useState(true);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (eventId) {
@@ -58,9 +65,9 @@ function EventDetailPage() {
   const loadEventDetail = async (id: string) => {
     try {
       setLoading(true);
-      
+
       const response = await recommendationService.getEventDetail(id);
-      
+
       if (response.success && response.data) {
         setEvent(response.data);
         console.log('[EventDetail] Loaded event:', response.data.title);
@@ -132,7 +139,7 @@ function EventDetailPage() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3182F6" />
+        <Loader size="large" type="primary" />
         <Text style={styles.loadingText}>이벤트 정보를 불러오는 중...</Text>
       </View>
     );
@@ -186,8 +193,8 @@ function EventDetailPage() {
         {/* 이벤트 이미지 */}
         <View style={styles.imageContainer}>
           {event.thumbnail_url ? (
-            <Image 
-              source={{ uri: event.thumbnail_url }} 
+            <Image
+              source={{ uri: event.thumbnail_url }}
               style={styles.image}
               resizeMode="cover"
             />
@@ -196,7 +203,7 @@ function EventDetailPage() {
               <Text style={styles.placeholderEmoji}>🖼️</Text>
             </View>
           )}
-          
+
           {/* 카테고리 배지 */}
           <View style={styles.categoryBadge}>
             <Text style={styles.categoryBadgeText}>{event.category}</Text>
@@ -261,19 +268,19 @@ function EventDetailPage() {
               <View style={{
                 flex: 1,
                 minWidth: '45%',
-                backgroundColor: '#F9FAFB',
+                backgroundColor: adaptive.grey100,
                 padding: 16,
                 borderRadius: 12,
                 borderWidth: 1,
-                borderColor: '#E5E7EB',
+                borderColor: adaptive.grey200,
               }}>
                 <Text style={{ fontSize: 24, marginBottom: 8 }}>📅</Text>
-                <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>기간</Text>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
+                <Text style={{ fontSize: 12, color: adaptive.grey500, marginBottom: 4 }}>기간</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: adaptive.grey900 }}>
                   {formatDate(event.start_date)}
                 </Text>
-                <Text style={{ fontSize: 12, color: '#6B7280' }}>~</Text>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
+                <Text style={{ fontSize: 12, color: adaptive.grey500 }}>~</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: adaptive.grey900 }}>
                   {formatDate(event.end_date)}
                 </Text>
               </View>
@@ -284,15 +291,15 @@ function EventDetailPage() {
               <View style={{
                 flex: 1,
                 minWidth: '45%',
-                backgroundColor: '#F9FAFB',
+                backgroundColor: adaptive.grey100,
                 padding: 16,
                 borderRadius: 12,
                 borderWidth: 1,
-                borderColor: '#E5E7EB',
+                borderColor: adaptive.grey200,
               }}>
                 <Text style={{ fontSize: 24, marginBottom: 8 }}>📍</Text>
-                <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>장소</Text>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827', numberOfLines: 2 }}>
+                <Text style={{ fontSize: 12, color: adaptive.grey500, marginBottom: 4 }}>장소</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: adaptive.grey900 }} numberOfLines={2}>
                   {event.venue}
                 </Text>
               </View>
@@ -302,15 +309,15 @@ function EventDetailPage() {
             <View style={{
               flex: 1,
               minWidth: '45%',
-              backgroundColor: '#F9FAFB',
+              backgroundColor: adaptive.grey100,
               padding: 16,
               borderRadius: 12,
               borderWidth: 1,
-              borderColor: '#E5E7EB',
+              borderColor: adaptive.grey200,
             }}>
               <Text style={{ fontSize: 24, marginBottom: 8 }}>💰</Text>
-              <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>가격</Text>
-              <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
+              <Text style={{ fontSize: 12, color: adaptive.grey500, marginBottom: 4 }}>가격</Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: adaptive.grey900 }}>
                 {event.is_free ? '무료' : '유료'}
               </Text>
             </View>
@@ -320,15 +327,15 @@ function EventDetailPage() {
               <View style={{
                 flex: 1,
                 minWidth: '45%',
-                backgroundColor: '#F9FAFB',
+                backgroundColor: adaptive.grey100,
                 padding: 16,
                 borderRadius: 12,
                 borderWidth: 1,
-                borderColor: '#E5E7EB',
+                borderColor: adaptive.grey200,
               }}>
                 <Text style={{ fontSize: 24, marginBottom: 8 }}>🚶</Text>
-                <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>거리</Text>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
+                <Text style={{ fontSize: 12, color: adaptive.grey500, marginBottom: 4 }}>거리</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: adaptive.grey900 }}>
                   {formatDistance(event.distance_km)}
                 </Text>
               </View>
@@ -356,7 +363,7 @@ function EventDetailPage() {
                 </Text>
               </View>
             )}
-            
+
             {event.venue && (
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>📍 장소</Text>
@@ -396,7 +403,7 @@ function EventDetailPage() {
 
       {/* Phase 2A: Sticky Bar (강화) */}
       <View style={styles.bottomActions}>
-        <Pressable 
+        <Pressable
           style={[styles.saveButton, saved && styles.saveButtonActive]}
           onPress={handleSave}
         >
@@ -405,14 +412,14 @@ function EventDetailPage() {
           </Text>
         </Pressable>
 
-        <Pressable 
+        <Pressable
           style={styles.shareButton2}
           onPress={handleShare}
         >
           <Text style={styles.shareButtonText2}>🔗</Text>
         </Pressable>
-        
-        <Pressable 
+
+        <Pressable
           style={styles.primaryButton}
           onPress={() => {
             // TODO: 티켓 예매 또는 상세 링크로 이동
@@ -449,27 +456,27 @@ function formatDistance(distanceKm: number): string {
 
 // ==================== 스타일 ====================
 
-const styles = StyleSheet.create({
+const createStyles = (a: Adaptive) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
   },
   loadingText: {
     marginTop: 12,
     fontSize: 14,
-    color: '#6B7280',
+    color: a.grey500,
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     padding: 20,
   },
   errorEmoji: {
@@ -478,11 +485,11 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 16,
-    color: '#6B7280',
+    color: a.grey500,
     marginBottom: 24,
   },
   errorButton: {
-    backgroundColor: '#3182F6',
+    backgroundColor: a.blue500,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
@@ -492,7 +499,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  
+
   // 헤더
   header: {
     flexDirection: 'row',
@@ -501,9 +508,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     paddingTop: 50,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: a.grey200,
   },
   backButton: {
     paddingVertical: 8,
@@ -511,7 +518,7 @@ const styles = StyleSheet.create({
   },
   backButtonText: {
     fontSize: 16,
-    color: '#1A1A1A',
+    color: a.grey900,
     fontWeight: '600',
   },
   shareButton: {
@@ -520,7 +527,7 @@ const styles = StyleSheet.create({
   },
   shareButtonText: {
     fontSize: 16,
-    color: '#3182F6',
+    color: a.blue500,
     fontWeight: '600',
   },
 
@@ -532,7 +539,7 @@ const styles = StyleSheet.create({
   imageContainer: {
     width: '100%',
     height: 300,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: a.grey100,
     position: 'relative',
   },
   image: {
@@ -544,7 +551,7 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#E5E7EB',
+    backgroundColor: a.grey200,
   },
   placeholderEmoji: {
     fontSize: 80,
@@ -571,7 +578,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: '800',
-    color: '#1A1A1A',
+    color: a.grey900,
     marginBottom: 12,
     lineHeight: 32,
   },
@@ -581,7 +588,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   tag: {
-    backgroundColor: '#EBF0FF',
+    backgroundColor: a.blue50,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -589,14 +596,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   tagText: {
-    color: '#3182F6',
+    color: a.blue500,
     fontSize: 12,
     fontWeight: '600',
   },
 
   // 메타 정보
   metaSection: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: a.grey100,
     borderRadius: 12,
     padding: 16,
     marginBottom: 24,
@@ -608,14 +615,14 @@ const styles = StyleSheet.create({
   },
   metaLabel: {
     fontSize: 14,
-    color: '#6B7280',
+    color: a.grey500,
     fontWeight: '600',
     width: 80,
   },
   metaValue: {
     flex: 1,
     fontSize: 14,
-    color: '#1A1A1A',
+    color: a.grey900,
     fontWeight: '500',
   },
 
@@ -626,13 +633,13 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: a.grey900,
     marginBottom: 12,
   },
   description: {
     fontSize: 15,
     lineHeight: 24,
-    color: '#4B5563',
+    color: a.grey700,
   },
 
   // 하단 액션
@@ -644,35 +651,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     padding: 16,
     paddingBottom: 24,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+    borderTopColor: a.grey200,
     gap: 12,
     zIndex: 99999, // Phase 2A: 절대 안 가려지게
     elevation: 99999, // Android
   },
   saveButton: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: a.grey100,
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   saveButtonActive: {
-    backgroundColor: '#EBF0FF',
+    backgroundColor: a.blue50,
   },
   saveButtonText: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#6B7280',
+    color: a.grey500,
   },
   saveButtonTextActive: {
-    color: '#3182F6',
+    color: a.blue500,
   },
   shareButton2: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: a.grey100,
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -684,7 +691,7 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     flex: 3,
-    backgroundColor: '#3182F6',
+    backgroundColor: a.blue500,
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -698,4 +705,3 @@ const styles = StyleSheet.create({
 });
 
 export default EventDetailPage;
-

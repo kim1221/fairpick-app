@@ -3,6 +3,8 @@ import { View, StyleSheet } from 'react-native';
 import { Txt } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 
+type Adaptive = ReturnType<typeof useAdaptive>;
+
 interface DynamicHeaderProps {
   title: string;
   subtitle?: string;
@@ -10,10 +12,11 @@ interface DynamicHeaderProps {
 
 export function DynamicHeader({ title, subtitle }: DynamicHeaderProps) {
   const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   return (
     <View style={styles.container}>
-      <Txt typography="h1" fontWeight="bold" color={adaptive.grey900}>
+      <Txt typography="t2" fontWeight="bold" color={adaptive.grey900}>
         {title}
       </Txt>
       {subtitle && (
@@ -25,12 +28,12 @@ export function DynamicHeader({ title, subtitle }: DynamicHeaderProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (a: Adaptive) => StyleSheet.create({
   container: {
     paddingHorizontal: 20,
     paddingTop: 24,
     paddingBottom: 16,
-    backgroundColor: '#F2F4F6',
+    backgroundColor: a.grey100,
   },
   subtitle: {
     marginTop: 8,

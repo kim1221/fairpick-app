@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Image, ImageStyle, StyleProp, ImageResizeMode } from 'react-native';
+import { useAdaptive } from '@toss/tds-react-native/private';
 import { getImageSource } from '../utils/imageHelpers';
 
 type Props = {
@@ -20,6 +21,7 @@ type Props = {
  * - 이미지가 없거나 로드 실패 시 카테고리별 3D 기본 이미지를 표시
  */
 export function EventImage({ uri, width = '100%', height, borderRadius = 16, resizeMode = 'cover', accessibilityLabel, style, category }: Props) {
+  const adaptive = useAdaptive();
   const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
@@ -47,10 +49,10 @@ export function EventImage({ uri, width = '100%', height, borderRadius = 16, res
       onError={() => setImageError(true)}
       style={[
         {
-          width,
+          width: width as any,
           height,
           borderRadius,
-          backgroundColor: '#EFF2F5',
+          backgroundColor: adaptive.grey100,
         },
         style,
       ]}

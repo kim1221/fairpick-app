@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View, Pressable, ActivityIndicator, Dimensions } from 'react-native';
-import { Txt, Post, Badge } from '@toss/tds-react-native';
+import { ScrollView, StyleSheet, View, Pressable, Dimensions } from 'react-native';
+import { Txt, Post, Badge, Loader } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import eventService from '../services/eventService';
 import { EventCardData } from '../data/events';
@@ -55,7 +55,7 @@ export function NewArrivalSection({ onSelectEvent }: NewArrivalSectionProps) {
           </Txt>
         </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator color={adaptive.grey600} />
+          <Loader customStrokeColor={adaptive.grey600} />
         </View>
       </View>
     );

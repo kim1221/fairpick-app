@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { useAdaptive } from '@toss/tds-react-native/private';
+
+type Adaptive = ReturnType<typeof useAdaptive>;
 
 interface FilterChipsProps {
   selectedRegion?: string;
@@ -16,20 +19,23 @@ export const FilterChips: React.FC<FilterChipsProps> = ({
 }) => {
   const [selectedRegion, setSelectedRegion] = useState(initialRegion);
   const [selectedCategory, setSelectedCategory] = useState(initialCategory);
-  
+
+  const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
+
   const regions = ['전국', '서울', '경기', '인천', '부산', '대구', '광주', '대전', '울산', '세종'];
   const categories = ['축제', '공연', '전시', '행사'];
-  
+
   const handleRegionPress = (region: string) => {
     setSelectedRegion(region);
     onRegionSelect?.(region);
   };
-  
+
   const handleCategoryPress = (category: string) => {
     setSelectedCategory(selectedCategory === category ? undefined : category);
     onCategorySelect?.(category);
   };
-  
+
   return (
     <View>
       {/* 지역 필터 */}
@@ -59,7 +65,7 @@ export const FilterChips: React.FC<FilterChipsProps> = ({
           </TouchableOpacity>
         ))}
       </ScrollView>
-      
+
       {/* 카테고리 필터 */}
       <ScrollView
         horizontal
@@ -91,7 +97,7 @@ export const FilterChips: React.FC<FilterChipsProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (a: Adaptive) => StyleSheet.create({
   scrollView: {
     flexGrow: 0,
   },
@@ -99,29 +105,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   chip: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
     marginRight: 8,
     borderWidth: 1,
-    borderColor: '#E5E8EB',
+    borderColor: a.grey200,
   },
   chipActive: {
-    backgroundColor: '#3182F6',
-    borderColor: '#3182F6',
+    backgroundColor: a.blue500,
+    borderColor: a.blue500,
   },
   chipSecondary: {
-    backgroundColor: '#F2F4F6',
-    borderColor: '#F2F4F6',
+    backgroundColor: a.grey100,
+    borderColor: a.grey100,
   },
   chipText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#4E5968',
+    color: a.grey700,
   },
   chipTextActive: {
     color: '#FFFFFF',
   },
 });
-

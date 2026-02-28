@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { Loader } from '@toss/tds-react-native';
+import { useAdaptive } from '@toss/tds-react-native/private';
 import { useTodayBanner } from '../hooks/useTodayBanner';
 import { getBannerDebugEnabled, toggleBannerDebug } from '../utils/storage';
 import { getActiveTuning } from '../config/todayBannerTuning';
+
+type Adaptive = ReturnType<typeof useAdaptive>;
 
 interface AICurationBannerProps {
   onBannerPress: (bannerSnapshot: {
@@ -13,7 +17,7 @@ interface AICurationBannerProps {
     recommendedScore?: number;
     recommendedBreakdown?: any;
     recommendationExplanation?: any;
-    copySource?: 'gemini' | 'template' | 'cache';
+    copySource?: 'ai' | 'gemini' | 'template' | 'cache';
     state: string;
     dongLabel?: string;
     noRecommendationReason?: string;
@@ -21,6 +25,8 @@ interface AICurationBannerProps {
 }
 
 export function AICurationBanner({ onBannerPress }: AICurationBannerProps) {
+  const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
   const { bannerData, loading, requestPermission } = useTodayBanner();
 
   // Debug toggle state (DEV only)
@@ -192,8 +198,8 @@ export function AICurationBanner({ onBannerPress }: AICurationBannerProps) {
               {bannerData.context.copySource && (
                 <Text style={styles.debugInfo}>
                   🤖 Copy: {bannerData.context.copySource}
-                  {bannerData.context.copySource === 'gemini' || bannerData.context.copySource === 'cache' 
-                    ? ' (Gemini 1.5 Flash)' 
+                  {bannerData.context.copySource === 'gemini' || bannerData.context.copySource === 'cache'
+                    ? ' (Gemini 1.5 Flash)'
                     : ' (Template)'}
                 </Text>
               )}
@@ -238,7 +244,7 @@ export function AICurationBanner({ onBannerPress }: AICurationBannerProps) {
           )}
         </View>
         {loading && (
-          <ActivityIndicator size="small" color="#3182F6" style={styles.loader} />
+          <Loader size="small" type="primary" style={styles.loader} />
         )}
         {!loading && (
           <Text style={styles.chevron}>›</Text>
@@ -248,9 +254,9 @@ export function AICurationBanner({ onBannerPress }: AICurationBannerProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (a: Adaptive) => StyleSheet.create({
   banner: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     borderRadius: 12,
     padding: 16,
     shadowColor: '#000',
@@ -280,18 +286,18 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#191F28',
+    color: a.grey900,
     lineHeight: 22,
     marginBottom: 4,
   },
   subtext: {
     fontSize: 13,
-    color: '#6B7684',
+    color: a.grey600,
     marginTop: 4,
   },
   location: {
     fontSize: 12,
-    color: '#3182F6',
+    color: a.blue500,
     fontWeight: '600',
     marginTop: 2,
   },
@@ -300,7 +306,7 @@ const styles = StyleSheet.create({
   },
   debugInfo: {
     fontSize: 11,
-    color: '#8B95A1',
+    color: a.grey500,
     marginTop: 2,
     fontStyle: 'italic',
   },
@@ -313,12 +319,12 @@ const styles = StyleSheet.create({
   },
   debugHint: {
     fontSize: 9,
-    color: '#B0B8C1',
+    color: a.grey400,
     marginTop: 2,
     fontStyle: 'italic',
   },
   button: {
-    backgroundColor: '#3182F6',
+    backgroundColor: a.blue500,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 8,
@@ -334,7 +340,7 @@ const styles = StyleSheet.create({
   },
   chevron: {
     fontSize: 24,
-    color: '#B0B8C1',
+    color: a.grey400,
     marginLeft: 8,
   },
 });

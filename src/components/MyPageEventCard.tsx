@@ -1,7 +1,10 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
+import { useAdaptive } from '@toss/tds-react-native/private';
 import { EventImage } from './EventImage';
 import { EventCardData } from '../data/events';
+
+type Adaptive = ReturnType<typeof useAdaptive>;
 
 // ─────────────────────────────────────────────────────────
 // 타입
@@ -47,6 +50,9 @@ export function MyPageEventCard({ event, onPress, onDelete, deleteStyle = 'x' }:
   const isDeleted = event.lastKnownStatus === 'deleted';
   const isEnded = event.lastKnownStatus === 'ended';
   const isNonActive = isDeleted || isEnded;
+
+  const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   // deleted 아이템은 상세 이동 불가 (snapshot 데이터만 있음)
   const handlePress = () => {
@@ -158,9 +164,9 @@ export function MyPageEventCard({ event, onPress, onDelete, deleteStyle = 'x' }:
 // 스타일
 // ─────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+const createStyles = (a: Adaptive) => StyleSheet.create({
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: a.background,
     borderRadius: 12,
     marginBottom: 16,
     overflow: 'hidden',
@@ -237,21 +243,21 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 17,
     fontWeight: '700',
-    color: '#191F28',
+    color: a.grey900,
     marginBottom: 6,
     lineHeight: 24,
   },
   cardMeta: {
     fontSize: 14,
-    color: '#6B7684',
+    color: a.grey600,
     marginBottom: 4,
   },
   cardPeriod: {
     fontSize: 13,
-    color: '#8B95A1',
+    color: a.grey500,
   },
   dimText: {
-    color: '#B0B8C1',
+    color: a.grey400,
   },
   cardFooter: {
     flexDirection: 'row',
@@ -262,13 +268,13 @@ const styles = StyleSheet.create({
   priceText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#4E5968',
+    color: a.grey700,
   },
   freePriceText: {
-    color: '#0064FF',
+    color: a.blue500,
   },
   relativeTime: {
     fontSize: 12,
-    color: '#B0B8C1',
+    color: a.grey400,
   },
 });

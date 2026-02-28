@@ -5,11 +5,13 @@ import {
   FlatList,
   Pressable,
   StyleSheet,
-  ActivityIndicator,
 } from 'react-native';
-import { Txt } from '@toss/tds-react-native';
+import { Txt, Loader, Icon } from '@toss/tds-react-native';
+import { useAdaptive } from '@toss/tds-react-native/private';
 import { EventCardData } from '../data/events';
 import { EventImage } from './EventImage';
+
+type Adaptive = ReturnType<typeof useAdaptive>;
 
 // ─────────────────────────────────────────────────
 // 카테고리별 컬러
@@ -29,10 +31,12 @@ function HighlightText({
   text,
   query,
   baseStyle,
+  highlightStyle,
 }: {
   text: string;
   query: string;
   baseStyle?: object;
+  highlightStyle?: object;
 }) {
   if (!query.trim()) {
     return <Text style={baseStyle}>{text}</Text>;
@@ -46,7 +50,7 @@ function HighlightText({
     <Text style={baseStyle}>
       {parts.map((part, i) =>
         i % 2 === 1 ? (
-          <Text key={i} style={styles.highlightText}>{part}</Text>
+          <Text key={i} style={highlightStyle}>{part}</Text>
         ) : (
           <Text key={i}>{part}</Text>
         )
@@ -62,6 +66,7 @@ interface SearchResultsProps {
   query: string;
   results: EventCardData[];
   totalCount: number;
+  searchMode?: 'text' | 'vector' | null;
   loading: boolean;
   loadingMore: boolean;
   hasMore: boolean;
@@ -77,195 +82,7 @@ interface SearchResultsProps {
   onPopularKeywordPress: (keyword: string) => void;
 }
 
-export default function SearchResults({
-  query,
-  results,
-  totalCount,
-  loading,
-  loadingMore,
-  hasMore,
-  activeCategory,
-  activeRegion,
-  activeQuickFilter,
-  sortLabel,
-  onEventPress,
-  onLoadMore,
-  onResetFilters,
-  onSortPress,
-  popularKeywords,
-  onPopularKeywordPress,
-}: SearchResultsProps) {
-  // 필터 컨텍스트 레이블 ("팝업 · 서울 내 검색결과")
-  const filterContextParts: string[] = [];
-  if (activeCategory) filterContextParts.push(activeCategory);
-  if (activeRegion) filterContextParts.push(activeRegion);
-  if (activeQuickFilter) filterContextParts.push(activeQuickFilter);
-  const filterContext = filterContextParts.length > 0
-    ? `${filterContextParts.join(' · ')} 내 검색결과`
-    : null;
-  // ── 초기 로딩 ────────────────────────────────────
-  if (loading) {
-    return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#3182F6" />
-      </View>
-    );
-  }
-
-  // ── 결과 없음 ────────────────────────────────────
-  if (results.length === 0) {
-    const hasFilter = activeCategory || activeRegion;
-    const filterDesc = [activeCategory, activeRegion].filter(Boolean).join(' · ');
-
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyIcon}>🔍</Text>
-
-        {hasFilter ? (
-          <>
-            <Txt typography="body1" style={styles.emptyTitle}>
-              '{filterDesc}' 범위에서
-            </Txt>
-            <Txt typography="body1" style={styles.emptyTitle}>
-              '{query}'에 대한 결과가 없어요
-            </Txt>
-            <Pressable style={styles.resetButton} onPress={onResetFilters}>
-              <Txt typography="label2" style={styles.resetButtonText}>
-                필터 초기화하고 전체 검색하기
-              </Txt>
-            </Pressable>
-          </>
-        ) : (
-          <>
-            <Txt typography="body1" style={styles.emptyTitle}>
-              '{query}'에 대한 결과가 없어요
-            </Txt>
-            <Txt typography="body3" style={styles.emptyHint}>
-              다른 키워드로 검색해보세요
-            </Txt>
-          </>
-        )}
-
-        {/* 인기 검색어 제안 */}
-        <View style={styles.emptyPopular}>
-          <Txt typography="label2" style={styles.emptyPopularTitle}>인기 검색어</Txt>
-          <View style={styles.emptyPopularChips}>
-            {popularKeywords.slice(0, 6).map((keyword, i) => (
-              <Pressable
-                key={i}
-                style={styles.emptyPopularChip}
-                onPress={() => onPopularKeywordPress(keyword)}
-              >
-                <Txt typography="label3" style={styles.emptyPopularChipText}>{keyword}</Txt>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-      </View>
-    );
-  }
-
-  // ── 결과 있음 ────────────────────────────────────
-  return (
-    <FlatList
-      data={results}
-      keyExtractor={(item) => item.id}
-      keyboardDismissMode="on-drag"
-      keyboardShouldPersistTaps="handled"
-      ListHeaderComponent={() => (
-        <View style={styles.resultHeader}>
-          <View style={styles.resultCountGroup}>
-            <Txt typography="label2" style={styles.resultCount}>
-              총 {totalCount.toLocaleString()}개
-            </Txt>
-            {filterContext && (
-              <Txt typography="label3" style={styles.filterContext}>
-                {filterContext}
-              </Txt>
-            )}
-          </View>
-          <Pressable style={styles.sortButton} onPress={onSortPress}>
-            <Txt typography="label3" style={styles.sortButtonText}>{sortLabel} ▾</Txt>
-          </Pressable>
-        </View>
-      )}
-      renderItem={({ item }) => {
-        const catColor = CATEGORY_COLORS[item.mainCategory ?? item.category] ?? { bg: '#F2F4F6', text: '#4E5968' };
-
-        return (
-          <Pressable style={styles.eventItem} onPress={() => onEventPress(item.id)}>
-            {/* 썸네일 — 3:4 세로형 */}
-            <View style={styles.thumbWrapper}>
-              <EventImage
-                uri={item.thumbnailUrl}
-                width={80}
-                height={107}
-                borderRadius={10}
-                category={item.category}
-              />
-            </View>
-
-            {/* 정보 영역 */}
-            <View style={styles.eventInfo}>
-              {/* 카테고리 배지 */}
-              <View style={[styles.categoryBadge, { backgroundColor: catColor.bg }]}>
-                <Text style={[styles.categoryText, { color: catColor.text }]}>
-                  {item.mainCategory ?? item.category}
-                </Text>
-              </View>
-
-              {/* 제목 — 검색어 하이라이팅 */}
-              <HighlightText
-                text={item.title}
-                query={query}
-                baseStyle={styles.title}
-              />
-
-              {/* 장소 */}
-              <Txt typography="label3" style={styles.metaText} numberOfLines={1}>
-                📍 {item.venue || item.region}
-              </Txt>
-
-              {/* 기간 */}
-              <Txt typography="label3" style={styles.metaPeriod}>
-                📅 {item.periodText}
-              </Txt>
-
-              {/* 무료/마감임박 태그 */}
-              {(item.isFree || item.isEndingSoon) && (
-                <View style={styles.tagRow}>
-                  {item.isFree && (
-                    <View style={styles.freeTag}>
-                      <Text style={styles.freeTagText}>💰 무료</Text>
-                    </View>
-                  )}
-                  {item.isEndingSoon && (
-                    <View style={styles.endingTag}>
-                      <Text style={styles.endingTagText}>⏰ 마감임박</Text>
-                    </View>
-                  )}
-                </View>
-              )}
-            </View>
-          </Pressable>
-        );
-      }}
-      onEndReached={onLoadMore}
-      onEndReachedThreshold={0.4}
-      ListFooterComponent={
-        loadingMore ? (
-          <ActivityIndicator size="small" color="#3182F6" style={styles.footerLoader} />
-        ) : !hasMore && results.length > 0 ? (
-          <Txt typography="label3" style={styles.endText}>모든 결과를 불러왔어요</Txt>
-        ) : null
-      }
-      contentContainerStyle={styles.listContent}
-      showsVerticalScrollIndicator={false}
-    />
-  );
-}
-
-const styles = StyleSheet.create({
+const createStyles = (a: Adaptive) => StyleSheet.create({
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -279,36 +96,37 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingHorizontal: 24,
   },
-  emptyIcon: {
-    fontSize: 40,
-    marginBottom: 16,
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 3,
   },
   emptyTitle: {
-    color: '#333D4B',
+    color: a.grey800,
     textAlign: 'center',
     lineHeight: 26,
   },
   emptyHint: {
     marginTop: 8,
-    color: '#8B95A1',
+    color: a.grey500,
     textAlign: 'center',
   },
   resetButton: {
     marginTop: 20,
     paddingHorizontal: 20,
     paddingVertical: 12,
-    backgroundColor: '#191F28',
+    backgroundColor: a.grey900,
     borderRadius: 10,
   },
   resetButtonText: {
-    color: '#FFFFFF',
+    color: a.background,
   },
   emptyPopular: {
     marginTop: 40,
     alignSelf: 'stretch',
   },
   emptyPopularTitle: {
-    color: '#8B95A1',
+    color: a.grey500,
     marginBottom: 12,
   },
   emptyPopularChips: {
@@ -319,11 +137,11 @@ const styles = StyleSheet.create({
   emptyPopularChip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
-    backgroundColor: '#F5F6F7',
+    backgroundColor: a.grey100,
     borderRadius: 20,
   },
   emptyPopularChipText: {
-    color: '#4E5968',
+    color: a.grey700,
   },
 
   // ── 결과 헤더 (카운트 + 정렬) ─────────────────────
@@ -343,19 +161,26 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   resultCount: {
-    color: '#333D4B',
+    color: a.grey800,
   },
   filterContext: {
-    color: '#8B95A1',
+    color: a.grey500,
+  },
+  vectorBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: a.blue50,
+    borderRadius: 4,
+    color: a.blue500,
   },
   sortButton: {
     paddingHorizontal: 10,
     paddingVertical: 5,
-    backgroundColor: '#F5F6F7',
+    backgroundColor: a.grey100,
     borderRadius: 8,
   },
   sortButtonText: {
-    color: '#4E5968',
+    color: a.grey700,
   },
   listContent: {
     paddingHorizontal: 16,
@@ -365,7 +190,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#F2F4F6',
+    borderBottomColor: a.grey100,
     alignItems: 'flex-start',
   },
   thumbWrapper: {
@@ -390,20 +215,20 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#191F28',
+    color: a.grey900,
     lineHeight: 20,
     marginBottom: 6,
   },
   highlightText: {
     fontWeight: '800',
-    color: '#3182F6',
+    color: a.blue500,
   },
   metaText: {
-    color: '#6B7684',
+    color: a.grey600,
     marginBottom: 3,
   },
   metaPeriod: {
-    color: '#8B95A1',
+    color: a.grey500,
   },
   tagRow: {
     flexDirection: 'row',
@@ -439,7 +264,214 @@ const styles = StyleSheet.create({
   },
   endText: {
     textAlign: 'center',
-    color: '#B0B8C1',
+    color: a.grey400,
     paddingVertical: 20,
   },
 });
+
+export default function SearchResults({
+  query,
+  results,
+  totalCount,
+  searchMode,
+  loading,
+  loadingMore,
+  hasMore,
+  activeCategory,
+  activeRegion,
+  activeQuickFilter,
+  sortLabel,
+  onEventPress,
+  onLoadMore,
+  onResetFilters,
+  onSortPress,
+  popularKeywords,
+  onPopularKeywordPress,
+}: SearchResultsProps) {
+  const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
+
+  const isVectorSearch = searchMode === 'vector';
+  // 필터 컨텍스트 레이블 ("팝업 · 서울 내 검색결과")
+  const filterContextParts: string[] = [];
+  if (activeCategory) filterContextParts.push(activeCategory);
+  if (activeRegion) filterContextParts.push(activeRegion);
+  if (activeQuickFilter) filterContextParts.push(activeQuickFilter);
+  const filterContext = filterContextParts.length > 0
+    ? `${filterContextParts.join(' · ')} 내 검색결과`
+    : null;
+  // ── 초기 로딩 ────────────────────────────────────
+  if (loading) {
+    return (
+      <View style={styles.centerContainer}>
+        <Loader size="large" type="primary" />
+      </View>
+    );
+  }
+
+  // ── 결과 없음 ────────────────────────────────────
+  if (results.length === 0) {
+    const hasFilter = activeCategory || activeRegion;
+    const filterDesc = [activeCategory, activeRegion].filter(Boolean).join(' · ');
+
+    return (
+      <View style={styles.emptyContainer}>
+        <Icon name="icon-search-bold-mono" size={40} color={adaptive.grey400} style={{ marginBottom: 16 }} />
+
+        {hasFilter ? (
+          <>
+            <Txt typography="t5" style={styles.emptyTitle}>
+              '{filterDesc}' 범위에서
+            </Txt>
+            <Txt typography="t5" style={styles.emptyTitle}>
+              '{query}'에 대한 결과가 없어요
+            </Txt>
+            <Pressable style={styles.resetButton} onPress={onResetFilters}>
+              <Txt typography="t6" style={styles.resetButtonText}>
+                필터 초기화하고 전체 검색하기
+              </Txt>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Txt typography="t5" style={styles.emptyTitle}>
+              '{query}'에 대한 결과가 없어요
+            </Txt>
+            <Txt typography="t6" style={styles.emptyHint}>
+              다른 키워드로 검색해보세요
+            </Txt>
+          </>
+        )}
+
+        {/* 인기 검색어 제안 */}
+        <View style={styles.emptyPopular}>
+          <Txt typography="t6" style={styles.emptyPopularTitle}>인기 검색어</Txt>
+          <View style={styles.emptyPopularChips}>
+            {popularKeywords.slice(0, 6).map((keyword, i) => (
+              <Pressable
+                key={i}
+                style={styles.emptyPopularChip}
+                onPress={() => onPopularKeywordPress(keyword)}
+              >
+                <Txt typography="t7" style={styles.emptyPopularChipText}>{keyword}</Txt>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  // ── 결과 있음 ────────────────────────────────────
+  return (
+    <FlatList
+      data={results}
+      keyExtractor={(item) => item.id}
+      keyboardDismissMode="on-drag"
+      keyboardShouldPersistTaps="handled"
+      ListHeaderComponent={() => (
+        <View style={styles.resultHeader}>
+          <View style={styles.resultCountGroup}>
+            <Txt typography="t6" style={styles.resultCount}>
+              {isVectorSearch
+                ? `연관 추천 ${totalCount.toLocaleString()}개`
+                : `총 ${totalCount.toLocaleString()}개`}
+            </Txt>
+            {isVectorSearch && (
+              <Txt typography="t7" style={styles.vectorBadge}>
+                AI 추천
+              </Txt>
+            )}
+            {filterContext && (
+              <Txt typography="t7" style={styles.filterContext}>
+                {filterContext}
+              </Txt>
+            )}
+          </View>
+          <Pressable style={styles.sortButton} onPress={onSortPress}>
+            <Txt typography="t7" style={styles.sortButtonText}>{sortLabel} ▾</Txt>
+          </Pressable>
+        </View>
+      )}
+      renderItem={({ item }) => {
+        const catColor = CATEGORY_COLORS[item.mainCategory ?? item.category] ?? { bg: '#F2F4F6', text: '#4E5968' };
+
+        return (
+          <Pressable style={styles.eventItem} onPress={() => onEventPress(item.id)}>
+            {/* 썸네일 — 3:4 세로형 */}
+            <View style={styles.thumbWrapper}>
+              <EventImage
+                uri={item.thumbnailUrl}
+                width={80}
+                height={107}
+                borderRadius={10}
+                category={item.category}
+              />
+            </View>
+
+            {/* 정보 영역 */}
+            <View style={styles.eventInfo}>
+              {/* 카테고리 배지 */}
+              <View style={[styles.categoryBadge, { backgroundColor: catColor.bg }]}>
+                <Text style={[styles.categoryText, { color: catColor.text }]}>
+                  {item.mainCategory ?? item.category}
+                </Text>
+              </View>
+
+              {/* 제목 — 검색어 하이라이팅 */}
+              <HighlightText
+                text={item.title}
+                query={query}
+                baseStyle={styles.title}
+                highlightStyle={styles.highlightText}
+              />
+
+              {/* 장소 */}
+              <View style={styles.metaRow}>
+                <Icon name="icon-pin-mono" size={11} color={adaptive.grey600} style={{ marginRight: 3 }} />
+                <Txt typography="t7" style={[styles.metaText, { flex: 1 }]} numberOfLines={1}>
+                  {item.venue || item.region}
+                </Txt>
+              </View>
+
+              {/* 기간 */}
+              <View style={styles.metaRow}>
+                <Icon name="icon-calendar-check-mono" size={11} color={adaptive.grey500} style={{ marginRight: 3 }} />
+                <Txt typography="t7" style={styles.metaPeriod}>
+                  {item.periodText}
+                </Txt>
+              </View>
+
+              {/* 무료/마감임박 태그 */}
+              {(item.isFree || item.isEndingSoon) && (
+                <View style={styles.tagRow}>
+                  {item.isFree && (
+                    <View style={styles.freeTag}>
+                      <Text style={styles.freeTagText}>무료</Text>
+                    </View>
+                  )}
+                  {item.isEndingSoon && (
+                    <View style={styles.endingTag}>
+                      <Text style={styles.endingTagText}>마감임박</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
+          </Pressable>
+        );
+      }}
+      onEndReached={onLoadMore}
+      onEndReachedThreshold={0.1}
+      ListFooterComponent={
+        loadingMore ? (
+          <Loader size="small" type="primary" style={styles.footerLoader} />
+        ) : !hasMore && results.length > 0 ? (
+          <Txt typography="t7" style={styles.endText}>모든 결과를 불러왔어요</Txt>
+        ) : null
+      }
+      contentContainerStyle={styles.listContent}
+      showsVerticalScrollIndicator={false}
+    />
+  );
+}

@@ -1,9 +1,12 @@
 import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { useAdaptive } from '@toss/tds-react-native/private';
 import { EventCardData } from '../data/events';
 import { EventBadge } from './EventBadge';
 import { formatEventPeriodShort } from '../lib/dateUtils';
 import { getImageSource } from '../utils/imageHelpers';
+
+type Adaptive = ReturnType<typeof useAdaptive>;
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -14,6 +17,9 @@ interface RankingCardProps {
 }
 
 export const RankingCard: React.FC<RankingCardProps> = ({ event, rank, onPress }) => {
+  const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
+
   // 모든 카드 동일한 크기
   const cardWidth = SCREEN_WIDTH * 0.85;
   const cardHeight = 280;
@@ -39,20 +45,20 @@ export const RankingCard: React.FC<RankingCardProps> = ({ event, rank, onPress }
         style={styles.image}
         resizeMode="cover"
       />
-      
+
       {/* 어두운 그라데이션 오버레이 */}
       <View style={styles.overlay} />
-      
+
       {/* 좌측 상단 HOT 배지 */}
       <EventBadge type="hot" />
-      
+
       {/* 하단 정보 영역 */}
       <View style={styles.infoContainer}>
         {/* 왼쪽: 순위 숫자 */}
         <View style={styles.rankBadge}>
           <Text style={styles.rankText}>{rank}</Text>
         </View>
-        
+
         {/* 오른쪽: 이벤트 정보 */}
         <View style={styles.eventInfo}>
           <Text style={styles.title} numberOfLines={2}>
@@ -70,7 +76,7 @@ export const RankingCard: React.FC<RankingCardProps> = ({ event, rank, onPress }
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (a: Adaptive) => StyleSheet.create({
   card: {
     borderRadius: 16,
     overflow: 'hidden',
@@ -129,7 +135,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 13,
-    color: '#E5E8EB',
+    color: a.grey200,
     marginBottom: 2,
   },
   date: {

@@ -1,6 +1,8 @@
 import { createRoute } from '@granite-js/react-native';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { ScrollView, StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, RefreshControl, Animated } from 'react-native';
+import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl, Animated } from 'react-native';
+import { Loader, Icon } from '@toss/tds-react-native';
+import { useAdaptive } from '@toss/tds-react-native/private';
 import {
   getLikesV2,
   subscribeStorageChange,
@@ -19,6 +21,218 @@ export const Route = createRoute('/mypage/likes', {
   component: LikesPage,
 });
 
+type Adaptive = ReturnType<typeof useAdaptive>;
+
+function createStyles(a: Adaptive) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: a.grey100,
+    },
+    header: {
+      backgroundColor: a.background,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      paddingTop: 50,
+      borderBottomWidth: 1,
+      borderBottomColor: a.grey200,
+    },
+    backButton: {
+      width: 40,
+      height: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    backIcon: {
+      fontSize: 32,
+      color: a.grey900,
+      fontWeight: '300',
+    },
+    headerTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: a.grey900,
+    },
+    headerRight: {
+      width: 40,
+    },
+    scrollView: {
+      flex: 1,
+    },
+    scrollContent: {
+      paddingVertical: 20,
+    },
+    loadingContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 80,
+    },
+    loadingText: {
+      marginTop: 16,
+      fontSize: 14,
+      color: a.grey500,
+    },
+    emptyContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 80,
+      paddingHorizontal: 40,
+    },
+    emptyText: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: a.grey900,
+      marginBottom: 8,
+      textAlign: 'center',
+    },
+    emptySubText: {
+      fontSize: 14,
+      color: a.grey500,
+      textAlign: 'center',
+      marginBottom: 24,
+    },
+    emptyCta: {
+      backgroundColor: a.blue500,
+      paddingVertical: 13,
+      paddingHorizontal: 28,
+      borderRadius: 10,
+    },
+    emptyCtaText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: '#FFFFFF',
+    },
+    cardList: {
+      paddingHorizontal: 20,
+    },
+    endedNotice: {
+      backgroundColor: '#FFF9E6',
+      marginHorizontal: 20,
+      marginBottom: 16,
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: '#FFE8A3',
+    },
+    endedNoticeContent: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginBottom: 12,
+    },
+    endedNoticeTextContainer: {
+      flex: 1,
+    },
+    endedNoticeText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: a.grey900,
+      marginBottom: 4,
+    },
+    endedNoticeSubText: {
+      fontSize: 13,
+      color: a.grey600,
+    },
+    clearButton: {
+      backgroundColor: a.blue500,
+      paddingVertical: 12,
+      paddingHorizontal: 24,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    clearButtonText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: '#FFFFFF',
+    },
+    cleanupBar: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingVertical: 12,
+      marginBottom: 8,
+    },
+    cleanupText: {
+      fontSize: 14,
+      color: a.grey600,
+    },
+    cleanupButton: {
+      paddingVertical: 6,
+      paddingHorizontal: 16,
+      borderRadius: 6,
+      backgroundColor: a.grey100,
+    },
+    cleanupButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: a.blue500,
+    },
+    cleanupButtonDisabled: {
+      opacity: 0.5,
+    },
+    clearButtonDisabled: {
+      opacity: 0.6,
+    },
+    errorContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 80,
+      paddingHorizontal: 40,
+    },
+    errorText: {
+      fontSize: 16,
+      color: a.grey600,
+      textAlign: 'center',
+      marginBottom: 16,
+    },
+    retryButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 24,
+      backgroundColor: a.blue500,
+      borderRadius: 8,
+    },
+    retryText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#FFFFFF',
+    },
+    undoToast: {
+      position: 'absolute',
+      bottom: 24,
+      left: 20,
+      right: 20,
+      backgroundColor: a.grey900,
+      borderRadius: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 18,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.2,
+      shadowRadius: 12,
+      elevation: 8,
+    },
+    undoToastText: {
+      fontSize: 14,
+      color: '#FFFFFF',
+      fontWeight: '500',
+    },
+    undoToastAction: {
+      fontSize: 14,
+      color: a.blue300,
+      fontWeight: '700',
+    },
+  });
+}
+
 function LikesPage() {
   const navigation = Route.useNavigation();
   const { isLoggedIn } = useAuth();
@@ -33,6 +247,9 @@ function LikesPage() {
   const skipNextStorageReload = useRef(false);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastOpacity = useRef(new Animated.Value(0));
+
+  const adaptive = useAdaptive();
+  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   const loadLikes = useCallback(async () => {
     setLoading(true);
@@ -309,12 +526,12 @@ function LikesPage() {
       >
         {loading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#0064FF" />
+            <Loader size="large" type="primary" />
             <Text style={styles.loadingText}>불러오는 중...</Text>
           </View>
         ) : hasError ? (
           <View style={styles.errorContainer}>
-            <Text style={styles.errorIcon}>⚠️</Text>
+            <Icon name="icon-warning-mono" size={48} color={adaptive.grey300} style={{ marginBottom: 16 }} />
             <Text style={styles.errorText}>불러오기에 실패했어요.</Text>
             <TouchableOpacity onPress={loadLikes} style={styles.retryButton} activeOpacity={0.7}>
               <Text style={styles.retryText}>다시 시도</Text>
@@ -322,8 +539,8 @@ function LikesPage() {
           </View>
         ) : events.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>❤️</Text>
-            <Text style={styles.emptyText}>아직 찜한 행사가 없어요.</Text>
+            <Icon name="icon-heart-mono" size={64} color={adaptive.grey300} style={{ marginBottom: 20 }} />
+            <Text style={styles.emptyText}>아직 찜한 이벤트가 없어요.</Text>
             <Text style={styles.emptySubText}>마음에 드는 축제를 찜해보세요!</Text>
             <TouchableOpacity
               style={styles.emptyCta}
@@ -339,10 +556,10 @@ function LikesPage() {
             {activeCount === 0 && endedCount > 0 && (
               <View style={styles.endedNotice}>
                 <View style={styles.endedNoticeContent}>
-                  <Text style={styles.endedNoticeIcon}>📭</Text>
+                  <Icon name="icon-bookmark-mono" size={24} color={adaptive.grey600} style={{ marginRight: 12 }} />
                   <View style={styles.endedNoticeTextContainer}>
                     <Text style={styles.endedNoticeText}>
-                      찜한 목록 중 종료된 이벤트만 있습니다.
+                      찜한 목록 중 종료된 이벤트만 있어요.
                     </Text>
                     <Text style={styles.endedNoticeSubText}>
                       종료된 이벤트 {endedCount}개
@@ -402,223 +619,3 @@ function LikesPage() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F2F4F6',
-  },
-  header: {
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    paddingTop: 50,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E8EB',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backIcon: {
-    fontSize: 32,
-    color: '#191F28',
-    fontWeight: '300',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#191F28',
-  },
-  headerRight: {
-    width: 40,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingVertical: 20,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 80,
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 14,
-    color: '#8B95A1',
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 80,
-    paddingHorizontal: 40,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 20,
-  },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#191F28',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  emptySubText: {
-    fontSize: 14,
-    color: '#8B95A1',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  emptyCta: {
-    backgroundColor: '#0064FF',
-    paddingVertical: 13,
-    paddingHorizontal: 28,
-    borderRadius: 10,
-  },
-  emptyCtaText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  cardList: {
-    paddingHorizontal: 20,
-  },
-  endedNotice: {
-    backgroundColor: '#FFF9E6',
-    marginHorizontal: 20,
-    marginBottom: 16,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#FFE8A3',
-  },
-  endedNoticeContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  endedNoticeIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  endedNoticeTextContainer: {
-    flex: 1,
-  },
-  endedNoticeText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#191F28',
-    marginBottom: 4,
-  },
-  endedNoticeSubText: {
-    fontSize: 13,
-    color: '#6B7684',
-  },
-  clearButton: {
-    backgroundColor: '#0064FF',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  clearButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  cleanupBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    marginBottom: 8,
-  },
-  cleanupText: {
-    fontSize: 14,
-    color: '#6B7684',
-  },
-  cleanupButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-    borderRadius: 6,
-    backgroundColor: '#F2F4F6',
-  },
-  cleanupButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#0064FF',
-  },
-  cleanupButtonDisabled: {
-    opacity: 0.5,
-  },
-  clearButtonDisabled: {
-    opacity: 0.6,
-  },
-  errorContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 80,
-    paddingHorizontal: 40,
-  },
-  errorIcon: {
-    fontSize: 48,
-    marginBottom: 16,
-  },
-  errorText: {
-    fontSize: 16,
-    color: '#6B7684',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  retryButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    backgroundColor: '#0064FF',
-    borderRadius: 8,
-  },
-  retryText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  undoToast: {
-    position: 'absolute',
-    bottom: 24,
-    left: 20,
-    right: 20,
-    backgroundColor: '#191F28',
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  undoToastText: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-  undoToastAction: {
-    fontSize: 14,
-    color: '#4DA3FF',
-    fontWeight: '700',
-  },
-});
