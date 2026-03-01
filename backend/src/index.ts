@@ -17,7 +17,7 @@ import {
 } from './utils/instrumentApi';
 import { uploadEventImage, deleteEventImage, ImageUploadError, validateS3Config } from './lib/imageUpload';
 import { searchEventInfo, mergeSearchResults, extractTicketLinks, searchEventInfoEnhanced } from './lib/naverApi';
-import { extractEventInfoEnhanced, AIExtractedInfo } from './lib/aiExtractor';
+import { extractEventInfoEnhanced, AIExtractedInfo, parseCaptionText } from './lib/aiExtractor';
 import { enrichSingleEvent } from './jobs/enrichInternalFields';
 import { 
   filterSearchResults, 
@@ -822,7 +822,6 @@ app.post('/api/user-events', async (req, res) => {
       });
     }
     
-    // 유효한 actionType 검증
     const validActions = ['view', 'save', 'unsave', 'share', 'click'];
     if (!validActions.includes(actionType)) {
       return res.status(400).json({
@@ -831,11 +830,84 @@ app.post('/api/user-events', async (req, res) => {
       });
     }
     
+    // 1. user_events 기록 (기존)
     await pool.query(
       `INSERT INTO user_events (user_id, event_id, action_type, metadata)
        VALUES ($1, $2, $3, $4)`,
       [userId, eventId, actionType, JSON.stringify(metadata || {})]
     );
+
+    // 2. event_views / event_actions 동시 기록 (buzz_score 계산에 활용)
+    if (actionType === 'view') {
+      await pool.query(
+        `INSERT INTO event_views (event_id, user_id, viewed_at)
+         VALUES ($1, $2, NOW())`,
+        [eventId, userId]
+      );
+    } else if (actionType === 'save') {
+      await pool.query(
+        `INSERT INTO event_actions (id, event_id, user_id, session_id, action_type, created_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, 'like', NOW())`,
+        [eventId, userId, userId]
+      );
+    } else if (actionType === 'share') {
+      await pool.query(
+        `INSERT INTO event_actions (id, event_id, user_id, session_id, action_type, created_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, 'share', NOW())`,
+        [eventId, userId, userId]
+      );
+    } else if (actionType === 'click') {
+      await pool.query(
+        `INSERT INTO event_actions (id, event_id, user_id, session_id, action_type, created_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, 'ticket_click', NOW())`,
+        [eventId, userId, userId]
+      );
+    }
+
+    // 3. user_preferences 카테고리 점수 자동 업데이트 (개인화 추천용)
+    //    view: +5점 / save: +20점 / unsave: -10점 (최소 0, 최대 100)
+    const scoreDelta =
+      actionType === 'save'   ?  20 :
+      actionType === 'view'   ?   5 :
+      actionType === 'unsave' ? -10 : 0;
+
+    if (scoreDelta !== 0) {
+      // users 테이블에 존재하는 사용자만 업데이트 (익명 사용자 FK 에러 방지)
+      const userExists = await pool.query(
+        `SELECT 1 FROM users WHERE id = $1`,
+        [userId]
+      );
+      if (userExists.rows.length > 0) {
+        const eventRow = await pool.query(
+          `SELECT main_category FROM canonical_events WHERE id = $1`,
+          [eventId]
+        );
+        const category: string | undefined = eventRow.rows[0]?.main_category;
+
+        if (category) {
+          await pool.query(
+            `INSERT INTO user_preferences (user_id, category_scores, preferred_tags, last_updated)
+             VALUES ($1, $2::jsonb, ARRAY[]::text[], NOW())
+             ON CONFLICT (user_id) DO UPDATE
+               SET category_scores = (
+                 SELECT jsonb_object_agg(
+                   key,
+                   GREATEST(0, LEAST(100,
+                     COALESCE((user_preferences.category_scores->>key)::int, 0)
+                     + CASE WHEN key = $3 THEN $4 ELSE 0 END
+                   ))
+                 )
+                 FROM jsonb_object_keys(
+                   COALESCE(user_preferences.category_scores, '{}'::jsonb)
+                   || jsonb_build_object($3, 0)
+                 ) AS key
+               ),
+               last_updated = NOW()`,
+            [userId, JSON.stringify({ [category]: Math.max(0, scoreDelta) }), category, scoreDelta]
+          );
+        }
+      }
+    }
     
     res.json({
       success: true,
@@ -847,6 +919,32 @@ app.post('/api/user-events', async (req, res) => {
       success: false,
       error: error.message,
     });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 검색 쿼리 로그
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.post('/api/search-logs', async (req, res) => {
+  try {
+    const { userId, query, resultCount, searchMode, metadata } = req.body;
+
+    if (!userId || !query?.trim()) {
+      return res.status(400).json({ success: false, error: 'userId와 query가 필요합니다.' });
+    }
+
+    await pool.query(
+      `INSERT INTO search_logs (user_id, query, result_count, search_mode, metadata)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [userId, query.trim(), resultCount ?? null, searchMode ?? null, JSON.stringify(metadata || {})]
+    );
+
+    res.json({ success: true });
+  } catch (error: any) {
+    // 로그 실패가 UX에 영향 주지 않도록 조용히 처리
+    console.error('[SearchLog] Error:', error.message);
+    res.json({ success: false });
   }
 });
 
@@ -3028,7 +3126,9 @@ app.get('/events', async (req, res) => {
         display_title ILIKE $${params.length} OR
         title ILIKE $${params.length} OR
         venue ILIKE $${params.length} OR
-        address ILIKE $${params.length}
+        address ILIKE $${params.length} OR
+        overview ILIKE $${params.length} OR
+        derived_tags::text ILIKE $${params.length}
       )`);
     }
 
@@ -3068,188 +3168,244 @@ app.get('/events', async (req, res) => {
     const sortField = validSortFields.includes(sortBy) ? sortBy : 'start_at';
     const sortOrder = order.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
-    params.push(size);
-    const limitIndex = params.length;
-    params.push((page - 1) * size);
-    const offsetIndex = params.length;
-
-    const listQuery = `
-      WITH ranked AS (
-        SELECT
-          id,
-          title,
-          display_title AS "displayTitle",
-          content_key AS "contentKey",
-          COALESCE(venue, '') AS venue,
-          start_at AS "startAt",
-          end_at AS "endAt",
-          region,
-          main_category AS "mainCategory",
-          sub_category AS "subCategory",
-          COALESCE(image_url, '${PLACEHOLDER_IMAGE}') AS "imageUrl",
-          source_priority_winner AS "sourcePriorityWinner",
-          address,
-          lat,
-          lng,
-          start_at,
-          created_at,
-          updated_at,
-          end_at,
-          COALESCE(buzz_score, 0) AS buzz_score,
-          COALESCE(popularity_score, 0) AS popularity_score,
-          COALESCE(is_ending_soon, false) AS is_ending_soon,
-          COALESCE(is_free, false) AS is_free,
-          CASE
-            WHEN image_url IS NOT NULL
-              AND image_url != ''
-              AND image_url NOT LIKE '%placeholder%'
-            THEN 1
-            ELSE 0
-          END AS has_real_image,
-          ROW_NUMBER() OVER (
-            PARTITION BY COALESCE(content_key, canonical_key, id::text)
-            ORDER BY
-              CASE
-                WHEN image_url IS NOT NULL
-                  AND image_url != ''
-                  AND image_url NOT LIKE '%placeholder%'
-                THEN 1
-                ELSE 0
-              END DESC,
-              updated_at DESC
-          ) AS rn
-        FROM canonical_events
-        ${where}
-      )
-      SELECT
-        id,
-        title,
-        "displayTitle",
-        "contentKey",
-        venue,
-        "startAt",
-        "endAt",
-        region,
-        "mainCategory",
-        "subCategory",
-        "imageUrl",
-        "sourcePriorityWinner",
-        address,
-        lat,
-        lng,
-        buzz_score AS "buzzScore",
-        created_at AS "createdAt",
-        popularity_score AS "popularityScore",
-        is_ending_soon AS "isEndingSoon",
-        is_free AS "isFree"
-      FROM ranked
-      WHERE rn = 1
-      ORDER BY ${sortField} ${sortOrder}, id ASC
-      LIMIT $${limitIndex} OFFSET $${offsetIndex};
-    `;
-
-    const countQuery = `
-      SELECT COUNT(*)::int AS total
-      FROM (
-        SELECT DISTINCT COALESCE(content_key, canonical_key, id::text) AS dedupe_key
-        FROM canonical_events
-        ${where}
-      ) AS deduped;
-    `;
-
-    const [itemsResult, countResult] = await Promise.all([
-      pool.query(listQuery, params),
-      pool.query(countQuery, params.slice(0, params.length - 2)),
-    ]);
-
-    const totalCount = countResult.rows[0]?.total ?? 0;
-
-    // ── 벡터 검색 폴백 ──────────────────────────────────────────────────────
-    // 텍스트 검색 결과가 부족할 때(< 5) Gemini 임베딩 기반 의미 검색으로 보완
-    const VECTOR_FALLBACK_THRESHOLD = 5;
-    let finalItems = itemsResult.rows;
-    let finalTotal = totalCount;
+    let finalItems: Record<string, unknown>[] = [];
+    let finalTotal = 0;
     let searchMode: 'text' | 'vector' = 'text';
 
-    if (effectiveQuery && totalCount < VECTOR_FALLBACK_THRESHOLD && process.env.GEMINI_API_KEY) {
+    // ══════════════════════════════════════════════════════════════════════════
+    // 하이브리드 검색: 검색어가 있고, 관련도순(기본)일 때
+    //   1) ILIKE 후보군 최대 200개 추출
+    //   2) 쿼리 임베딩으로 코사인 유사도 re-rank → 진짜 관련도순
+    //   3) 후보 0건이면 텍스트 필터 없이 순수 벡터 검색 (기존 동작 유지)
+    // ══════════════════════════════════════════════════════════════════════════
+    const isRelevanceSort = !req.query.sortBy || sortBy === 'start_at';
+    const canHybrid = !!(effectiveQuery && isRelevanceSort && process.env.GEMINI_API_KEY);
+
+    if (canHybrid) {
       try {
         const queryEmbedding = await embedQuery(effectiveQuery);
         const vectorLiteral = toVectorLiteral(queryEmbedding);
 
-        // 텍스트 필터 없이 나머지 필터만 적용
-        const vectorParams: unknown[] = [...preTextParams];
-        const vectorWhere = preTextFilters.length
-          ? `WHERE ${preTextFilters.join(' AND ')} AND embedding IS NOT NULL`
-          : 'WHERE embedding IS NOT NULL AND is_deleted = false';
+        // ── 1단계: ILIKE 후보군 → 벡터 re-rank ──────────────────────────────
+        const hybridParams: unknown[] = [...params];
+        const CANDIDATE_LIMIT = 200;
+        hybridParams.push(CANDIDATE_LIMIT);
+        const candidateLimitIdx = hybridParams.length;
+        hybridParams.push(vectorLiteral);
+        const embeddingIdx = hybridParams.length;
+        hybridParams.push(size);
+        const pageSizeIdx = hybridParams.length;
+        hybridParams.push((page - 1) * size);
+        const offsetIdx = hybridParams.length;
 
-        vectorParams.push(size); // $LIMIT
-        const vectorLimitIdx = vectorParams.length;
-        vectorParams.push(vectorLiteral); // $EMBEDDING
-        const vectorEmbeddingIdx = vectorParams.length;
-
-        const vectorQuery = `
-          WITH ranked AS (
-            SELECT
-              id,
-              title,
-              display_title AS "displayTitle",
-              content_key AS "contentKey",
-              COALESCE(venue, '') AS venue,
-              start_at AS "startAt",
-              end_at AS "endAt",
+        const hybridQuery = `
+          WITH candidates AS (
+            SELECT DISTINCT ON (COALESCE(content_key, canonical_key, id::text))
+              id, title,
+              display_title               AS "displayTitle",
+              content_key                 AS "contentKey",
+              COALESCE(venue, '')         AS venue,
+              start_at                    AS "startAt",
+              end_at                      AS "endAt",
               region,
-              main_category AS "mainCategory",
-              sub_category AS "subCategory",
+              main_category               AS "mainCategory",
+              sub_category                AS "subCategory",
               COALESCE(image_url, '${PLACEHOLDER_IMAGE}') AS "imageUrl",
-              source_priority_winner AS "sourcePriorityWinner",
-              address,
-              lat,
-              lng,
-              COALESCE(buzz_score, 0) AS buzz_score,
-              COALESCE(popularity_score, 0) AS popularity_score,
-              COALESCE(is_ending_soon, false) AS is_ending_soon,
-              COALESCE(is_free, false) AS is_free,
-              embedding <=> $${vectorEmbeddingIdx}::vector AS vector_dist,
-              ROW_NUMBER() OVER (
-                PARTITION BY COALESCE(content_key, canonical_key, id::text)
-                ORDER BY
-                  CASE
-                    WHEN image_url IS NOT NULL
-                      AND image_url != ''
-                      AND image_url NOT LIKE '%placeholder%'
-                    THEN 1 ELSE 0
-                  END DESC,
-                  updated_at DESC
-              ) AS rn
+              source_priority_winner      AS "sourcePriorityWinner",
+              address, lat, lng,
+              COALESCE(buzz_score, 0)          AS buzz_score,
+              COALESCE(popularity_score, 0)    AS popularity_score,
+              COALESCE(is_ending_soon, false)  AS is_ending_soon,
+              COALESCE(is_free, false)         AS is_free,
+              embedding
             FROM canonical_events
-            ${vectorWhere}
-            ORDER BY embedding <=> $${vectorEmbeddingIdx}::vector
-            LIMIT $${vectorLimitIdx}
+            ${where}
+              AND embedding IS NOT NULL
+            ORDER BY
+              COALESCE(content_key, canonical_key, id::text),
+              CASE WHEN image_url IS NOT NULL AND image_url != '' AND image_url NOT LIKE '%placeholder%'
+                   THEN 1 ELSE 0 END DESC,
+              updated_at DESC
+            LIMIT $${candidateLimitIdx}
+          ),
+          scored AS (
+            SELECT
+              id, title, "displayTitle", "contentKey", venue,
+              "startAt", "endAt", region, "mainCategory", "subCategory",
+              "imageUrl", "sourcePriorityWinner", address, lat, lng,
+              buzz_score       AS "buzzScore",
+              popularity_score AS "popularityScore",
+              is_ending_soon   AS "isEndingSoon",
+              is_free          AS "isFree",
+              embedding::halfvec(3072) <=> $${embeddingIdx}::halfvec(3072) AS vector_dist,
+              COUNT(*) OVER () AS total_count
+            FROM candidates
           )
           SELECT
-            id, title, "displayTitle", "contentKey", venue, "startAt", "endAt",
-            region, "mainCategory", "subCategory", "imageUrl", "sourcePriorityWinner",
-            address, lat, lng,
-            buzz_score AS "buzzScore",
-            popularity_score AS "popularityScore",
-            is_ending_soon AS "isEndingSoon",
-            is_free AS "isFree"
-          FROM ranked
-          WHERE rn = 1
-          ORDER BY vector_dist ASC;
+            id, title, "displayTitle", "contentKey", venue,
+            "startAt", "endAt", region, "mainCategory", "subCategory",
+            "imageUrl", "sourcePriorityWinner", address, lat, lng,
+            "buzzScore", "popularityScore", "isEndingSoon", "isFree",
+            total_count
+          FROM scored
+          ORDER BY vector_dist ASC, "buzzScore" DESC
+          LIMIT $${pageSizeIdx} OFFSET $${offsetIdx};
         `;
 
-        const vectorResult = await pool.query(vectorQuery, vectorParams);
-        if (vectorResult.rows.length > 0) {
-          finalItems = vectorResult.rows;
-          finalTotal = vectorResult.rows.length;
+        const hybridResult = await pool.query(hybridQuery, hybridParams);
+
+        if (hybridResult.rows.length > 0) {
+          finalTotal = Number(hybridResult.rows[0].total_count ?? hybridResult.rows.length);
+          finalItems = hybridResult.rows.map(({ total_count, ...row }) => row);
           searchMode = 'vector';
+        } else {
+          // ── 2단계: ILIKE 후보 없음 → 순수 벡터 검색 (의미 기반만 사용) ──
+          const pureWhere = preTextFilters.length
+            ? `WHERE ${preTextFilters.join(' AND ')} AND embedding IS NOT NULL`
+            : `WHERE embedding IS NOT NULL AND is_deleted = false`;
+
+          const pureParams: unknown[] = [...preTextParams];
+          pureParams.push(200);
+          const pvFetchIdx = pureParams.length;
+          pureParams.push(vectorLiteral);
+          const pvEmbIdx = pureParams.length;
+          pureParams.push(size);
+          const pvSizeIdx = pureParams.length;
+          pureParams.push((page - 1) * size);
+          const pvOffsetIdx = pureParams.length;
+
+          const pureVectorQuery = `
+            WITH ranked AS (
+              SELECT
+                id, title,
+                display_title AS "displayTitle",
+                content_key   AS "contentKey",
+                COALESCE(venue, '') AS venue,
+                start_at AS "startAt", end_at AS "endAt",
+                region, main_category AS "mainCategory", sub_category AS "subCategory",
+                COALESCE(image_url, '${PLACEHOLDER_IMAGE}') AS "imageUrl",
+                source_priority_winner AS "sourcePriorityWinner",
+                address, lat, lng,
+                COALESCE(buzz_score, 0)         AS buzz_score,
+                COALESCE(popularity_score, 0)   AS popularity_score,
+                COALESCE(is_ending_soon, false)  AS is_ending_soon,
+                COALESCE(is_free, false)         AS is_free,
+                embedding::halfvec(3072) <=> $${pvEmbIdx}::halfvec(3072) AS vector_dist,
+                ROW_NUMBER() OVER (
+                  PARTITION BY COALESCE(content_key, canonical_key, id::text)
+                  ORDER BY
+                    CASE WHEN image_url IS NOT NULL AND image_url != '' AND image_url NOT LIKE '%placeholder%'
+                         THEN 1 ELSE 0 END DESC,
+                    updated_at DESC
+                ) AS rn
+              FROM canonical_events
+              ${pureWhere}
+              ORDER BY embedding::halfvec(3072) <=> $${pvEmbIdx}::halfvec(3072)
+              LIMIT $${pvFetchIdx}
+            ),
+            deduped AS (
+              SELECT
+                id, title, "displayTitle", "contentKey", venue, "startAt", "endAt",
+                region, "mainCategory", "subCategory", "imageUrl", "sourcePriorityWinner",
+                address, lat, lng,
+                buzz_score       AS "buzzScore",
+                popularity_score AS "popularityScore",
+                is_ending_soon   AS "isEndingSoon",
+                is_free          AS "isFree",
+                vector_dist,
+                COUNT(*) OVER () AS total_count
+              FROM ranked
+              WHERE rn = 1 AND vector_dist < 0.55
+            )
+            SELECT
+              id, title, "displayTitle", "contentKey", venue, "startAt", "endAt",
+              region, "mainCategory", "subCategory", "imageUrl", "sourcePriorityWinner",
+              address, lat, lng,
+              "buzzScore", "popularityScore", "isEndingSoon", "isFree",
+              total_count
+            FROM deduped
+            ORDER BY vector_dist ASC
+            LIMIT $${pvSizeIdx} OFFSET $${pvOffsetIdx};
+          `;
+
+          const pureResult = await pool.query(pureVectorQuery, pureParams);
+          if (pureResult.rows.length > 0) {
+            finalTotal = Number(pureResult.rows[0].total_count ?? pureResult.rows.length);
+            finalItems = pureResult.rows.map(({ total_count, ...row }) => row);
+            searchMode = 'vector';
+          }
         }
-      } catch (vecErr) {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('[API][/events][vector-fallback] Error:', vecErr);
-        }
+      } catch (hybridErr) {
+        console.warn('[API][/events][hybrid] Error, falling back to text search:', hybridErr);
+        // finalItems 비어있음 → 아래 텍스트 검색 실행
       }
+    }
+
+    // ── 텍스트 검색: 쿼리 없음 / 다른 정렬 / 하이브리드 실패 시 ─────────────
+    if (finalItems.length === 0 && searchMode === 'text') {
+      params.push(size);
+      const limitIndex = params.length;
+      params.push((page - 1) * size);
+      const offsetIndex = params.length;
+
+      const listQuery = `
+        WITH ranked AS (
+          SELECT
+            id, title,
+            display_title AS "displayTitle",
+            content_key   AS "contentKey",
+            COALESCE(venue, '') AS venue,
+            start_at AS "startAt", end_at AS "endAt",
+            region, main_category AS "mainCategory", sub_category AS "subCategory",
+            COALESCE(image_url, '${PLACEHOLDER_IMAGE}') AS "imageUrl",
+            source_priority_winner AS "sourcePriorityWinner",
+            address, lat, lng,
+            start_at, created_at, updated_at, end_at,
+            COALESCE(buzz_score, 0)        AS buzz_score,
+            COALESCE(popularity_score, 0)  AS popularity_score,
+            COALESCE(is_ending_soon, false) AS is_ending_soon,
+            COALESCE(is_free, false)        AS is_free,
+            ROW_NUMBER() OVER (
+              PARTITION BY COALESCE(content_key, canonical_key, id::text)
+              ORDER BY
+                CASE WHEN image_url IS NOT NULL AND image_url != '' AND image_url NOT LIKE '%placeholder%'
+                     THEN 1 ELSE 0 END DESC,
+                updated_at DESC
+            ) AS rn
+          FROM canonical_events
+          ${where}
+        )
+        SELECT
+          id, title, "displayTitle", "contentKey", venue,
+          "startAt", "endAt", region, "mainCategory", "subCategory",
+          "imageUrl", "sourcePriorityWinner", address, lat, lng,
+          buzz_score AS "buzzScore",
+          created_at AS "createdAt",
+          popularity_score AS "popularityScore",
+          is_ending_soon AS "isEndingSoon",
+          is_free AS "isFree"
+        FROM ranked
+        WHERE rn = 1
+        ORDER BY ${sortField} ${sortOrder}, id ASC
+        LIMIT $${limitIndex} OFFSET $${offsetIndex};
+      `;
+
+      const countQuery = `
+        SELECT COUNT(*)::int AS total
+        FROM (
+          SELECT DISTINCT COALESCE(content_key, canonical_key, id::text) AS dedupe_key
+          FROM canonical_events
+          ${where}
+        ) AS deduped;
+      `;
+
+      const [itemsResult, countResult] = await Promise.all([
+        pool.query(listQuery, params),
+        pool.query(countQuery, params.slice(0, params.length - 2)),
+      ]);
+
+      finalTotal = countResult.rows[0]?.total ?? 0;
+      finalItems = itemsResult.rows;
     }
     // ────────────────────────────────────────────────────────────────────────
 
@@ -5203,6 +5359,39 @@ app.post('/events/:id/action', async (req, res) => {
     });
 
     res.status(500).json({ message: 'Failed to record action.' });
+  }
+});
+
+// ============================================================
+// Admin: 캡션 파싱
+// ============================================================
+
+/**
+ * POST /admin/caption-parse
+ * 팝업 캡션 텍스트를 AI로 파싱하여 구조화된 필드 반환 (CreateEventPage 팝업 자동채우기용)
+ */
+app.post('/admin/caption-parse', requireAdminAuth, async (req, res) => {
+  try {
+    const { caption } = req.body;
+
+    if (!caption || typeof caption !== 'string' || caption.trim().length < 10) {
+      return res.status(400).json({ success: false, message: '캡션 텍스트를 입력하세요.' });
+    }
+
+    console.log('[Admin] POST /admin/caption-parse - caption length:', caption.length);
+
+    const parsed = await parseCaptionText(caption.trim());
+
+    console.log('[Admin] Caption parse result - extracted fields:', parsed.extracted_fields);
+
+    return res.json({
+      success: true,
+      fields: parsed,
+      extracted_fields: parsed.extracted_fields,
+    });
+  } catch (error: any) {
+    console.error('[Admin] Caption parse error:', error.message);
+    return res.status(500).json({ success: false, message: error.message || '캡션 파싱 중 오류가 발생했습니다.' });
   }
 });
 

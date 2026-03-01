@@ -248,6 +248,43 @@ export const adminApi = {
     return data;
   },
 
+  // 캡션 텍스트 파싱 (팝업 자동채우기용)
+  captionParse: async (caption: string): Promise<{
+    success: boolean;
+    message?: string;
+    fields?: {
+      title?: string;
+      start_date?: string;
+      end_date?: string;
+      venue?: string;
+      address?: string;
+      opening_hours?: {
+        weekday?: string;
+        weekend?: string;
+        holiday?: string;
+        closed?: string;
+        notes?: string;
+      };
+      is_free?: boolean;
+      price_info?: string;
+      price_min?: number;
+      price_max?: number;
+      instagram_url?: string;
+      source_tags?: string[];
+      popup_brand?: string;
+      popup_type?: 'fnb' | 'collab' | 'general';
+      is_fnb?: boolean;
+      has_photo_zone?: boolean;
+      goods_items?: string[];
+      signature_menu?: string[];
+      public_transport_info?: string;
+    };
+    extracted_fields?: string[];
+  }> => {
+    const { data } = await api.post('/admin/caption-parse', { caption });
+    return data;
+  },
+
   // AI로 기존 이벤트 보완
   enrichEvent: async (
     eventId: string,

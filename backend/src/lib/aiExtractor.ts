@@ -193,7 +193,6 @@ export interface AIExtractedInfo {
  * ⚠️ DEPRECATED: buildExtractionPrompt 함수는 더 이상 사용되지 않습니다.
  * buildExtractionPromptWithSections를 사용하세요.
  */
-/*
 function buildExtractionPrompt(
   eventTitle: string,
   category: string,
@@ -311,16 +310,16 @@ ${searchResults}
    - 장르/카테고리 설명
    - 대상/관람연령 (객관적 사실인 경우)
 
-   **✅ 좋은 예시 (콘셉트만)**:
-   - **공연**: "리움챔버오케스트라와 한국피아노협회가 주최하는 실내악 공연입니다."
+   **✅ 좋은 예시 (콘셉트만, 해요체)**:
+   - **공연**: "리움챔버오케스트라와 한국피아노협회가 주최하는 실내악 공연이에요."
 
-   - **전시**: "팀랩의 디지털 아트 전시로 관람객이 작품과 상호작용할 수 있습니다."
+   - **전시**: "팀랩의 디지털 아트 전시로 관람객이 작품과 상호작용할 수 있어요."
 
-   - **팝업**: "쿠키런 캐릭터를 활용한 인터랙티브 콜라보 팝업입니다. 포토존과 한정판 굿즈가 준비되어 있습니다."
+   - **팝업**: "쿠키런 캐릭터를 활용한 인터랙티브 콜라보 팝업이에요. 포토존과 한정판 굿즈가 준비되어 있어요."
 
    **🎯 작성 가이드**:
    - overview_raw에 있는 **콘셉트만** 재정리
-   - "~입니다", "~합니다" 같은 명확한 서술어 사용
+   - **반드시 해요체 사용**: "~이에요", "~해요", "~있어요", "~예요" (합니다/입니다 금지!)
    - 날짜/시간/가격/주소/링크는 **절대 포함 금지**
 
 5. **opening_hours**: 운영/공연 시간 ⭐ **가장 중요! 반드시 추출하세요!**
@@ -587,8 +586,8 @@ ${searchResults}
        2. 콜라보의 특별한 점 (첫 협업, 리미티드 에디션 등)
        3. 콜라보 한정 아이템/메뉴가 있다면 간단히 언급
      * **좋은 예시**:
-       - "노티드와 산리오 캐릭터즈의 첫 공식 콜라보레이션으로, 시나모롤과 쿠로미 캐릭터가 적용된 한정판 디저트를 선보입니다."
-       - "무신사 스탠다드와 뉴발란스가 손잡은 특별 협업 팝업으로, 한정판 스니커즈와 익스클루시브 의류를 만나볼 수 있습니다."
+       - "노티드와 산리오 캐릭터즈의 첫 공식 콜라보레이션으로, 시나모롤과 쿠로미 캐릭터가 적용된 한정판 디저트를 선보여요."
+       - "무신사 스탠다드와 뉴발란스가 손잡은 특별 협업 팝업으로, 한정판 스니커즈와 익스클루시브 의류를 만나볼 수 있어요."
      * **나쁜 예시** (너무 일반적):
        - "다양한 브랜드의 제품을 만나볼 수 있는 팝업입니다." ❌
        - "특별한 아이템들이 준비되어 있습니다." ❌
@@ -683,7 +682,7 @@ ${searchResults}
 {
   "address": "서울특별시 송파구 올림픽로 300",
   "price_min": 15000,
-  "overview": "디지털 아트 전시입니다...",
+  "overview": "디지털 아트 전시예요...",
   "sources": {
     "address": { "source": "...", "evidence": "...", "url": "...", "confidence": 9 },
     "price_min": { "source": "...", "evidence": "...", "url": "...", "confidence": 10 },
@@ -749,7 +748,7 @@ ${searchResults}
   "end_date": "2026-02-22",
   "venue": "롯데월드몰",
   "address": "서울특별시 송파구 올림픽로 300",
-  "overview": "디지털 아트의 선두주자 팀랩이 선보이는 인터랙티브 미디어아트 전시입니다. 빛과 소리가 어우러진 몰입형 공간에서 관람객이 직접 작품의 일부가 되는 독특한 경험을 제공합니다. SNS 인증샷 명소로도 유명하며, 가족 단위 관람객에게 특히 인기가 높습니다.",
+  "overview": "디지털 아트의 선두주자 팀랩이 선보이는 인터랙티브 미디어아트 전시예요. 빛과 소리가 어우러진 몰입형 공간에서 관람객이 직접 작품의 일부가 되는 독특한 경험을 제공해요.",
   "opening_hours": { 
     "weekday": "10:00-19:00", 
     "weekend": "10:00-20:00", 
@@ -900,7 +899,7 @@ ${searchResults}
   "end_date": "2026-05-31",
   "venue": "샤롯데씨어터",
   "address": "서울특별시 송파구 올림픽로 240",
-  "overview": "브로드웨이 원작의 국내 라이센스 공연입니다. 화요일부터 일요일까지 샤롯데씨어터에서 진행되며 회차별로 다른 시간에 공연됩니다.",
+  "overview": "브로드웨이 원작의 국내 라이센스 공연이에요. 회차별로 다른 시간에 공연돼요.",
   "opening_hours": { 
     "notes": "화~금 19:30, 토 14:00/18:00, 일 15:00" 
   },
@@ -1239,7 +1238,7 @@ ${searchResults}
   "end_date": "2026-02-28",
   "venue": "롯데월드몰",
   "address": "서울특별시 송파구 올림픽로 300",
-  "overview": "두쫀쿠 브랜드의 팝업 스토어입니다. 쪽파 크림치즈 베이글 등의 메뉴와 포토존이 준비되어 있으며 평일 11시부터 20시까지 운영됩니다.",
+  "overview": "두쫀쿠 브랜드의 팝업 스토어예요. 쪽파 크림치즈 베이글 등의 메뉴와 포토존이 준비되어 있어요.",
   "opening_hours": { 
     "weekday": "11:00-20:00", 
     "weekend": "11:00-21:00"
@@ -1467,7 +1466,6 @@ ${searchResults}
 - URL은 검색 결과에서 찾은 원본 링크를 그대로 사용하세요
 - 예시를 참고하여 정확히 같은 형식으로 작성하세요!`;
 }
-*/
 
 /**
  * 카테고리별 Overview 가이드라인 생성
@@ -1500,7 +1498,7 @@ function buildOverviewGuideline(category: string): string {
 
    **문체**:
    - 서사형 문장 허용 (스토리텔링 가능)
-   - "~전시입니다"로만 끝내지 말 것 - 제목의 의미나 맥락을 풀어내기
+   - "~전시예요"로만 끝내지 말 것 - 제목의 의미나 맥락을 풀어내기
    - 감정·의미 표현 허용 (단, 과장 금지)
 
    **포함 가능 요소**:
@@ -1511,7 +1509,7 @@ function buildOverviewGuideline(category: string): string {
 
    **예시**:
    - ❌ "현대미술 작가 OOO의 개인전입니다. 3층에서 진행됩니다."
-   - ✅ "현대미술 작가 OOO이 20년간 천착해 온 '경계'라는 주제를 회화, 설치, 영상 등 다양한 매체로 풀어낸 전시입니다. 관람객은 3층 규모의 공간을 따라 작가의 사유를 따라가며 경계의 의미를 재발견하게 됩니다."
+   - ✅ "현대미술 작가 OOO이 20년간 천착해 온 '경계'라는 주제를 회화, 설치, 영상 등 다양한 매체로 풀어낸 전시예요. 관람객은 3층 규모의 공간을 따라 작가의 사유를 따라가며 경계의 의미를 재발견하게 돼요."
 `;
   }
   // 공연 (performance, musical, theater)
@@ -1551,7 +1549,7 @@ function buildOverviewGuideline(category: string): string {
 
    **예시**:
    - ❌ "클래식 음악 공연입니다. 토요일 오후 2시, 7시 2회 공연이며 약 100분 소요됩니다."
-   - ✅ "리움챔버오케스트라가 선보이는 실내악 공연으로, 바로크부터 현대까지 아우르는 프로그램으로 구성됩니다. 섬세한 앙상블과 웅장한 오케스트라 사운드를 동시에 경험할 수 있습니다."
+   - ✅ "리움챔버오케스트라가 선보이는 실내악 공연으로, 바로크부터 현대까지 아우르는 프로그램으로 구성돼요. 섬세한 앙상블과 웅장한 오케스트라 사운드를 동시에 경험할 수 있어요."
 `;
   }
   // 축제
@@ -1565,7 +1563,7 @@ function buildOverviewGuideline(category: string): string {
    3. **규모와 지역성** - 대규모 축제인지, 지역 특색이 있는지
 
    **문체**:
-   - "즐길 수 있습니다", "체험할 수 있습니다" 같은 직접 권유 허용
+   - "즐길 수 있어요", "체험할 수 있어요" 같은 직접 권유 허용
    - 프로그램 나열은 1-2개 핵심만 (전체 나열 금지)
    - 축제의 전체적인 느낌과 분위기 전달
 
@@ -1582,7 +1580,7 @@ function buildOverviewGuideline(category: string): string {
 
    **예시**:
    - ❌ "벚꽃 축제입니다. 3월 20일부터 4월 10일까지 진행되며 무료입니다."
-   - ✅ "강변을 따라 펼쳐진 벚꽃길을 걸으며 봄을 만끽하는 지역 축제입니다. 야간 조명으로 밤벚꽃을 감상할 수 있으며, 지역 먹거리 부스와 라이브 공연이 함께하는 활기찬 분위기가 특징입니다."
+   - ✅ "강변을 따라 펼쳐진 벚꽃길을 걸으며 봄을 만끽하는 지역 축제예요. 야간 조명으로 밤벚꽃을 감상할 수 있으며, 지역 먹거리 부스와 라이브 공연이 함께하는 활기찬 분위기가 특징이에요."
 `;
   }
   // 팝업
@@ -1613,7 +1611,7 @@ function buildOverviewGuideline(category: string): string {
 
    **예시**:
    - ❌ "인기 애니메이션 캐릭터 팝업스토어입니다. 3월까지 운영하며 입장료는 5천원입니다."
-   - ✅ "인기 애니메이션 'OOO'의 세계관을 구현한 팝업 스토어로, 캐릭터들이 사는 마을을 재현한 포토존과 작중 등장하는 디저트를 맛볼 수 있는 F&B 공간이 마련되어 있습니다. 팝업 한정 굿즈와 팬아트 전시도 함께 즐길 수 있습니다."
+   - ✅ "인기 애니메이션 'OOO'의 세계관을 구현한 팝업 스토어로, 캐릭터들이 사는 마을을 재현한 포토존과 작중 등장하는 디저트를 맛볼 수 있는 F&B 공간이 마련되어 있어요. 팝업 한정 굿즈와 팬아트 전시도 함께 즐길 수 있어요."
 `;
   }
   // 행사/세미나/강연
@@ -1654,7 +1652,7 @@ function buildOverviewGuideline(category: string): string {
 
    **예시**:
    - ❌ "AI 기술에 대한 세미나입니다. 3월 15일 진행되며 참가비는 무료입니다."
-   - ✅ "AI 기술이 산업 현장에 미치는 영향을 다루는 전문가 세미나로, 현직 개발자와 연구자들이 실제 적용 사례와 기술적 도전 과제를 공유합니다. AI 분야에 관심 있는 학생과 실무자 모두에게 유익한 자리입니다."
+   - ✅ "AI 기술이 산업 현장에 미치는 영향을 다루는 전문가 세미나로, 현직 개발자와 연구자들이 실제 적용 사례와 기술적 도전 과제를 공유해요. AI 분야에 관심 있는 학생과 실무자 모두에게 유익한 자리예요."
 `;
   }
   // 기본 (카테고리 미지정 또는 기타)
@@ -1933,7 +1931,7 @@ ${category === '전시' ? `
   "venue": "샤롯데씨어터",
   "address": "서울특별시 송파구 올림픽로 240",
   "overview_raw": "2026년 3월 1일부터 5월 31일까지 샤롯데씨어터에서 브로드웨이 명작 뮤지컬이 공연됩니다. 조승우, 홍광호, 김소현이 출연하며, 홍길동 연출, 김작가 작가, 박작곡 작곡으로 제작되었습니다. 공연 시간은 화~금 19:30, 토 14:00/18:00, 일 15:00이며, 약 150분간 진행되고 인터미션이 있습니다. VIP석 150,000원, R석 120,000원, S석 90,000원, A석 60,000원이며, 조기예매 30%, 학생 20%, 장애인 50% 할인이 적용됩니다. 만 8세 이상 관람 가능합니다.",
-  "overview": "브로드웨이 원작 뮤지컬 공연입니다. 조승우, 홍광호, 김소현이 출연하며 만 8세 이상 관람 가능합니다.",
+  "overview": "브로드웨이 원작 뮤지컬 공연이에요. 조승우, 홍광호, 김소현이 출연하며 만 8세 이상 관람 가능해요.",
   "opening_hours": { "notes": "화~금 19:30, 토 14:00/18:00, 일 15:00" },
   "price_min": 60000,
   "price_max": 150000,
@@ -2016,7 +2014,7 @@ ${category === '전시' ? `
   "venue": "여의도 한강공원",
   "address": "서울특별시 영등포구 여의동로 330",
   "overview_raw": "2026년 3월 15일부터 3월 20일까지 여의도 한강공원에서 벚꽃축제가 열립니다. 서울시 관광재단 주최로 개막식 불꽃놀이, K-POP 공연, LED 등불 전시가 진행됩니다. 푸드트럭 20개, 체험 부스 10개가 운영되며, 작년 50만 명이 방문했습니다. 행사장 주차는 불가능하며 인근 공영주차장 이용을 권장합니다. 입장은 무료입니다.",
-  "overview": "여의도 한강공원에서 열리는 벚꽃축제입니다. 개막식 불꽃놀이, K-POP 공연, LED 등불 전시가 진행되며 푸드트럭과 체험 부스가 운영됩니다.",
+  "overview": "여의도 한강공원에서 열리는 벚꽃 축제예요. 개막식 불꽃놀이, K-POP 공연, LED 등불 전시가 진행되며 푸드트럭과 체험 부스도 즐길 수 있어요.",
   "opening_hours": { "weekday": "10:00-22:00", "weekend": "10:00-23:00" },
   "price_min": 0,
   "price_max": 0,
@@ -2049,7 +2047,7 @@ ${category === '전시' ? `
   "end_date": "2026-04-10",
   "venue": "코엑스 컨퍼런스룸",
   "address": "서울특별시 강남구 영동대로 513",
-  "overview": "스타트업 채용 박람회로, 대학생과 취준생을 대상으로 20개 기업이 참여합니다. 사전 등록 필수이며 현장 등록은 불가합니다.",
+  "overview": "스타트업 채용 박람회로, 대학생과 취준생을 대상으로 20개 기업이 참여해요. 사전 등록이 필요하며 현장 등록은 불가해요.",
   "opening_hours": { "weekday": "14:00-18:00" },
   "price_min": 0,
   "price_max": 0,
@@ -2078,7 +2076,7 @@ ${category === '전시' ? `
   "end_date": "2026-02-22",
   "venue": "롯데월드몰",
   "address": "서울특별시 종로구 인사동9길 26",
-  "overview": "어린이들을 위한 가족 뮤지컬로, 고전 동화를 현대적으로 재해석한 작품입니다.",
+  "overview": "어린이들을 위한 가족 뮤지컬로, 고전 동화를 현대적으로 재해석한 작품이에요.",
   "opening_hours": { "weekday": "10:00-18:00", "weekend": "10:00-20:00", "closed": "월요일" },
   "price_min": 0,
   "price_max": 0,
@@ -2117,9 +2115,8 @@ ${category === '전시' ? `
    - 근거 검색결과가 없으면 빈 배열 [] 또는 해당 키 생략`;
 }
 
-/*
- * ⚠️ DEPRECATED: extractEventInfo 함수는 더 이상 사용되지 않습니다.
- * extractEventInfoEnhanced를 사용하세요.
+// ⚠️ DEPRECATED: extractEventInfo 함수는 더 이상 사용되지 않습니다.
+// extractEventInfoEnhanced를 사용하세요.
 
 export async function extractEventInfo(
   eventTitle: string,
@@ -2217,7 +2214,6 @@ export async function extractEventInfo(
     return null;
   }
 }
-*/
 
 /**
  * Phase A: 향상된 정보 추출 (섹션별 분리 + 검증)
@@ -3201,6 +3197,223 @@ export function validateOverview(
     reasonMessage: violations.length > 0
       ? `Overview contains ${violations.length} violation(s): ${violations.map(v => v.type).join(', ')}`
       : undefined,
+  };
+}
+
+// ============================================================
+// 캡션 파싱 (팝업 이벤트 자동 채우기용)
+// ============================================================
+
+export interface CaptionParseResult {
+  // 캡션에서 추출된 필드 (신뢰도 높음 — 캡션에 명시된 사실 정보)
+  title?: string;
+  start_date?: string;       // YYYY-MM-DD
+  end_date?: string;         // YYYY-MM-DD
+  venue?: string;            // 장소명 (상호명/건물명)
+  address?: string;          // 도로명 주소만
+  opening_hours?: {
+    weekday?: string;
+    weekend?: string;
+    holiday?: string;
+    closed?: string;
+    notes?: string;
+  };
+  is_free?: boolean;
+  price_info?: string;
+  price_min?: number;
+  price_max?: number;
+  instagram_url?: string;
+  source_tags?: string[];    // 해시태그 기반
+  // 팝업 전용
+  popup_brand?: string;
+  popup_type?: 'fnb' | 'collab' | 'general';
+  is_fnb?: boolean;
+  has_photo_zone?: boolean;
+  goods_items?: string[];
+  signature_menu?: string[];
+  public_transport_info?: string;
+
+  // 추출에 사용된 캡션 내 근거 필드 목록
+  extracted_fields: string[];
+}
+
+/**
+ * 팝업 캡션 텍스트를 Gemini로 파싱하여 구조화된 필드 반환
+ * 네이버 검색 없이 캡션 텍스트만으로 추출 → 정확도 우선
+ */
+export async function parseCaptionText(captionText: string): Promise<CaptionParseResult> {
+  if (!model) {
+    throw new Error('Gemini API가 초기화되지 않았습니다.');
+  }
+
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+  const prompt = `당신은 팝업스토어 정보를 정확하게 추출하는 전문가입니다.
+아래 캡션 텍스트에서 정보를 추출하여 JSON으로 반환하세요.
+
+**최우선 원칙: 캡션에 명시된 사실 정보만 추출. 추론·추측·생성 절대 금지.**
+- 캡션에 없는 정보는 해당 필드를 null로 반환
+- 오늘 날짜 기준: ${today}
+- 연도가 생략된 날짜(예: "02. 23")는 오늘 날짜 기준으로 가장 가까운 미래 날짜로 해석
+  예) 오늘이 2026-03-01이고 캡션에 "02. 23 ~ 03. 15"이면 → start_date: "2026-02-23", end_date: "2026-03-15"
+
+---
+
+**캡션 텍스트:**
+${captionText}
+
+---
+
+**추출 규칙:**
+
+1. **title**: 팝업의 공식 이름 (브랜드명 포함). 캡션 상단 제목 줄에서 추출.
+   예) "귤메달 X 프리카 팝업"
+
+2. **start_date / end_date**: YYYY-MM-DD 형식. 날짜 범위 표현 파싱.
+   - "26. 02. 23(월) ~ 26. 03. 15(일)" → "2026-02-23", "2026-03-15"
+   - "2월 23일 ~ 3월 15일" → 연도는 오늘 기준으로 가장 가까운 미래 날짜
+   - 종료일 없으면 null
+
+3. **venue**: 장소명(상호명)만. 주소 포함 금지.
+   - "서울 성동구 연무장13길 4 프리카 성수" → venue: "프리카 성수"
+   - "롯데월드몰 1층" → venue: "롯데월드몰"
+
+4. **address**: 도로명 주소만. 장소명·층수 포함 금지.
+   - "서울 성동구 연무장13길 4 프리카 성수" → address: "서울 성동구 연무장13길 4"
+   - 주소가 없으면 null
+
+5. **opening_hours**: 운영시간. 패턴별 분리.
+   - "매일 11:00~19:00" → weekday: "11:00~19:00", weekend: "11:00~19:00"
+   - "평일 11~19시, 주말 12~20시" → weekday: "11:00~19:00", weekend: "12:00~20:00"
+   - 정보 없으면 null
+
+6. **is_free**: 무료 여부. "무료입장", "입장 무료" → true. 가격 정보 있으면 false. 언급 없으면 null.
+
+7. **price_info**: 가격 텍스트 그대로. 없으면 null.
+   예) "성인 15,000원 / 청소년 10,000원"
+
+8. **price_min / price_max**: 숫자(원 단위). 없으면 null.
+
+9. **instagram_url**: "@계정명" 형태면 "https://instagram.com/계정명"으로 변환. 없으면 null.
+
+10. **source_tags**: 해시태그(#) 목록. # 제거하고 텍스트만.
+    예) ["성수", "팝업", "귤메달"]
+
+11. **popup_brand**: 팝업을 여는 브랜드명. 콜라보면 메인 브랜드.
+    예) "귤메달"
+
+12. **popup_type**: "fnb"(F&B 음식/음료), "collab"(브랜드 콜라보), "general"(일반).
+    F&B 카테고리 표시나 음식/음료 언급 있으면 "fnb".
+
+13. **is_fnb**: F&B 팝업 여부. "F&B" 카테고리 표시나 음식/음료 중심이면 true.
+
+14. **has_photo_zone**: "포토존", "포토스팟", "사진" 언급 있으면 true. 없으면 null.
+
+15. **goods_items**: 굿즈/상품 목록. 없으면 null.
+
+16. **signature_menu**: 시그니처 메뉴/대표 음식 목록. 없으면 null.
+    예) ["시그니처 감귤 아이스크림", "감귤 캔디"]
+
+17. **public_transport_info**: 대중교통 안내 텍스트. 없으면 null.
+
+---
+
+반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 없이 JSON만:
+
+{
+  "title": string | null,
+  "start_date": string | null,
+  "end_date": string | null,
+  "venue": string | null,
+  "address": string | null,
+  "opening_hours": { "weekday": string | null, "weekend": string | null, "holiday": string | null, "closed": string | null, "notes": string | null } | null,
+  "is_free": boolean | null,
+  "price_info": string | null,
+  "price_min": number | null,
+  "price_max": number | null,
+  "instagram_url": string | null,
+  "source_tags": string[] | null,
+  "popup_brand": string | null,
+  "popup_type": "fnb" | "collab" | "general" | null,
+  "is_fnb": boolean | null,
+  "has_photo_zone": boolean | null,
+  "goods_items": string[] | null,
+  "signature_menu": string[] | null,
+  "public_transport_info": string | null
+}`;
+
+  const result = await model.generateContent(prompt);
+  const text = result.response.text().trim();
+
+  // JSON 블록 추출
+  const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\{[\s\S]*\}/);
+  const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : text;
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    throw new Error(`캡션 파싱 실패: Gemini 응답이 JSON이 아닙니다. 응답: ${text.substring(0, 200)}`);
+  }
+
+  // 추출된 필드 목록 (null이 아닌 필드)
+  const fieldMap: Record<string, string> = {
+    title: 'title',
+    start_date: 'start_date',
+    end_date: 'end_date',
+    venue: 'venue',
+    address: 'address',
+    opening_hours: 'opening_hours',
+    is_free: 'is_free',
+    price_info: 'price_info',
+    price_min: 'price_min',
+    price_max: 'price_max',
+    instagram_url: 'instagram_url',
+    source_tags: 'source_tags',
+    popup_brand: 'popup_brand',
+    popup_type: 'popup_type',
+    is_fnb: 'is_fnb',
+    has_photo_zone: 'has_photo_zone',
+    goods_items: 'goods_items',
+    signature_menu: 'signature_menu',
+    public_transport_info: 'public_transport_info',
+  };
+
+  const extractedFields: string[] = [];
+  Object.keys(fieldMap).forEach((key) => {
+    const val = parsed[key];
+    if (val !== null && val !== undefined) {
+      if (Array.isArray(val) && val.length === 0) return;
+      if (typeof val === 'object' && !Array.isArray(val)) {
+        const hasValue = Object.values(val).some(v => v !== null && v !== undefined);
+        if (hasValue) extractedFields.push(key);
+      } else {
+        extractedFields.push(key);
+      }
+    }
+  });
+
+  return {
+    title: parsed.title ?? undefined,
+    start_date: parsed.start_date ?? undefined,
+    end_date: parsed.end_date ?? undefined,
+    venue: parsed.venue ?? undefined,
+    address: parsed.address ?? undefined,
+    opening_hours: parsed.opening_hours ?? undefined,
+    is_free: parsed.is_free ?? undefined,
+    price_info: parsed.price_info ?? undefined,
+    price_min: parsed.price_min ?? undefined,
+    price_max: parsed.price_max ?? undefined,
+    instagram_url: parsed.instagram_url ?? undefined,
+    source_tags: parsed.source_tags ?? undefined,
+    popup_brand: parsed.popup_brand ?? undefined,
+    popup_type: parsed.popup_type ?? undefined,
+    is_fnb: parsed.is_fnb ?? undefined,
+    has_photo_zone: parsed.has_photo_zone ?? undefined,
+    goods_items: parsed.goods_items ?? undefined,
+    signature_menu: parsed.signature_menu ?? undefined,
+    public_transport_info: parsed.public_transport_info ?? undefined,
+    extracted_fields: extractedFields,
   };
 }
 

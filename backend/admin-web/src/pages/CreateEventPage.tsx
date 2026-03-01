@@ -75,6 +75,9 @@ export default function CreateEventPage() {
   const [showFieldSelectorModal, setShowFieldSelectorModal] = useState(false);
   // 🆕 AI 제안 시스템
   const [aiSuggestions, setAiSuggestions] = useState<any>(null);
+  const [captionText, setCaptionText] = useState('');
+  const [captionParsing, setCaptionParsing] = useState(false);
+  const [captionLockedFields, setCaptionLockedFields] = useState<Set<string>>(new Set());
 
   // Hot Suggestion에서 전달된 데이터
   const hotSuggestionState = location.state as {
@@ -213,14 +216,14 @@ export default function CreateEventPage() {
         // 결과를 폼에 적용
         setFormData((prev) => {
           const shouldUpdate = (fieldKey: string, currentValue: any) => {
-            if (isForceAll) return true; // 전체 재생성이면 무조건 업데이트
+            // 캡션으로 확정된 필드는 절대 덮어쓰지 않음
+            if (captionLockedFields.has(fieldKey)) return false;
+            if (isForceAll) return true;
             if (isEmptyFieldsOnly) {
-              // 빈 필드만 모드: 현재 값이 비어있을 때만 업데이트
               if (Array.isArray(currentValue)) return currentValue.length === 0;
               if (typeof currentValue === 'object' && currentValue !== null) return Object.keys(currentValue).length === 0;
               return !currentValue || currentValue === '' || currentValue === null;
             }
-            // 선택한 필드 모드: forceFields에 포함된 경우만 업데이트
             return forceFields.includes(fieldKey);
           };
 
@@ -289,6 +292,79 @@ export default function CreateEventPage() {
       alert('AI 분석 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
     } finally {
       setAutoFillLoading(false);
+    }
+  };
+
+  const handleCaptionParse = async () => {
+    if (!captionText.trim()) {
+      alert('캡션을 입력하세요.');
+      return;
+    }
+    setCaptionParsing(true);
+    try {
+      const result = await adminApi.captionParse(captionText);
+      if (!result.success || !result.fields) {
+        alert(result.message || '캡션 파싱에 실패했습니다.');
+        return;
+      }
+      const f = result.fields;
+      const locked = new Set<string>();
+
+      setFormData((prev) => {
+        const next = { ...prev };
+
+        if (f.title) { next.title = f.title; locked.add('title'); }
+        if (f.start_date) { next.startAt = f.start_date; locked.add('start_at'); }
+        if (f.end_date) { next.endAt = f.end_date; locked.add('end_at'); }
+        if (f.venue) { next.venue = f.venue; locked.add('venue'); }
+        if (f.address) { next.address = f.address; locked.add('address'); }
+        if (f.opening_hours) { next.openingHours = f.opening_hours; locked.add('opening_hours'); }
+        if (f.is_free !== undefined) { next.isFree = f.is_free; locked.add('is_free'); }
+        if (f.price_info) { next.priceInfo = f.price_info; locked.add('price_info'); }
+        if (f.price_min !== undefined) { next.priceMin = f.price_min; locked.add('price_min'); }
+        if (f.price_max !== undefined) { next.priceMax = f.price_max; locked.add('price_max'); }
+        if (f.instagram_url) {
+          next.instagramUrl = f.instagram_url;
+          next.externalLinks = { ...next.externalLinks, instagram: f.instagram_url };
+          locked.add('instagram_url');
+        }
+        if (f.source_tags && f.source_tags.length > 0) {
+          next.sourceTags = f.source_tags;
+          locked.add('source_tags');
+        }
+        // 팝업 전용 메타데이터
+        const popupMeta: any = {};
+        if (f.popup_brand) { popupMeta.brand = f.popup_brand; locked.add('popup_brand'); }
+        if (f.popup_type) { popupMeta.type = f.popup_type; locked.add('popup_type'); }
+        if (f.is_fnb !== undefined) { popupMeta.is_fnb = f.is_fnb; locked.add('is_fnb'); }
+        if (f.has_photo_zone !== undefined) { popupMeta.has_photo_zone = f.has_photo_zone; locked.add('has_photo_zone'); }
+        if (f.goods_items && f.goods_items.length > 0) { popupMeta.goods = f.goods_items; locked.add('goods_items'); }
+        if (f.signature_menu && f.signature_menu.length > 0) { popupMeta.best_items = f.signature_menu; locked.add('signature_menu'); }
+        if (Object.keys(popupMeta).length > 0) {
+          next.metadata = {
+            ...next.metadata,
+            display: {
+              ...next.metadata?.display,
+              popup: { ...(next.metadata?.display?.popup || {}), ...popupMeta },
+            },
+          };
+        }
+        return next;
+      });
+
+      setCaptionLockedFields(locked);
+
+      // 캡션 파싱 후 AI 보완 자동 실행 (캡션에 없는 빈 필드만)
+      // 잠깐 딜레이 후 실행 (setFormData 반영 후)
+      setTimeout(() => {
+        handleAIEnrichPreview([]);
+      }, 300);
+
+      alert(`✅ 캡션 파싱 완료! ${locked.size}개 필드 자동채우기 완료.\nAI 보완으로 나머지 필드를 채웁니다.`);
+    } catch (error: any) {
+      alert('캡션 파싱 오류: ' + (error.message || '알 수 없는 오류'));
+    } finally {
+      setCaptionParsing(false);
     }
   };
 
@@ -658,6 +734,71 @@ export default function CreateEventPage() {
               </p>
             </div>
           </section>
+
+          {/* 캡션 자동채우기 — 팝업 전용 */}
+          {formData.mainCategory === '팝업' && (
+            <div style={{
+              background: '#EFF6FF',
+              border: '1px solid #BFDBFE',
+              borderRadius: 12,
+              padding: '16px 20px',
+              marginBottom: 24,
+            }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#1D4ED8', marginBottom: 8 }}>
+                📋 캡션으로 자동채우기
+              </div>
+              <div style={{ fontSize: 12, color: '#3B82F6', marginBottom: 12 }}>
+                팝가, 인스타그램 등에서 복사한 캡션을 붙여넣으면 AI가 필드를 자동으로 채워드려요.
+              </div>
+              <textarea
+                value={captionText}
+                onChange={(e) => setCaptionText(e.target.value)}
+                placeholder="캡션을 여기에 붙여넣으세요..."
+                rows={6}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: '1px solid #BFDBFE',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  resize: 'vertical',
+                  boxSizing: 'border-box',
+                  fontFamily: 'inherit',
+                  background: '#fff',
+                }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
+                <button
+                  type="button"
+                  onClick={handleCaptionParse}
+                  disabled={captionParsing || !captionText.trim()}
+                  style={{
+                    background: captionParsing || !captionText.trim() ? '#93C5FD' : '#2563EB',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 8,
+                    padding: '8px 18px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: captionParsing || !captionText.trim() ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {captionParsing ? '⏳ 파싱 중...' : '🔍 캡션으로 자동채우기'}
+                </button>
+                {captionLockedFields.size > 0 && (
+                  <span style={{ fontSize: 12, color: '#16A34A', fontWeight: 600 }}>
+                    ✅ {captionLockedFields.size}개 필드 확정됨
+                  </span>
+                )}
+              </div>
+              {captionLockedFields.size > 0 && (
+                <div style={{ marginTop: 10, fontSize: 11, color: '#6B7280' }}>
+                  🔒 확정 필드는 AI 보완이 덮어쓰지 않아요: {Array.from(captionLockedFields).join(', ')}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Instagram URL (팝업 전용) */}
           {formData.mainCategory === '팝업' && (
