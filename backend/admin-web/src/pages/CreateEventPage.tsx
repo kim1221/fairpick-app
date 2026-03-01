@@ -70,7 +70,8 @@ export default function CreateEventPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [agreedCopyright, setAgreedCopyright] = useState(false);
-  const [autoFillStatus, setAutoFillStatus] = useState<Record<string, boolean>>({});
+  // fieldSources: 각 필드가 어떻게 채워졌는지 추적 ('caption' | 'ai' | 'manual')
+  const [fieldSources, setFieldSources] = useState<Record<string, 'caption' | 'ai' | 'manual'>>({});
   // 🆕 필드 선택 기능 (EventsPage와 동일)
   const [showFieldSelectorModal, setShowFieldSelectorModal] = useState(false);
   // 🆕 AI 제안 시스템
@@ -78,6 +79,19 @@ export default function CreateEventPage() {
   const [captionText, setCaptionText] = useState('');
   const [captionParsing, setCaptionParsing] = useState(false);
   const [captionLockedFields, setCaptionLockedFields] = useState<Set<string>>(new Set());
+
+  // 필드 출처 뱃지 헬퍼
+  const getFieldSourceBadge = (fieldKey: string) => {
+    const s = fieldSources[fieldKey];
+    if (!s) return null;
+    const cfg = {
+      caption: { label: '캡션', bg: '#DBEAFE', color: '#1D4ED8' },
+      ai:      { label: 'AI',   bg: '#FEF9C3', color: '#B45309' },
+      manual:  { label: '수동', bg: '#F3E8FF', color: '#7E22CE' },
+    };
+    const c = cfg[s];
+    return <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, background: c.bg, color: c.color, marginLeft: 6, fontWeight: 700 }}>{c.label}</span>;
+  };
 
   // Hot Suggestion에서 전달된 데이터
   const hotSuggestionState = location.state as {
@@ -178,22 +192,27 @@ export default function CreateEventPage() {
   });
 
   // 🆕 통합 AI 보완 함수 (EventsPage와 동일 패턴)
-  const handleAIEnrichPreview = async (forceFields: string[] = []) => {
-    if (!formData.title) {
+  const handleAIEnrichPreview = async (
+    forceFields: string[] = [],
+    titleHint?: string,           // 캡션 파싱 후 stale closure 우회용
+    sourceTagsHint?: string[]     // 캡션 source_tags → AI derived_tags 참고
+  ) => {
+    const effectiveTitle = titleHint || formData.title;
+    if (!effectiveTitle) {
       alert('제목을 먼저 입력하세요!');
       return;
     }
 
     setAutoFillLoading(true);
-    setAutoFillStatus({});
 
     try {
       const result = await adminApi.enrichEventPreview({
-        title: formData.title,
+        title: effectiveTitle,
         venue: formData.venue || undefined,
         main_category: formData.mainCategory || undefined,
         overview: formData.overview || undefined,
         selectedFields: forceFields.length > 0 && !forceFields.includes('*') ? forceFields : undefined,
+        sourceTagsHint: sourceTagsHint || (formData.sourceTags?.length ? formData.sourceTags : undefined),
       });
 
       if (!result.success) {
@@ -236,7 +255,7 @@ export default function CreateEventPage() {
                 const category = parts[2]; // exhibition, performance, popup, etc.
                 const field = parts.slice(3).join('.'); // 나머지 경로
 
-                if (shouldUpdate(key, prev.metadata?.display?.[category as any]?.[field])) {
+                if (shouldUpdate(key, (prev.metadata?.display as any)?.[category]?.[field])) {
                   if (!updatedMetadata.display) updatedMetadata.display = {};
                   if (!updatedMetadata.display[category]) updatedMetadata.display[category] = {};
 
@@ -257,7 +276,7 @@ export default function CreateEventPage() {
             }
           });
 
-          return {
+          const next = {
             ...prev,
             startAt: shouldUpdate('start_at', prev.startAt) && enriched.start_at ? enriched.start_at : prev.startAt,
             endAt: shouldUpdate('end_at', prev.endAt) && enriched.end_at ? enriched.end_at : prev.endAt,
@@ -279,10 +298,33 @@ export default function CreateEventPage() {
             // 🆕 metadata 적용
             metadata: Object.keys(updatedMetadata).length > 0 ? updatedMetadata : prev.metadata,
           };
+          // AI로 변경된 필드 추적
+          const aiKeys: string[] = [];
+          if (next.startAt !== prev.startAt) aiKeys.push('start_at');
+          if (next.endAt !== prev.endAt) aiKeys.push('end_at');
+          if (next.venue !== prev.venue) aiKeys.push('venue');
+          if (next.address !== prev.address) aiKeys.push('address');
+          if (next.overview !== prev.overview) aiKeys.push('overview');
+          if (next.derivedTags !== prev.derivedTags) aiKeys.push('derived_tags');
+          if (next.openingHours !== prev.openingHours) aiKeys.push('opening_hours');
+          if (next.priceMin !== prev.priceMin) aiKeys.push('price_min');
+          if (next.priceMax !== prev.priceMax) aiKeys.push('price_max');
+          if (aiKeys.length > 0) {
+            // setFieldSources는 상태 업데이트라 여기서 직접 호출 불가 → setTimeout으로 처리
+            setTimeout(() => {
+              setFieldSources((ps) => {
+                const updated = { ...ps };
+                aiKeys.forEach((k) => { if (!ps[k] || ps[k] === 'ai') updated[k] = 'ai'; });
+                return updated;
+              });
+            }, 0);
+          }
+          return next;
         });
 
         const modeLabel = isForceAll ? '전체 재생성' : isEmptyFieldsOnly ? '빈 필드 보완' : '선택 필드 재생성';
-        alert(`✅ ${modeLabel} 완료!\n\n생성된 제안: ${Object.keys(result.suggestions).length}개`);
+        const appliedCount = Object.keys(result.suggestions).filter(k => !captionLockedFields.has(k)).length;
+        alert(`✅ ${modeLabel} 완료!\n\n보완된 필드: ${appliedCount}개`);
         return;
       }
 
@@ -308,45 +350,64 @@ export default function CreateEventPage() {
         return;
       }
       const f = result.fields;
+
+      // ✅ locked set을 setFormData 호출 전에 미리 구성 (alert 시점에 size가 정확해야 함)
       const locked = new Set<string>();
+      if (f.title) locked.add('title');
+      if (f.start_date) locked.add('start_at');
+      if (f.end_date) locked.add('end_at');
+      if (f.venue) locked.add('venue');
+      if (f.address) locked.add('address');
+      if (f.opening_hours) locked.add('opening_hours');
+      if (f.is_free !== undefined) locked.add('is_free');
+      if (f.price_info) locked.add('price_info');
+      if (f.price_min !== undefined) locked.add('price_min');
+      if (f.price_max !== undefined) locked.add('price_max');
+      if (f.instagram_url) locked.add('instagram_url');
+      if (f.source_tags && f.source_tags.length > 0) locked.add('source_tags');
+      if (f.popup_brand) locked.add('popup_brand');
+      if (f.popup_type) locked.add('popup_type');
+      if (f.is_fnb !== undefined) locked.add('is_fnb');
+      if (f.has_photo_zone !== undefined) locked.add('has_photo_zone');
+      if (f.goods_items && f.goods_items.length > 0) locked.add('goods_items');
+      if (f.signature_menu && f.signature_menu.length > 0) locked.add('signature_menu');
+
+      // 캡션 출처 마킹
+      setFieldSources((prev) => {
+        const next = { ...prev };
+        locked.forEach((k) => { next[k] = 'caption'; });
+        return next;
+      });
 
       setFormData((prev) => {
         const next = { ...prev };
-
-        if (f.title) { next.title = f.title; locked.add('title'); }
-        if (f.start_date) { next.startAt = f.start_date; locked.add('start_at'); }
-        if (f.end_date) { next.endAt = f.end_date; locked.add('end_at'); }
-        if (f.venue) { next.venue = f.venue; locked.add('venue'); }
-        if (f.address) { next.address = f.address; locked.add('address'); }
-        if (f.opening_hours) { next.openingHours = f.opening_hours; locked.add('opening_hours'); }
-        if (f.is_free !== undefined) { next.isFree = f.is_free; locked.add('is_free'); }
-        if (f.price_info) { next.priceInfo = f.price_info; locked.add('price_info'); }
-        if (f.price_min !== undefined) { next.priceMin = f.price_min; locked.add('price_min'); }
-        if (f.price_max !== undefined) { next.priceMax = f.price_max; locked.add('price_max'); }
+        if (f.title) next.title = f.title;
+        if (f.start_date) next.startAt = f.start_date;
+        if (f.end_date) next.endAt = f.end_date;
+        if (f.venue) next.venue = f.venue;
+        if (f.address) next.address = f.address;
+        if (f.opening_hours) next.openingHours = f.opening_hours;
+        if (f.is_free !== undefined) next.isFree = f.is_free;
+        if (f.price_info) next.priceInfo = f.price_info;
+        if (f.price_min !== undefined) next.priceMin = f.price_min;
+        if (f.price_max !== undefined) next.priceMax = f.price_max;
         if (f.instagram_url) {
           next.instagramUrl = f.instagram_url;
           next.externalLinks = { ...next.externalLinks, instagram: f.instagram_url };
-          locked.add('instagram_url');
         }
-        if (f.source_tags && f.source_tags.length > 0) {
-          next.sourceTags = f.source_tags;
-          locked.add('source_tags');
-        }
+        if (f.source_tags && f.source_tags.length > 0) next.sourceTags = f.source_tags;
         // 팝업 전용 메타데이터
         const popupMeta: any = {};
-        if (f.popup_brand) { popupMeta.brand = f.popup_brand; locked.add('popup_brand'); }
-        if (f.popup_type) { popupMeta.type = f.popup_type; locked.add('popup_type'); }
-        if (f.is_fnb !== undefined) { popupMeta.is_fnb = f.is_fnb; locked.add('is_fnb'); }
-        if (f.has_photo_zone !== undefined) { popupMeta.has_photo_zone = f.has_photo_zone; locked.add('has_photo_zone'); }
-        if (f.goods_items && f.goods_items.length > 0) { popupMeta.goods = f.goods_items; locked.add('goods_items'); }
-        if (f.signature_menu && f.signature_menu.length > 0) { popupMeta.best_items = f.signature_menu; locked.add('signature_menu'); }
+        if (f.popup_brand) popupMeta.brand = f.popup_brand;
+        if (f.popup_type) popupMeta.type = f.popup_type;
+        if (f.is_fnb !== undefined) popupMeta.is_fnb = f.is_fnb;
+        if (f.has_photo_zone !== undefined) popupMeta.has_photo_zone = f.has_photo_zone;
+        if (f.goods_items && f.goods_items.length > 0) popupMeta.goods = f.goods_items;
+        if (f.signature_menu && f.signature_menu.length > 0) popupMeta.best_items = f.signature_menu;
         if (Object.keys(popupMeta).length > 0) {
           next.metadata = {
             ...next.metadata,
-            display: {
-              ...next.metadata?.display,
-              popup: { ...(next.metadata?.display?.popup || {}), ...popupMeta },
-            },
+            display: { ...next.metadata?.display, popup: { ...(next.metadata?.display?.popup || {}), ...popupMeta } },
           };
         }
         return next;
@@ -355,9 +416,11 @@ export default function CreateEventPage() {
       setCaptionLockedFields(locked);
 
       // 캡션 파싱 후 AI 보완 자동 실행 (캡션에 없는 빈 필드만)
-      // 잠깐 딜레이 후 실행 (setFormData 반영 후)
+      // titleHint로 stale closure 우회, sourceTagsHint로 AI derived_tags 참고
+      const captionTitle = f.title || undefined;
+      const captionSourceTags = f.source_tags || [];
       setTimeout(() => {
-        handleAIEnrichPreview([]);
+        handleAIEnrichPreview([], captionTitle, captionSourceTags.length ? captionSourceTags : undefined);
       }, 300);
 
       alert(`✅ 캡션 파싱 완료! ${locked.size}개 필드 자동채우기 완료.\nAI 보완으로 나머지 필드를 채웁니다.`);
@@ -677,7 +740,8 @@ export default function CreateEventPage() {
       metadata: {},
     });
     setAgreedCopyright(false);
-    setAutoFillStatus({});
+    setFieldSources({});
+    setCaptionLockedFields(new Set());
   };
 
   return (
@@ -998,12 +1062,12 @@ export default function CreateEventPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  제목 * {autoFillStatus.title && <span className="text-green-600 text-xs">✅ AI 채움</span>}
+                  제목 * {getFieldSourceBadge('title')}
                 </label>
                 <input
                   type="text"
                   value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  onChange={(e) => { setFormData({ ...formData, title: e.target.value }); setFieldSources((p) => ({ ...p, title: 'manual' })); }}
                   className="input"
                   placeholder="이벤트 제목 (예: 롯데월드 벚꽃축제)"
                   required
@@ -1025,12 +1089,12 @@ export default function CreateEventPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  시작일 * {autoFillStatus.startAt && <span className="text-green-600 text-xs">✅ AI 채움</span>}
+                  시작일 * {getFieldSourceBadge('start_at')}
                 </label>
                 <input
                   type="date"
                   value={formData.startAt}
-                  onChange={(e) => setFormData({ ...formData, startAt: e.target.value })}
+                  onChange={(e) => { setFormData({ ...formData, startAt: e.target.value }); setFieldSources((p) => ({ ...p, start_at: 'manual' })); }}
                   className="input"
                   required
                 />
@@ -1038,12 +1102,12 @@ export default function CreateEventPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  종료일 * {autoFillStatus.endAt && <span className="text-green-600 text-xs">✅ AI 채움</span>}
+                  종료일 * {getFieldSourceBadge('end_at')}
                 </label>
                 <input
                   type="date"
                   value={formData.endAt}
-                  onChange={(e) => setFormData({ ...formData, endAt: e.target.value })}
+                  onChange={(e) => { setFormData({ ...formData, endAt: e.target.value }); setFieldSources((p) => ({ ...p, end_at: 'manual' })); }}
                   className="input"
                   required
                 />
@@ -1057,12 +1121,12 @@ export default function CreateEventPage() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  장소 * {autoFillStatus.venue && <span className="text-green-600 text-xs">✅ AI 채움</span>}
+                  장소 * {getFieldSourceBadge('venue')}
                 </label>
                 <input
                   type="text"
                   value={formData.venue}
-                  onChange={(e) => setFormData({ ...formData, venue: e.target.value })}
+                  onChange={(e) => { setFormData({ ...formData, venue: e.target.value }); setFieldSources((p) => ({ ...p, venue: 'manual' })); }}
                   className="input"
                   placeholder="예: 롯데월드몰"
                   required
@@ -1071,12 +1135,12 @@ export default function CreateEventPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  주소 (선택) {autoFillStatus.address && <span className="text-green-600 text-xs">✅ AI 채움 + 지오코딩</span>}
+                  주소 (선택) {getFieldSourceBadge('address')}
                 </label>
                 <input
                   type="text"
                   value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  onChange={(e) => { setFormData({ ...formData, address: e.target.value }); setFieldSources((p) => ({ ...p, address: 'manual' })); }}
                   className="input"
                   placeholder="서울 성동구 서울숲2길 32-14"
                 />
@@ -1211,11 +1275,11 @@ export default function CreateEventPage() {
             <h3 className="text-lg font-bold text-gray-900 mb-4 pb-2 border-b">📄 설명</h3>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                개요 (선택) {autoFillStatus.overview && <span className="text-green-600 text-xs">✅ AI 작성</span>}
+                개요 (선택) {getFieldSourceBadge('overview')}
               </label>
               <textarea
                 value={formData.overview}
-                onChange={(e) => setFormData({ ...formData, overview: e.target.value })}
+                onChange={(e) => { setFormData({ ...formData, overview: e.target.value }); setFieldSources((p) => ({ ...p, overview: 'manual' })); }}
                 className="input"
                 rows={5}
                 placeholder="이벤트에 대한 설명을 입력하세요 (AI가 자동으로 작성합니다)"
@@ -1291,7 +1355,7 @@ export default function CreateEventPage() {
           <section>
             <h3 className="text-lg font-bold text-gray-900 mb-4 pb-2 border-b">
               🔗 추가 정보
-              {autoFillStatus.externalLinks && <span className="text-green-600 text-sm ml-2">✅ AI 채움</span>}
+              {getFieldSourceBadge('external_links.official')}
             </h3>
             <div className="space-y-4">
               <div>
@@ -1364,7 +1428,7 @@ export default function CreateEventPage() {
               {/* AI 추천 태그 (수정 가능) */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  🤖 AI 추천 태그 {autoFillStatus.derivedTags && <span className="text-green-600 text-xs">✅ AI 분석</span>}
+                  🤖 AI 추천 태그 {getFieldSourceBadge('derived_tags')}
                 </label>
                 <div className="flex flex-wrap gap-2 mb-3">
                   {formData.derivedTags && formData.derivedTags.length > 0 ? (
@@ -1438,7 +1502,7 @@ export default function CreateEventPage() {
               {/* 운영 시간 (수정 가능) */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  🕐 운영 시간 (선택) {autoFillStatus.openingHours && <span className="text-green-600 text-xs">✅ AI 분석</span>}
+                  🕐 운영 시간 (선택) {getFieldSourceBadge('opening_hours')}
                 </label>
                 <div className="grid grid-cols-2 gap-4">
                   <div>

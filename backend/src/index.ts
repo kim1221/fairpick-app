@@ -5405,7 +5405,11 @@ app.post('/admin/caption-parse', requireAdminAuth, async (req, res) => {
  */
 app.post('/admin/events/enrich-preview', requireAdminAuth, async (req, res) => {
   try {
-    const { title, venue, address, main_category, overview, start_at, end_at, aiOnly, selectedFields } = req.body;
+    const { title, venue, address, main_category, overview, start_at, end_at, aiOnly, selectedFields, sourceTagsHint } = req.body;
+    // sourceTagsHint: 캡션 파싱에서 추출된 source_tags → AI derived_tags 생성 시 참고
+    const sourceTagsContext = Array.isArray(sourceTagsHint) && sourceTagsHint.length > 0
+      ? `\n\n[참고 태그] 아래 태그들은 원본 캡션에서 추출된 해시태그입니다. derived_tags 생성 시 이를 참고하되, 그대로 복사하지 말고 앱에 맞는 자연스러운 태그로 재해석하세요:\n${sourceTagsHint.join(', ')}`
+      : '';
 
     if (!title) {
       return res.status(400).json({ error: 'Title is required' });
@@ -5537,7 +5541,7 @@ app.post('/admin/events/enrich-preview', requireAdminAuth, async (req, res) => {
     let extracted = await extractEventInfoEnhanced(
       title,
       main_category || '행사',
-      overview || null,
+      (overview || '') + sourceTagsContext || null,
       yearTokens,
       aiContext,
       address || undefined,  // 🆕 주소 전달 (주차장 검색용)

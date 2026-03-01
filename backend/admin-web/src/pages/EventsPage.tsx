@@ -503,6 +503,7 @@ export default function EventsPage() {
       'Culture': { emoji: '🟢', label: 'Culture', color: 'bg-green-100 text-green-700' },
       'TourAPI': { emoji: '🟢', label: 'TourAPI', color: 'bg-green-100 text-green-700' },
       'AI': { emoji: '🟡', label: 'AI', color: 'bg-yellow-100 text-yellow-700' },
+      'Caption': { emoji: '📋', label: '캡션', color: 'bg-blue-100 text-blue-700' },
       'Manual': { emoji: '🟣', label: '수동', color: 'bg-purple-100 text-purple-700' },
       'CALCULATED': { emoji: '⚫', label: '계산', color: 'bg-gray-100 text-gray-700' },
     };

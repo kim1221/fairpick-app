@@ -166,6 +166,7 @@ export const adminApi = {
     main_category?: string;
     overview?: string;
     selectedFields?: string[]; // 🆕 선택한 필드만 재생성
+    sourceTagsHint?: string[]; // 🆕 캡션 파싱 source_tags → AI derived_tags 참고용
   }): Promise<{
     success: boolean;
     message?: string;
