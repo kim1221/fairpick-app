@@ -48,6 +48,7 @@ async function callGeminiWithGrounding(prompt: string): Promise<string> {
           }],
           generationConfig: {
             temperature: 0.3,
+            thinkingConfig: { thinkingBudget: 0 },
           }
         })
       }

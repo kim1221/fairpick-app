@@ -117,7 +117,8 @@ async function callGeminiWithGrounding(prompt: string): Promise<string> {
             google_search: {}
           }],
           generationConfig: {
-            temperature: 0.2, // 낮은 temperature = 환각 감소
+            temperature: 0.2,
+            thinkingConfig: { thinkingBudget: 0 },
           }
         })
       }

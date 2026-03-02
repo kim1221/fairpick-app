@@ -14,13 +14,15 @@ let model: any = null;
 
 if (GEMINI_API_KEY) {
   genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  model = genAI.getGenerativeModel({ 
+  model = genAI.getGenerativeModel({
     model: GEMINI_MODEL,
     generationConfig: {
-      temperature: 0.05, // 최소화: 0.1 → 0.05 (최대한 일관된 결과)
-      maxOutputTokens: 8192, // 증가: 4096 → 8192 (응답 잘림 방지)
-      topP: 0.8, // 다양성 제한
-      topK: 10, // 선택지 제한
+      temperature: 0.05,
+      maxOutputTokens: 8192,
+      topP: 0.8,
+      topK: 10,
+      // @ts-ignore - thinkingConfig은 아직 타입 정의에 없지만 API에서 지원
+      thinkingConfig: { thinkingBudget: 0 }, // thinking 비활성화 (비용 절감)
     },
   });
   console.log(`[AI] Gemini initialized (model: ${GEMINI_MODEL})`);
@@ -2268,7 +2270,12 @@ export async function extractEventInfoEnhanced(
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
       currentModel = genAI.getGenerativeModel({
         model: 'gemini-2.5-flash',
-        tools: [{ googleSearch: {} } as any], // Google Search Grounding (타입 우회)
+        tools: [{ googleSearch: {} } as any],
+        generationConfig: {
+          temperature: 0.05,
+          // @ts-ignore
+          thinkingConfig: { thinkingBudget: 0 },
+        } as any,
       });
       console.log('[AI] 🔍 Using Gemini 2.5 Flash with Google Search Grounding');
     }

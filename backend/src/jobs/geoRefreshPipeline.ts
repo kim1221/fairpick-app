@@ -219,8 +219,7 @@ export async function runGeoRefreshPipeline(): Promise<void> {
         limit: null,
         testMode: false,
         useNaverSearch: true,
-        onlyMissingTags: false,  // 모든 빈 필드 처리
-        onlyRecent: true,        // 최근 24시간만
+        // ai_enriched_at IS NULL 필터로 미처리 이벤트만 자동 선택됨
       });
       
       const step5End = Date.now();

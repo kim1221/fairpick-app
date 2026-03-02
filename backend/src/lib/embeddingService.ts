@@ -61,6 +61,26 @@ export function buildEventText(event: EventTextInput): string {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Query embedding cache (in-memory LRU)
+// ─────────────────────────────────────────────────────────────
+
+const QUERY_CACHE_MAX = 2000; // 최대 2,000개 쿼리 캐시 (메모리 ~50MB 이내)
+const queryCache = new Map<string, number[]>();
+
+function getCacheKey(text: string): string {
+  return text.trim().toLowerCase();
+}
+
+function cacheSet(key: string, value: number[]): void {
+  // LRU: 한도 초과 시 가장 오래된 항목 제거
+  if (queryCache.size >= QUERY_CACHE_MAX) {
+    const firstKey = queryCache.keys().next().value;
+    queryCache.delete(firstKey);
+  }
+  queryCache.set(key, value);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Embedding generation
 // ─────────────────────────────────────────────────────────────
 
@@ -86,16 +106,27 @@ export async function embedDocument(text: string): Promise<number[]> {
 
 /**
  * Generates an embedding vector for a search query.
- * Use taskType RETRIEVAL_QUERY for user search terms.
+ * 동일한 쿼리는 캐시에서 반환하여 Gemini API 호출 절약.
  */
 export async function embedQuery(text: string): Promise<number[]> {
+  const key = getCacheKey(text);
+
+  const cached = queryCache.get(key);
+  if (cached) {
+    console.log(`[embedQuery] cache hit: "${key}"`);
+    return cached;
+  }
+
   const genAI = getClient();
   const model = genAI.getGenerativeModel({ model: MODEL });
   const result = await model.embedContent({
     content: { parts: [{ text }], role: 'user' },
     taskType: TaskType.RETRIEVAL_QUERY,
   });
-  return result.embedding.values;
+
+  const embedding = result.embedding.values;
+  cacheSet(key, embedding);
+  return embedding;
 }
 
 /**

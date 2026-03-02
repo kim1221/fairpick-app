@@ -34,7 +34,9 @@ interface CanonicalEventRow {
   opening_hours: any;
   price_min: number | null;
   price_max: number | null;
-  manually_edited_fields: Record<string, boolean> | null;  // 🆕 수동 편집 추적
+  manually_edited_fields: Record<string, boolean> | null;
+  ai_enriched_at: string | null;
+  ai_enrichment_attempts: number;
 }
 
 interface EnrichmentStats {
@@ -557,9 +559,23 @@ async function enrichSingleEvent(
       console.log('[Enrich] ⚠️ No fields to update');
       stats.skipped++;
     }
+
+    // 성공/partial 모두 ai_enriched_at 기록 → 다음 실행에서 재처리 안 함
+    await pool.query(
+      `UPDATE canonical_events SET ai_enriched_at = NOW() WHERE id = $1`,
+      [event.id]
+    );
   } catch (error: any) {
     console.error('[Enrich] ❌ Error:', error.message);
     stats.failed++;
+
+    // 실패 횟수 증가 (3회 이상이면 자동으로 재시도 대상에서 제외됨)
+    await pool.query(
+      `UPDATE canonical_events
+       SET ai_enrichment_attempts = COALESCE(ai_enrichment_attempts, 0) + 1
+       WHERE id = $1`,
+      [event.id]
+    ).catch(() => {}); // 카운터 업데이트 실패는 무시
   }
 
   stats.processed++;
@@ -573,16 +589,16 @@ export async function aiEnrichmentBackfill(options: {
   testMode?: boolean;
   useNaverSearch?: boolean;
   onlyMissingTags?: boolean;
-  onlyRecent?: boolean;  // 최근 24시간 생성/업데이트만
-  forceFields?: string[];  // 🆕 강제로 재생성할 필드 목록 (수동 편집 무시)
+  /** @deprecated ai_enriched_at IS NULL 필터로 대체됨. 무시됨. */
+  onlyRecent?: boolean;
+  forceFields?: string[];
 }) {
   const {
     limit = null,
     testMode = false,
     useNaverSearch = true,
     onlyMissingTags = false,
-    onlyRecent = false,
-    forceFields = [],  // 🆕 빈 배열이면 모든 수동 편집 존중
+    forceFields = [],
   } = options;
 
   console.log('\n========================================');
@@ -600,21 +616,19 @@ export async function aiEnrichmentBackfill(options: {
 
   const startTime = Date.now();
 
-  // 처리할 이벤트 조회
+  // 처리할 이벤트 조회 — ai_enriched_at IS NULL인 미처리 이벤트만
   let selectSQL = `
     SELECT id, title, main_category, sub_category, venue, overview,
            derived_tags, opening_hours, price_min, price_max,
-           manually_edited_fields
+           manually_edited_fields, ai_enriched_at, ai_enrichment_attempts
     FROM canonical_events
     WHERE status IN ('scheduled', 'ongoing')
+      AND ai_enriched_at IS NULL
+      AND COALESCE(ai_enrichment_attempts, 0) < 3
   `;
 
   if (onlyMissingTags) {
     selectSQL += ` AND (derived_tags IS NULL OR jsonb_array_length(derived_tags) = 0)`;
-  }
-
-  if (onlyRecent) {
-    selectSQL += ` AND (created_at >= NOW() - INTERVAL '24 hours' OR updated_at >= NOW() - INTERVAL '24 hours')`;
   }
 
   selectSQL += ` ORDER BY created_at DESC`;
