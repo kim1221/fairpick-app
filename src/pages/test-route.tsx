@@ -20,6 +20,7 @@ function TestPage() {
   );
 }
 
-export const Route = createRoute('/test-route', {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const Route = (createRoute as any)('/test-route', {
   component: TestPage,
 });

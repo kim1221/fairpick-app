@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { createRoute } from '@granite-js/react-native';
 import React, { useEffect, useState, useMemo } from 'react';
 import { ScrollView, StyleSheet, View, Pressable, ActivityIndicator } from 'react-native';

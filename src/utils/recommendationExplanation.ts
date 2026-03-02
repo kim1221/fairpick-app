@@ -35,7 +35,7 @@ export interface RecommendationExplanation {
 export function explainRecommendation(
   event: NearbyEventItem,
   breakdown: ScoreBreakdown,
-  reasonTags: string[]
+  _reasonTags: string[]
 ): RecommendationExplanation {
   const details: RecommendationExplanation['details'] = {};
   const insights: string[] = [];

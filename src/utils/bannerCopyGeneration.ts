@@ -44,8 +44,8 @@ export interface BannerCopyResult {
  * 4. 캐시 없음
  */
 export function shouldUseGemini(
-  explanation: RecommendationExplanation,
-  reasonTags: string[]
+  _explanation: RecommendationExplanation,
+  _reasonTags: string[]
 ): boolean {
   // ✅ Gemini 2.5 Flash 활성화 (instruction 기반 프롬프트)
   return true;

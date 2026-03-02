@@ -3,7 +3,7 @@ import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'rea
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { EventCardData } from '../data/events';
 import { EventBadge } from './EventBadge';
-import { formatEventPeriodShort } from '../lib/dateUtils';
+import { formatEventPeriodHuman, getDateUrgency } from '../lib/dateUtils';
 import { getImageSource } from '../utils/imageHelpers';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
@@ -24,6 +24,23 @@ export const RankingCard: React.FC<RankingCardProps> = ({ event, rank, onPress }
   const cardWidth = SCREEN_WIDTH * 0.85;
   const cardHeight = 280;
 
+  const dateUrgency = React.useMemo(
+    () => getDateUrgency(event.startAt, event.endAt),
+    [event.startAt, event.endAt],
+  );
+
+  // 다크 배경용: critical=밝은 빨강, soon=앰버, 나머지=기본 흰색 계열
+  const dateColor =
+    dateUrgency === 'critical' ? '#FF6B6B' :
+    dateUrgency === 'soon'     ? '#FFB340' :
+    dateUrgency === 'upcoming' ? 'rgba(255,255,255,0.45)' :
+    '#C1C7CD';
+
+  const dateFontWeight: '400' | '600' | '700' =
+    dateUrgency === 'critical' ? '700' :
+    dateUrgency === 'soon'     ? '600' :
+    '400';
+
   console.log('[DEBUG] RankingCard event:', {
     id: event.id,
     title: event.title,
@@ -31,7 +48,7 @@ export const RankingCard: React.FC<RankingCardProps> = ({ event, rank, onPress }
     endAt: event.endAt,
     periodText: event.periodText,
   });
-  console.log('[DEBUG] RankingCard formatEventPeriodShort result:', formatEventPeriodShort(event.startAt, event.endAt));
+  console.log('[DEBUG] RankingCard formatEventPeriodHuman result:', formatEventPeriodHuman(event.startAt, event.endAt));
 
   return (
     <TouchableOpacity
@@ -67,8 +84,8 @@ export const RankingCard: React.FC<RankingCardProps> = ({ event, rank, onPress }
           <Text style={styles.subtitle}>
             {event.venue} · {event.region}
           </Text>
-          <Text style={styles.date}>
-            {formatEventPeriodShort(event.startAt, event.endAt)}
+          <Text style={[styles.date, { color: dateColor, fontWeight: dateFontWeight }]}>
+            {formatEventPeriodHuman(event.startAt, event.endAt)}
           </Text>
         </View>
       </View>

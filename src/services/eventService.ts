@@ -35,6 +35,7 @@ export interface NearbyEventsResult {
 export interface EventListResult {
   items: EventCardData[];
   totalCount: number;
+  searchMode?: 'text' | 'vector';
 }
 
 const eventService: EventService = {
@@ -143,6 +144,7 @@ const eventService: EventService = {
     return {
       items,
       totalCount: response.data.pageInfo.totalCount,
+      searchMode: response.data.pageInfo.searchMode,
     };
   },
   async getHotEvents(page = 1, size = 10) {
@@ -321,6 +323,7 @@ interface EventListResponse {
     page: number;
     size: number;
     totalCount: number;
+    searchMode?: 'text' | 'vector';
   };
 }
 
@@ -783,10 +786,6 @@ function normalizeRegion(rawRegion: string | null | undefined): Exclude<Region, 
 
   // 기본값: 기타
   return '기타' as Exclude<Region, '전국'>;
-}
-
-function isRegion(value: string): value is Exclude<Region, '전국'> {
-  return REGION_VALUES.includes(value as Exclude<Region, '전국'>);
 }
 
 function isCategory(value: string): value is Exclude<EventCategory, '전체'> {

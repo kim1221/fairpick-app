@@ -5,6 +5,7 @@ import { useAdaptive } from '@toss/tds-react-native/private';
 import { EventCardData } from '../data/events';
 import { EventImage } from '../components/EventImage';
 import { EventBadge } from '../components/EventBadge';
+import { formatEventPeriodHuman, getDateUrgency } from '../lib/dateUtils';
 
 interface EndingSectionProps {
   items: EventCardData[];
@@ -25,7 +26,7 @@ export function EndingSection({ items, onPressItem }: EndingSectionProps) {
   return (
     <View style={[styles.container, { backgroundColor: '#FFFFFF' }]}>
       <View style={styles.header}>
-        <Txt typography="h3" fontWeight="bold" color={adaptive.grey900}>
+        <Txt typography="t4" fontWeight="bold" color={adaptive.grey900}>
           ⏳ ENDING SOON
         </Txt>
         <Txt typography="t6" color={adaptive.grey600} style={styles.subtitle}>
@@ -48,6 +49,15 @@ interface CompactCardProps {
 }
 
 function CompactCard({ event, adaptive, onPress }: CompactCardProps) {
+  const dateUrgency = getDateUrgency(event.startAt, event.endAt);
+  const dateColor =
+    dateUrgency === 'critical' ? '#FF3B30' :
+    dateUrgency === 'soon'     ? '#FF9500' :
+    dateUrgency === 'upcoming' ? adaptive.grey400 :
+    adaptive.grey600;
+  const dateFontWeight: 'bold' | 'normal' =
+    dateUrgency === 'critical' || dateUrgency === 'soon' ? 'bold' : 'normal';
+
   return (
     <Pressable
       style={[styles.card, { backgroundColor: adaptive.background }]}
@@ -78,11 +88,11 @@ function CompactCard({ event, adaptive, onPress }: CompactCardProps) {
         <Post.H4 numberOfLines={2} style={styles.title}>
           {event.title}
         </Post.H4>
-        <Post.Paragraph typography="t7" color={adaptive.grey700} numberOfLines={1}>
-          {event.periodText}
+        <Post.Paragraph typography="t7" color={dateColor} fontWeight={dateFontWeight} numberOfLines={1}>
+          {formatEventPeriodHuman(event.startAt, event.endAt)}
         </Post.Paragraph>
         {event.venue ? (
-          <Post.Paragraph typography="t8" color={adaptive.grey600} numberOfLines={1}>
+          <Post.Paragraph typography="t7" color={adaptive.grey600} numberOfLines={1}>
             {event.venue}
           </Post.Paragraph>
         ) : null}

@@ -49,20 +49,20 @@ export interface AdminMetricsResponse {
 
 class AdminService {
   private getAdminKey(): string | null {
-    if (typeof window !== 'undefined') {
+    if (typeof (globalThis as any).window !== "undefined") {
       return localStorage.getItem('adminKey');
     }
     return null;
   }
 
   setAdminKey(key: string): void {
-    if (typeof window !== 'undefined') {
+    if (typeof (globalThis as any).window !== "undefined") {
       localStorage.setItem('adminKey', key);
     }
   }
 
   clearAdminKey(): void {
-    if (typeof window !== 'undefined') {
+    if (typeof (globalThis as any).window !== "undefined") {
       localStorage.removeItem('adminKey');
     }
   }

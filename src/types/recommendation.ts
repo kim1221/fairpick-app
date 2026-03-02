@@ -25,6 +25,8 @@ export interface Event {
   share_count: number;
   buzz_score: number;
   metadata?: any;
+  is_free?: boolean;
+  is_ending_soon?: boolean;
   created_at: string;
   updated_at: string;
 }

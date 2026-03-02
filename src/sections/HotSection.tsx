@@ -28,7 +28,7 @@ export function HotSection({ items, onPressItem }: HotSectionProps) {
   return (
     <View style={[styles.container, { backgroundColor: '#FFFFFF' }]}>
       <View style={styles.header}>
-        <Txt typography="h3" fontWeight="bold" color={adaptive.grey900}>
+        <Txt typography="t4" fontWeight="bold" color={adaptive.grey900}>
           🔥 HOT
         </Txt>
         <Txt typography="t6" color={adaptive.grey600} style={styles.subtitle}>
@@ -51,7 +51,7 @@ export function HotSection({ items, onPressItem }: HotSectionProps) {
               index === items.length - 1 && styles.cardLast,
             ]}
           >
-            <RankingCard event={event} rank={index + 1} onPress={handlePress} />
+            <RankingCard event={event} rank={index + 1} onPress={() => handlePress(event)} />
           </View>
         ))}
       </ScrollView>

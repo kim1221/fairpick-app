@@ -7,7 +7,8 @@
  */
 
 import { computePersonalScoreForEvent, PersonalScoreInput, PersonalScoreResult } from './personalScore';
-import { loadUserProfile, UserProfile } from './userProfile';
+import { loadUserProfile } from './userProfile';
+import type { UserProfile as _UserProfile } from './userProfile';
 import { normalizeRegionKey, normalizeCategoryKey, getTimeBucketsFromDate, detectKeyMappingIssues } from './normalizationDebug';
 
 // ============================================================
@@ -238,7 +239,7 @@ export async function auditPersonalScoreOnEvent(
   event: PersonalScoreInput,
   opts?: AuditOptions
 ): Promise<AuditResult> {
-  const verbose = opts?.verbose || false;
+  void opts?.verbose;
   const warnings: string[] = [];
   const specChecks: SpecCheck[] = [];
 

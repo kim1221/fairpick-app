@@ -7,6 +7,7 @@ import eventService from '../services/eventService';
 import { EventCardData } from '../data/events';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { getImageSource } from '../utils/imageHelpers';
+import { formatEventPeriodHuman, getDateUrgency } from '../lib/dateUtils';
 
 
 export const Route = createRoute('/hot', {
@@ -203,6 +204,15 @@ function HotPage() {
             events.map((event, index) => {
               const rank = index + 1;
               const rankStyle = getRankBadgeStyle(rank);
+              const dateUrgency = getDateUrgency(event.startAt, event.endAt);
+              const dateColor =
+                dateUrgency === 'critical' ? '#FF3B30' :
+                dateUrgency === 'soon'     ? '#FF9500' :
+                dateUrgency === 'upcoming' ? adaptive.grey400 :
+                adaptive.grey600;
+              const dateFontWeight: '400' | '600' | '700' =
+                dateUrgency === 'critical' ? '700' :
+                dateUrgency === 'soon'     ? '600' : '400';
 
               return (
                 <Pressable
@@ -241,7 +251,7 @@ function HotPage() {
                     <Text style={styles.eventTitle} numberOfLines={2}>
                       {event.title}
                     </Text>
-                    <Text style={styles.eventMeta}>{event.periodText}</Text>
+                    <Text style={[styles.eventMeta, { color: dateColor, fontWeight: dateFontWeight }]}>{formatEventPeriodHuman(event.startAt, event.endAt)}</Text>
                     {event.venue && (
                       <View style={styles.venueRow}>
                         <Icon name="icon-pin-mono" size={11} color={adaptive.grey500} style={{ marginRight: 3 }} />

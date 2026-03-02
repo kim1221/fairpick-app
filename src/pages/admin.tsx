@@ -12,7 +12,8 @@ import {
 } from 'react-native';
 import adminService, { AdminFeaturedEvent, AdminMetricsResponse } from '../services/adminService';
 
-export const Route = createRoute('/admin', {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const Route = (createRoute as any)('/admin', {
   component: Page,
 });
 

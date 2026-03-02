@@ -100,6 +100,30 @@ export async function logEventClick(
   return logUserAction(eventId, 'click', { clickSource });
 }
 
+/**
+ * 검색 쿼리 로그 — 자동완성 데이터 축적용
+ */
+export async function logSearchQuery(
+  query: string,
+  resultCount?: number,
+  searchMode?: string,
+  metadata?: Record<string, any>
+): Promise<void> {
+  try {
+    const userId = await getCurrentUserId().catch(() => 'anonymous');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+    await fetch(`${API_BASE_URL}/api/search-logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, query, resultCount, searchMode, metadata }),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutId));
+  } catch {
+    // fire-and-forget: 실패해도 무시
+  }
+}
+
 // ==================== Export ====================
 
 const userEventService = {
@@ -108,6 +132,7 @@ const userEventService = {
   logEventUnsave,
   logEventShare,
   logEventClick,
+  logSearchQuery,
 };
 
 export default userEventService;

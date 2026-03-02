@@ -5,6 +5,7 @@ import { useAdaptive } from '@toss/tds-react-native/private';
 import eventService from '../services/eventService';
 import { EventCardData } from '../data/events';
 import { EventImage } from './EventImage';
+import { formatEventPeriodHuman, getDateUrgency } from '../lib/dateUtils';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH = SCREEN_WIDTH * 0.7; // 카드 너비 = 화면의 70%
@@ -107,7 +108,14 @@ interface RecommendCardProps {
 }
 
 function RecommendCard({ event, adaptive, onPress, isFirst, isLast }: RecommendCardProps) {
-  // badge 속성은 EventCardData에 없으므로 제거
+  const dateUrgency = getDateUrgency(event.startAt, event.endAt);
+  const dateColor =
+    dateUrgency === 'critical' ? '#FF3B30' :
+    dateUrgency === 'soon'     ? '#FF9500' :
+    dateUrgency === 'upcoming' ? adaptive.grey400 :
+    adaptive.grey600;
+  const dateFontWeight: 'bold' | 'normal' =
+    dateUrgency === 'critical' || dateUrgency === 'soon' ? 'bold' : 'normal';
 
   return (
     <Pressable
@@ -152,8 +160,8 @@ function RecommendCard({ event, adaptive, onPress, isFirst, isLast }: RecommendC
         </Post.H3>
 
         {/* Period */}
-        <Post.Paragraph typography="t7" color={adaptive.grey700} numberOfLines={1}>
-          {event.periodText}
+        <Post.Paragraph typography="t7" color={dateColor} fontWeight={dateFontWeight} numberOfLines={1}>
+          {formatEventPeriodHuman(event.startAt, event.endAt)}
         </Post.Paragraph>
 
         {/* Venue */}

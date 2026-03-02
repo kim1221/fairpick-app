@@ -37,7 +37,7 @@ interface BannerContext {
   // Recommendation explanation (for Gemini)
   recommendationExplanation?: RecommendationExplanation;
   // AI copy generation info
-  copySource?: 'gemini' | 'template' | 'cache';
+  copySource?: 'ai' | 'gemini' | 'template' | 'cache';
   // 추천 실패 이유 (없으면 추천 성공)
   noRecommendationReason?: 'nearby_empty' | 'guardrails_filtered' | 'low_score';
 }

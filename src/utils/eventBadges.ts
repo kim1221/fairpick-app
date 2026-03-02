@@ -32,6 +32,6 @@ export const getEventBadges = (event: EventCardData): BadgeType[] => {
  */
 export const getPrimaryBadge = (event: EventCardData): BadgeType | null => {
   const badges = getEventBadges(event);
-  return badges.length > 0 ? badges[0] : null;
+  return badges.length > 0 ? badges[0]! : null;
 };
 

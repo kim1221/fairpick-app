@@ -133,6 +133,7 @@ const STORAGE_KEYS = {
   GEMINI_CACHE: 'fairpick_banner_gemini_cache_v1',
   TODAY_BANNER: 'fairpick_today_banner_v1',
   AI_CACHE_BYPASS: 'fairpick_ai_cache_bypass_dev', // 개발용 캐시 바이패스 플래그
+  AI_NOTICE_SHOWN: 'fairpick_ai_notice_shown', // 생성형 AI 사전 고지 표시 여부
 } as const;
 
 // DEV: Storage 객체 존재 확인 (한 번만)
@@ -147,7 +148,7 @@ if (__DEV__) {
 /**
  * JSON 배열 데이터 읽기 (안전장치 포함)
  */
-async function readJsonArray(key: string): Promise<string[]> {
+export async function readJsonArray(key: string): Promise<string[]> {
   try {
     console.log(`[Storage][readJsonArray][START] key=${key}, timestamp=${new Date().toISOString()}`);
 
@@ -302,7 +303,7 @@ export async function writeRecentV2(data: RecentDataV2): Promise<void> {
 /**
  * JSON 배열 데이터 쓰기
  */
-async function writeJsonArray(key: string, arr: string[]): Promise<void> {
+export async function writeJsonArray(key: string, arr: string[]): Promise<void> {
   try {
     console.log(`[Storage][writeJsonArray][START] key=${key}, arrayLen=${arr.length}, first5=${arr.slice(0, 5).join(',')}, timestamp=${new Date().toISOString()}`);
 
@@ -1030,6 +1031,33 @@ export async function __debugStorageSmokeTest(): Promise<void> {
       errorMessage: error instanceof Error ? error.message : String(error),
       errorStack: error instanceof Error ? error.stack : undefined
     });
+  }
+}
+
+// ============================================================
+// 생성형 AI 사전 고지
+// ============================================================
+
+/**
+ * AI 고지 표시 여부 확인
+ */
+export async function getAiNoticeShown(): Promise<boolean> {
+  try {
+    const raw = await TossStorage.getItem(STORAGE_KEYS.AI_NOTICE_SHOWN);
+    return raw === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * AI 고지 표시 완료 저장
+ */
+export async function setAiNoticeShown(): Promise<void> {
+  try {
+    await TossStorage.setItem(STORAGE_KEYS.AI_NOTICE_SHOWN, 'true');
+  } catch (error) {
+    console.error('[Storage][setAiNoticeShown] Exception', { error });
   }
 }
 

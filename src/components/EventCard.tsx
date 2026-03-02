@@ -8,6 +8,7 @@ import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, ViewStyle } from 'react-native';
 import type { ScoredEvent } from '../types/recommendation';
 import { useAdaptive } from '@toss/tds-react-native/private';
+import { formatEventPeriodHuman, getDateUrgency, type DateUrgency } from '../lib/dateUtils';
 
 // ==================== 타입 정의 ====================
 
@@ -18,63 +19,6 @@ interface EventCardProps {
 }
 
 // ==================== 헬퍼 함수 ====================
-
-/**
- * 날짜 포맷팅 (YYYY-MM-DD → MM.DD)
- */
-function formatDate(dateString: string): string {
-  try {
-    const date = new Date(dateString);
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    return `${month}.${day}`;
-  } catch {
-    return dateString;
-  }
-}
-
-/**
- * 기간 포맷팅
- */
-function formatPeriod(startDate: string, endDate: string): string {
-  return `${formatDate(startDate)} - ${formatDate(endDate)}`;
-}
-
-/**
- * 거리 포맷팅 (거리 + 이동 시간)
- *
- * 계산 기준:
- * - 도보: 평균 4km/h (분속 67m)
- * - 대중교통: 평균 20km/h + 대기시간 5분
- * - 직선 거리 × 1.3 (실제 도로 우회율)
- */
-function formatDistance(distanceKm?: number): string {
-  if (!distanceKm) return '';
-
-  // 실제 도로 거리 추정 (직선 거리 × 1.3)
-  const actualKm = distanceKm * 1.3;
-
-  // 거리 표시
-  const distanceText = actualKm < 1
-    ? `${Math.round(actualKm * 1000)}m`
-    : `${actualKm.toFixed(1)}km`;
-
-  // 1km 이하: 도보 시간
-  if (actualKm <= 1) {
-    const walkMin = Math.round((actualKm / 4) * 60);
-    return `${distanceText} · 도보 ${walkMin}분`;
-  }
-
-  // 1-3km: 도보 가능
-  if (actualKm <= 3) {
-    const walkMin = Math.round((actualKm / 4) * 60);
-    return `${distanceText} · 도보 ${walkMin}분`;
-  }
-
-  // 3km 이상: 대중교통 시간
-  const transitMin = Math.round((actualKm / 20) * 60) + 5;
-  return `${distanceText} · 대중교통 ${transitMin}분`;
-}
 
 // ==================== 스타일 헬퍼 ====================
 
@@ -139,6 +83,15 @@ function getCategoryColor(category: string): string {
   };
   return colorMap[category] || '#F3F4F6';
 }
+
+// 긴박도 → 색상 매핑 (라이트 배경용)
+// critical: 시스템 레드  / soon: 앰버  / normal: TDS grey600  / upcoming: TDS grey400
+const DATE_URGENCY_COLOR: Record<DateUrgency, string> = {
+  critical: '#FF3B30',
+  soon:     '#FF9500',
+  normal:   '',          // adaptive.grey600 로 처리
+  upcoming: '',          // adaptive.grey400 로 처리
+};
 
 // ==================== 정적 스타일 (색상 없음) ====================
 
@@ -338,6 +291,23 @@ export const EventCard: React.FC<EventCardProps> = ({ event, onPress, variant = 
   const adaptive = useAdaptive();
   const styles = useMemo(() => createStyles(adaptive), [adaptive]);
 
+  const dateUrgency = useMemo(
+    () => getDateUrgency(event.start_date, event.end_date),
+    [event.start_date, event.end_date],
+  );
+
+  // 긴박도별 색상: critical/soon은 고정색, 나머지는 adaptive 토큰
+  const dateColor =
+    dateUrgency === 'critical' ? DATE_URGENCY_COLOR.critical :
+    dateUrgency === 'soon'     ? DATE_URGENCY_COLOR.soon :
+    dateUrgency === 'upcoming' ? adaptive.grey400 :
+    adaptive.grey600;
+
+  const dateFontWeight: '400' | '600' | '700' =
+    dateUrgency === 'critical' ? '700' :
+    dateUrgency === 'soon'     ? '600' :
+    '400';
+
   const renderImage = () => (
     <View style={[styles.imageContainer, getImageStyle(variant)]}>
       {event.thumbnail_url ? (
@@ -384,19 +354,10 @@ export const EventCard: React.FC<EventCardProps> = ({ event, onPress, variant = 
         </View>
       )}
 
-      {/* 메타 정보 */}
-      <View style={staticStyles.metaContainer}>
-        {event.distance_km !== undefined && (
-          <Text style={styles.metaText}>
-            {formatDistance(event.distance_km)}
-          </Text>
-        )}
-        {event.start_date && event.end_date && (
-          <Text style={styles.metaText}>
-            {formatPeriod(event.start_date, event.end_date)}
-          </Text>
-        )}
-      </View>
+      {/* 날짜 — 긴박도에 따라 색상·굵기 변화 */}
+      <Text style={[styles.metaText, { color: dateColor, fontWeight: dateFontWeight }]}>
+        {formatEventPeriodHuman(event.start_date, event.end_date)}
+      </Text>
 
       {/* 장소 (large variant만) */}
       {variant === 'large' && event.venue && (

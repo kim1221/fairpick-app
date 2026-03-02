@@ -5,6 +5,7 @@ import { useAdaptive } from '@toss/tds-react-native/private';
 import { EventCardData } from '../data/events';
 import { EventImage } from '../components/EventImage';
 import { EventBadge } from '../components/EventBadge';
+import { formatEventPeriodHuman, getDateUrgency } from '../lib/dateUtils';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH = SCREEN_WIDTH * 0.7;
@@ -29,7 +30,7 @@ export function FreeSection({ items, onPressItem }: FreeSectionProps) {
   return (
     <View style={[styles.container, { backgroundColor: '#FFFFFF' }]}>
       <View style={styles.header}>
-        <Txt typography="h3" fontWeight="bold" color={adaptive.grey900}>
+        <Txt typography="t4" fontWeight="bold" color={adaptive.grey900}>
           💸 FREE
         </Txt>
         <Txt typography="t6" color={adaptive.grey600} style={styles.subtitle}>
@@ -67,6 +68,15 @@ interface FreeCardProps {
 }
 
 function FreeCard({ event, adaptive, onPress, isFirst, isLast }: FreeCardProps) {
+  const dateUrgency = getDateUrgency(event.startAt, event.endAt);
+  const dateColor =
+    dateUrgency === 'critical' ? '#FF3B30' :
+    dateUrgency === 'soon'     ? '#FF9500' :
+    dateUrgency === 'upcoming' ? adaptive.grey400 :
+    adaptive.grey600;
+  const dateFontWeight: 'bold' | 'normal' =
+    dateUrgency === 'critical' || dateUrgency === 'soon' ? 'bold' : 'normal';
+
   return (
     <Pressable
       style={[
@@ -104,13 +114,13 @@ function FreeCard({ event, adaptive, onPress, isFirst, isLast }: FreeCardProps) 
         </Post.H3>
 
         {/* Period */}
-        <Post.Paragraph typography="t7" color={adaptive.grey700} numberOfLines={1}>
-          {event.periodText}
+        <Post.Paragraph typography="t7" color={dateColor} fontWeight={dateFontWeight} numberOfLines={1}>
+          {formatEventPeriodHuman(event.startAt, event.endAt)}
         </Post.Paragraph>
 
         {/* Venue */}
         {event.venue ? (
-          <Post.Paragraph typography="t8" color={adaptive.grey600} numberOfLines={1}>
+          <Post.Paragraph typography="t7" color={adaptive.grey600} numberOfLines={1}>
             {event.venue}
           </Post.Paragraph>
         ) : null}
