@@ -11,13 +11,23 @@ import path from 'path';
 import { config } from '../config';
 
 function buildMtlsAgent(): https.Agent | undefined {
+  // Production: Base64 env var 방식 (Railway)
+  const certB64 = process.env.TOSS_CERT_B64;
+  const keyB64 = process.env.TOSS_KEY_B64;
+  if (certB64 && keyB64) {
+    return new https.Agent({
+      cert: Buffer.from(certB64, 'base64'),
+      key: Buffer.from(keyB64, 'base64'),
+    });
+  }
+
+  // Local dev: 파일 경로 방식
   const { certPath, keyPath } = config.toss;
   if (!certPath || !keyPath) {
     if (process.env.NODE_ENV === 'development') console.warn('[tossHttpAgent] mTLS 인증서 미설정 — TOSS_CERT_PATH / TOSS_KEY_PATH 확인');
     return undefined;
   }
 
-  // 상대 경로면 backend/ 루트 기준으로 resolve해요
   const backendRoot = path.resolve(__dirname, '../../');
   const resolvedCert = path.isAbsolute(certPath) ? certPath : path.join(backendRoot, certPath);
   const resolvedKey = path.isAbsolute(keyPath) ? keyPath : path.join(backendRoot, keyPath);
