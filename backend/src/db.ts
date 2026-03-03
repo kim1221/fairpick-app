@@ -1,7 +1,13 @@
 import { Pool } from 'pg';
 import { config } from './config';
 
-export const pool = new Pool(config.db);
+// DATABASE_URL이 있으면 connectionString으로, 없으면 개별 환경변수로 연결
+export const pool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    })
+  : new Pool(config.db);
 
 export async function upsertEvent(event: EventRecord) {
   await pool.query(
