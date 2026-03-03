@@ -21,8 +21,9 @@ export function decryptTossValue(encryptedValue: string | null | undefined): str
   if (!encryptedValue) return null;
 
   const { decryptKey, decryptAad } = config.toss;
+  const isDev = process.env.NODE_ENV === 'development';
   if (!decryptKey || !decryptAad) {
-    if (__DEV__) console.warn('[tossDecrypt] TOSS_DECRYPT_KEY 또는 TOSS_DECRYPT_AAD 미설정');
+    if (isDev) console.warn('[tossDecrypt] TOSS_DECRYPT_KEY 또는 TOSS_DECRYPT_AAD 미설정');
     return null;
   }
 
@@ -40,7 +41,7 @@ export function decryptTossValue(encryptedValue: string | null | undefined): str
 
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
   } catch (err) {
-    if (__DEV__) console.error('[tossDecrypt] 복호화 실패:', err);
+    if (isDev) console.error('[tossDecrypt] 복호화 실패:', err);
     return null;
   }
 }

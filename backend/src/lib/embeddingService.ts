@@ -74,7 +74,7 @@ function getCacheKey(text: string): string {
 function cacheSet(key: string, value: number[]): void {
   // LRU: 한도 초과 시 가장 오래된 항목 제거
   if (queryCache.size >= QUERY_CACHE_MAX) {
-    const firstKey = queryCache.keys().next().value;
+    const firstKey = queryCache.keys().next().value!;
     queryCache.delete(firstKey);
   }
   queryCache.set(key, value);

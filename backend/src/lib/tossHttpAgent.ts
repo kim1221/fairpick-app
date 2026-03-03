@@ -13,7 +13,7 @@ import { config } from '../config';
 function buildMtlsAgent(): https.Agent | undefined {
   const { certPath, keyPath } = config.toss;
   if (!certPath || !keyPath) {
-    if (__DEV__) console.warn('[tossHttpAgent] mTLS 인증서 미설정 — TOSS_CERT_PATH / TOSS_KEY_PATH 확인');
+    if (process.env.NODE_ENV === 'development') console.warn('[tossHttpAgent] mTLS 인증서 미설정 — TOSS_CERT_PATH / TOSS_KEY_PATH 확인');
     return undefined;
   }
 

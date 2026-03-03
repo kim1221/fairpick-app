@@ -598,6 +598,7 @@ export async function aiEnrichmentBackfill(options: {
     testMode = false,
     useNaverSearch = true,
     onlyMissingTags = false,
+    onlyRecent = false,
     forceFields = [],
   } = options;
 
