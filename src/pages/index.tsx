@@ -1,5 +1,6 @@
 /**
- * Fairpick - 추천 중심 홈 화면
+ * Fairpick - 홈 화면
+ * curation_themes 기반 동적 섹션 렌더링
  */
 
 import { createRoute } from '@granite-js/react-native';
@@ -10,32 +11,34 @@ import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { EventCard } from '../components/EventCard';
 
-// Toss MiniApp - 위치 정보
 import { Accuracy, getCurrentLocation, GetCurrentLocationPermissionError } from '@apps-in-toss/framework';
 
-// API 서비스
 import recommendationService from '../services/recommendationService';
 import userEventService from '../services/userEventService';
 import { getCurrentUserId } from '../utils/anonymousUser';
 import { getAiNoticeShown, setAiNoticeShown } from '../utils/storage';
 import { reverseGeocode } from '../utils/geocoding';
 
-// 타입
-import type { ScoredEvent } from '../types/recommendation';
-import type { Location } from '../types/recommendation';
+import type { ScoredEvent, Location } from '../types/recommendation';
 
 export const Route = createRoute('/', {
   component: HomePage,
 });
 
-// ==================== 타입 정의 ====================
+// ─────────────────────────────────────────────────────────────
+// 타입
+// ─────────────────────────────────────────────────────────────
 
-interface TodayPickData {
-  event: ScoredEvent | null;
-  loading: boolean;
+interface HomeSection {
+  slug: string;
+  title: string;
+  subtitle: string | null;
+  events: ScoredEvent[];
 }
 
-// ==================== 색상 토큰 ====================
+// ─────────────────────────────────────────────────────────────
+// 스타일
+// ─────────────────────────────────────────────────────────────
 
 type Adaptive = ReturnType<typeof useAdaptive>;
 
@@ -46,71 +49,18 @@ const createSkeletonStyles = (a: Adaptive) => StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
   },
-  largeImage: {
-    height: 200,
-    backgroundColor: a.grey200,
-  },
-  content: {
-    padding: 16,
-    gap: 8,
-  },
-  badge: {
-    width: 48,
-    height: 20,
-    backgroundColor: a.grey200,
-    borderRadius: 10,
-  },
-  titleLine1: {
-    height: 20,
-    backgroundColor: a.grey200,
-    borderRadius: 4,
-    width: '85%',
-  },
-  titleLine2: {
-    height: 20,
-    backgroundColor: a.grey200,
-    borderRadius: 4,
-    width: '60%',
-  },
-  meta: {
-    height: 14,
-    backgroundColor: a.grey200,
-    borderRadius: 4,
-    width: '40%',
-    marginTop: 4,
-  },
-  smallCard: {
-    width: 160,
-    backgroundColor: a.background,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  smallImage: {
-    height: 100,
-    backgroundColor: a.grey200,
-  },
-  smallContent: {
-    padding: 10,
-    gap: 6,
-  },
-  smallBadge: {
-    width: 36,
-    height: 16,
-    backgroundColor: a.grey200,
-    borderRadius: 8,
-  },
-  smallTitle1: {
-    height: 14,
-    backgroundColor: a.grey200,
-    borderRadius: 4,
-    width: '90%',
-  },
-  smallTitle2: {
-    height: 14,
-    backgroundColor: a.grey200,
-    borderRadius: 4,
-    width: '65%',
-  },
+  largeImage: { height: 200, backgroundColor: a.grey200 },
+  content: { padding: 16, gap: 8 },
+  badge: { width: 48, height: 20, backgroundColor: a.grey200, borderRadius: 10 },
+  titleLine1: { height: 20, backgroundColor: a.grey200, borderRadius: 4, width: '85%' },
+  titleLine2: { height: 20, backgroundColor: a.grey200, borderRadius: 4, width: '60%' },
+  meta: { height: 14, backgroundColor: a.grey200, borderRadius: 4, width: '40%', marginTop: 4 },
+  smallCard: { width: 160, backgroundColor: a.background, borderRadius: 12, overflow: 'hidden' },
+  smallImage: { height: 100, backgroundColor: a.grey200 },
+  smallContent: { padding: 10, gap: 6 },
+  smallBadge: { width: 36, height: 16, backgroundColor: a.grey200, borderRadius: 8 },
+  smallTitle1: { height: 14, backgroundColor: a.grey200, borderRadius: 4, width: '90%' },
+  smallTitle2: { height: 14, backgroundColor: a.grey200, borderRadius: 4, width: '65%' },
 });
 
 const createStyles = (a: Adaptive) => StyleSheet.create({
@@ -122,46 +72,19 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  aiNoticeText: {
-    flex: 1,
-    fontSize: 13,
-    color: a.blue500,
-    fontWeight: '500',
-  },
-  aiNoticeClose: {
-    fontSize: 14,
-    color: a.grey500,
-    marginLeft: 8,
-  },
-  container: {
-    flex: 1,
-    backgroundColor: a.grey100,
-  },
-  scrollView: {
-    flex: 1,
-  },
+  aiNoticeText: { flex: 1, fontSize: 13, color: a.blue500, fontWeight: '500' },
+  aiNoticeClose: { fontSize: 14, color: a.grey500, marginLeft: 8 },
+  container: { flex: 1, backgroundColor: a.grey100 },
+  scrollView: { flex: 1 },
   header: {
     backgroundColor: a.background,
     paddingHorizontal: 20,
     paddingTop: 50,
     paddingBottom: 16,
   },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: a.grey900,
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: a.grey600,
-    fontWeight: '500',
-  },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  title: { fontSize: 28, fontWeight: '700', color: a.grey900, marginBottom: 4 },
+  subtitle: { fontSize: 14, color: a.grey600, fontWeight: '500' },
   locationButton: {
     height: 36,
     paddingHorizontal: 12,
@@ -171,40 +94,13 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     justifyContent: 'center',
     marginTop: 4,
   },
-  locationButtonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  locationButtonText: {
-    fontSize: 13,
-    color: a.blue600,
-    fontWeight: '600',
-  },
-  section: {
-    marginTop: 24,
-    marginBottom: 8,
-  },
-  sectionHeader: {
-    paddingHorizontal: 20,
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: a.grey900,
-    letterSpacing: -0.3,
-  },
-  sectionSubtitle: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: a.grey500,
-    marginTop: 4,
-  },
-  horizontalList: {
-    paddingHorizontal: 20,
-    gap: 12,
-  },
+  locationButtonContent: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  locationButtonText: { fontSize: 13, color: a.blue600, fontWeight: '600' },
+  section: { marginTop: 24, marginBottom: 8 },
+  sectionHeader: { paddingHorizontal: 20, marginBottom: 16 },
+  sectionTitle: { fontSize: 20, fontWeight: '700', color: a.grey900, letterSpacing: -0.3 },
+  sectionSubtitle: { fontSize: 13, fontWeight: '400', color: a.grey500, marginTop: 4 },
+  horizontalList: { paddingHorizontal: 20, gap: 12 },
   emptyCard: {
     height: 300,
     backgroundColor: a.grey50,
@@ -213,26 +109,25 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     justifyContent: 'center',
     marginHorizontal: 20,
   },
-  emptyText: {
-    fontSize: 14,
-    color: a.grey600,
-  },
+  emptyText: { fontSize: 14, color: a.grey600 },
 });
 
-// ==================== 스켈레톤 컴포넌트 ====================
+// ─────────────────────────────────────────────────────────────
+// 스켈레톤
+// ─────────────────────────────────────────────────────────────
 
 function TodayPickSkeleton() {
   const adaptive = useAdaptive();
-  const skeletonStyles = React.useMemo(() => createSkeletonStyles(adaptive), [adaptive]);
+  const s = React.useMemo(() => createSkeletonStyles(adaptive), [adaptive]);
   return (
-    <AnimateSkeleton delay={0} withGradient={false} withShimmer={true}>
-      <View style={skeletonStyles.largeCard}>
-        <View style={skeletonStyles.largeImage} />
-        <View style={skeletonStyles.content}>
-          <View style={skeletonStyles.badge} />
-          <View style={skeletonStyles.titleLine1} />
-          <View style={skeletonStyles.titleLine2} />
-          <View style={skeletonStyles.meta} />
+    <AnimateSkeleton delay={0} withGradient={false} withShimmer>
+      <View style={s.largeCard}>
+        <View style={s.largeImage} />
+        <View style={s.content}>
+          <View style={s.badge} />
+          <View style={s.titleLine1} />
+          <View style={s.titleLine2} />
+          <View style={s.meta} />
         </View>
       </View>
     </AnimateSkeleton>
@@ -241,17 +136,17 @@ function TodayPickSkeleton() {
 
 function HorizontalSectionSkeleton() {
   const adaptive = useAdaptive();
-  const skeletonStyles = React.useMemo(() => createSkeletonStyles(adaptive), [adaptive]);
+  const s = React.useMemo(() => createSkeletonStyles(adaptive), [adaptive]);
   return (
-    <AnimateSkeleton delay={0} withGradient={false} withShimmer={true}>
+    <AnimateSkeleton delay={0} withGradient={false} withShimmer>
       <View style={{ flexDirection: 'row', paddingHorizontal: 20, gap: 12 }}>
         {[0, 1, 2].map((i) => (
-          <View key={i} style={skeletonStyles.smallCard}>
-            <View style={skeletonStyles.smallImage} />
-            <View style={skeletonStyles.smallContent}>
-              <View style={skeletonStyles.smallBadge} />
-              <View style={skeletonStyles.smallTitle1} />
-              <View style={skeletonStyles.smallTitle2} />
+          <View key={i} style={s.smallCard}>
+            <View style={s.smallImage} />
+            <View style={s.smallContent}>
+              <View style={s.smallBadge} />
+              <View style={s.smallTitle1} />
+              <View style={s.smallTitle2} />
             </View>
           </View>
         ))}
@@ -260,27 +155,22 @@ function HorizontalSectionSkeleton() {
   );
 }
 
-// ==================== 홈 화면 컴포넌트 ====================
+// ─────────────────────────────────────────────────────────────
+// 홈 화면
+// ─────────────────────────────────────────────────────────────
 
 function HomePage() {
   const navigation = Route.useNavigation();
   const adaptive = useAdaptive();
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
-  // 상태 관리
-  const [todayPick, setTodayPick] = useState<TodayPickData>({ event: null, loading: true });
-  const [nearby, setNearby] = useState<ScoredEvent[] | null>(null); // null=로딩, []=없음
-  const [trending, setTrending] = useState<ScoredEvent[] | null>(null);
-  const [endingSoon, setEndingSoon] = useState<ScoredEvent[] | null>(null);
-  const [exhibition, setExhibition] = useState<ScoredEvent[] | null>(null);
-  const [weekend, setWeekend] = useState<ScoredEvent[] | null>(null);
-  const [freeEvents, setFreeEvents] = useState<ScoredEvent[] | null>(null);
-  const [latest, setLatest] = useState<ScoredEvent[] | null>(null);
-  const [userId, setUserId] = useState<string>('');
+  // null = 로딩 중, [] = 실패/빈 상태, [...] = 로드 완료
+  const [sections, setSections] = useState<HomeSection[] | null>(null);
+  const [_userId, setUserId] = useState('');
   const [location, setLocation] = useState<Location | undefined>(undefined);
-  const [currentAddress, setCurrentAddress] = useState<string>(''); // 행정동 표시
-  const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [showAiNotice, setShowAiNotice] = useState<boolean>(false);
+  const [currentAddress, setCurrentAddress] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [showAiNotice, setShowAiNotice] = useState(false);
 
   const excludedIds = useRef<Set<string>>(new Set());
 
@@ -301,350 +191,131 @@ function HomePage() {
 
   const initializeUser = async () => {
     try {
-      const currentUserId = await getCurrentUserId();
-      setUserId(currentUserId);
-
-      console.log('[Home] User initialized:', { userId: currentUserId });
-
-      // 위치 정보 요청 (반환값 사용)
-      const userLocation = await requestLocation();
-
-      // 사용자 정보 로드 후 추천 로드 (위치 정보 전달)
-      await loadRecommendations(currentUserId, userLocation);
+      const uid = await getCurrentUserId();
+      setUserId(uid);
+      const loc = await requestLocation();
+      await loadSections(loc);
     } catch (error) {
-      console.error('[Home] Failed to initialize user:', error);
-      // 에러가 발생해도 추천은 로드
-      await loadRecommendations();
+      console.error('[Home] init error:', error);
+      await loadSections();
     }
   };
 
-  /**
-   * 위치 정보 요청
-   */
   const requestLocation = async (): Promise<Location | undefined> => {
     try {
-      console.log('[Home/Location] Requesting location permission...');
-
-      // 1. 현재 권한 상태 확인
       const permission = await getCurrentLocation.getPermission();
-      console.log('[Home/Location] Current permission:', permission);
-
       if ((permission as string) === 'denied' || (permission as string) === 'osPermissionDenied') {
-        console.log('[Home/Location] Location permission denied');
         return undefined;
       }
-
-      // 2. 권한이 없으면 요청
       if (permission === 'notDetermined') {
-        console.log('[Home/Location] Requesting permission...');
-        const dialogResult = await getCurrentLocation.openPermissionDialog();
-
-        if (dialogResult === 'denied') {
-          console.log('[Home/Location] User denied permission');
-          return undefined;
-        }
+        const result = await getCurrentLocation.openPermissionDialog();
+        if (result === 'denied') return undefined;
       }
-
-      // 3. 위치 정보 가져오기
-      console.log('[Home/Location] Getting current location...');
-      const locationData = await getCurrentLocation({
-        accuracy: Accuracy.Balanced
-      });
-
-      const userLocation: Location = {
-        lat: locationData.coords.latitude,
-        lng: locationData.coords.longitude,
-      };
-
-      setLocation(userLocation);
-      console.log('[Home/Location] Location acquired:', userLocation);
-
-      // 역지오코딩: 좌표 → 행정동
-      const geocodeResult = await reverseGeocode(userLocation.lat, userLocation.lng);
-      if (geocodeResult.success && geocodeResult.address) {
-        setCurrentAddress(geocodeResult.address);
-        console.log('[Home/Location] Address:', geocodeResult.address);
-      } else {
-        setCurrentAddress('위치 정보');
-        console.log('[Home/Location] Geocoding failed:', geocodeResult.error);
-      }
-
-      return userLocation;
-
+      const data = await getCurrentLocation({ accuracy: Accuracy.Balanced });
+      const loc: Location = { lat: data.coords.latitude, lng: data.coords.longitude };
+      setLocation(loc);
+      const geo = await reverseGeocode(loc.lat, loc.lng);
+      setCurrentAddress(geo.success && geo.address ? geo.address : '위치 정보');
+      return loc;
     } catch (error) {
-      if (error instanceof GetCurrentLocationPermissionError) {
-        console.log('[Home/Location] Permission error:', error.message);
-      } else {
-        console.error('[Home/Location] Failed to get location:', error);
+      if (!(error instanceof GetCurrentLocationPermissionError)) {
+        console.error('[Home] location error:', error);
       }
-      // 위치 정보 없이도 추천은 계속 진행
       return undefined;
     }
   };
 
-  const loadRecommendations = async (currentUserId?: string, userLocation?: Location) => {
-    try {
-      const uid = currentUserId || userId;
-      const loc = userLocation || location;
-
-      // 1. 오늘의 추천 (위치 정보 전달)
-      await loadTodayPick(uid, loc);
-
-      // 2. 내 주변 이벤트 (위치 필수)
-      if (loc) {
-        await loadNearby(loc);
-      } else {
-        setNearby([]); // 위치 없음 → 스켈레톤 없이 바로 숨김
-      }
-
-      // 3. 지금 떠오르는 (위치 정보 전달)
-      await loadTrending(loc);
-
-      // 4. 곧 끝나요 (테마 섹션 - excludeIds 없음)
-      await loadEndingSoon(loc);
-
-      // 5. 전시 큐레이션 (테마 섹션 - excludeIds 없음)
-      await loadExhibition(loc);
-
-      // 6. 이번 주말 (위치 정보 전달)
-      await loadWeekend(loc);
-
-      // 7. 무료로 즐겨요 (테마 섹션 - excludeIds 없음)
-      await loadFreeEvents(loc);
-
-      // 8. 새로 올라왔어요 (위치 정보 전달)
-      await loadLatest(loc);
-
-    } catch (error) {
-      console.error('[Home] Failed to load recommendations:', error);
-    }
-  };
-
-  const loadTodayPick = async (currentUserId?: string, userLocation?: Location) => {
-    try {
-      console.log('[Home/TodayPick] Starting to load today pick...', {
-        userId: currentUserId,
-        hasLocation: !!userLocation,
-        location: userLocation
-      });
-      setTodayPick({ event: null, loading: true });
-
-      const response = await recommendationService.getTodayPick(
-        currentUserId,
-        userLocation // 위치 정보 전달
-      );
-
-      if (response.success && response.data) {
-        setTodayPick({
-          event: response.data,
-          loading: false,
-        });
-
-        // 중복 제거 리스트에 추가
-        excludedIds.current.add(response.data.id);
-
-        console.log('[Home/TodayPick] Loaded:', response.data.title);
-      } else {
-        setTodayPick({ event: null, loading: false });
-        console.log('[Home/TodayPick] No recommendation available');
-      }
-    } catch (error) {
-      console.error('[Home/TodayPick] Error:', error);
-      setTodayPick({ event: null, loading: false });
-    }
-  };
-
-  const loadNearby = async (userLocation: Location) => {
-    try {
-      const response = await recommendationService.getNearby(
-        userLocation,
-        {
-          excludeIds: Array.from(excludedIds.current),
-          limit: 10,
-        }
-      );
-
-      if (response.success && response.data) {
-        setNearby(response.data);
-        // 이후 섹션 중복 제거를 위해 ID 등록
-        response.data.forEach((e: ScoredEvent) => excludedIds.current.add(e.id));
-        console.log('[Home/Nearby] Loaded:', response.data.length, 'events');
-      } else {
-        setNearby([]);
-        console.log('[Home/Nearby] No nearby events');
-      }
-    } catch (error) {
-      console.error('[Home/Nearby] Error:', error);
-      setNearby([]);
-    }
-  };
-
-  const loadTrending = async (userLocation?: Location) => {
-    try {
-      const response = await recommendationService.getTrending({
-        excludeIds: Array.from(excludedIds.current),
-        limit: 10,
-        location: userLocation,
-      });
-
-      if (response.success && response.data) {
-        setTrending(response.data);
-        response.data.forEach((e: ScoredEvent) => excludedIds.current.add(e.id));
-        console.log('[Home/Trending] Loaded:', response.data.length, 'events');
-      } else {
-        setTrending([]);
-        console.log('[Home/Trending] No trending events');
-      }
-    } catch (error) {
-      console.error('[Home/Trending] Error:', error);
-      setTrending([]);
-    }
-  };
-
-  const loadEndingSoon = async (userLocation?: Location) => {
-    try {
-      const response = await recommendationService.getEndingSoon({
-        limit: 10,
-        location: userLocation,
-      });
-      if (response.success && response.data) {
-        setEndingSoon(response.data);
-        console.log('[Home/EndingSoon] Loaded:', response.data.length, 'events');
-      } else {
-        setEndingSoon([]);
-      }
-    } catch (error) {
-      console.error('[Home/EndingSoon] Error:', error);
-      setEndingSoon([]);
-    }
-  };
-
-  const loadExhibition = async (userLocation?: Location) => {
-    try {
-      const response = await recommendationService.getExhibition({
-        limit: 10,
-        location: userLocation,
-      });
-      if (response.success && response.data) {
-        setExhibition(response.data);
-        console.log('[Home/Exhibition] Loaded:', response.data.length, 'events');
-      } else {
-        setExhibition([]);
-      }
-    } catch (error) {
-      console.error('[Home/Exhibition] Error:', error);
-      setExhibition([]);
-    }
-  };
-
-  const loadFreeEvents = async (userLocation?: Location) => {
-    try {
-      const response = await recommendationService.getFreeEvents({
-        limit: 10,
-        location: userLocation,
-      });
-      if (response.success && response.data) {
-        setFreeEvents(response.data);
-        console.log('[Home/Free] Loaded:', response.data.length, 'events');
-      } else {
-        setFreeEvents([]);
-      }
-    } catch (error) {
-      console.error('[Home/Free] Error:', error);
-      setFreeEvents([]);
-    }
-  };
-
-  const loadWeekend = async (userLocation?: Location) => {
-    try {
-      const response = await recommendationService.getWeekend({
-        limit: 10,
-        location: userLocation,
-      });
-
-      if (response.success && response.data) {
-        setWeekend(response.data);
-        console.log('[Home/Weekend] Loaded:', response.data.length, 'events');
-      } else {
-        setWeekend([]);
-        console.log('[Home/Weekend] No weekend events');
-      }
-    } catch (error) {
-      console.error('[Home/Weekend] Error:', error);
-      setWeekend([]);
-    }
-  };
-
-  const loadLatest = async (userLocation?: Location) => {
-    try {
-      const response = await recommendationService.getLatest({
-        excludeIds: Array.from(excludedIds.current),
-        limit: 10,
-        location: userLocation,
-      });
-
-      if (response.success && response.data) {
-        setLatest(response.data);
-        console.log('[Home/Latest] Loaded:', response.data.length, 'events');
-      } else {
-        setLatest([]);
-        console.log('[Home/Latest] No latest events');
-      }
-    } catch (error) {
-      console.error('[Home/Latest] Error:', error);
-      setLatest([]);
-    }
+  const loadSections = async (loc?: Location) => {
+    setSections(null);
+    const response = await recommendationService.getSections(loc);
+    setSections(response.success ? response.sections : []);
   };
 
   const handleEventPress = async (eventId: string) => {
-    console.log('[Home] Event pressed:', eventId);
-
-    // 사용자 행동 로그 기록 (비동기, 실패해도 진행)
     try {
       await userEventService.logEventClick(eventId, 'home_card');
-    } catch (error) {
-      console.error('[Home] Failed to log event click:', error);
-    }
-
-    // 이벤트 상세 페이지로 이동
+    } catch {}
     navigation.navigate('/events/:id', { id: eventId });
   };
 
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      console.log('[Home] Refreshing with new location...');
-
-      // 1. 위치 정보 다시 가져오기
-      const newLocation = await requestLocation();
-
-      // 2. 새로운 위치로 추천 다시 로드
       excludedIds.current.clear();
-      setNearby(null);
-      setTrending(null);
-      setEndingSoon(null);
-      setExhibition(null);
-      setWeekend(null);
-      setFreeEvents(null);
-      setLatest(null);
-      await loadRecommendations(userId, newLocation);
-
-      console.log('[Home] Refresh completed with location:', newLocation);
-    } catch (error) {
-      console.error('[Home] Refresh failed:', error);
+      const loc = await requestLocation();
+      await loadSections(loc);
     } finally {
       setRefreshing(false);
     }
   };
 
-  const handleLocationRefresh = async () => {
-    console.log('[Home] Location refresh button pressed');
-    await handleRefresh();
+  // ─────────────────────────────────────────────────────────────
+  // 섹션 렌더링 (slug에 따라 레이아웃 결정)
+  // ─────────────────────────────────────────────────────────────
+
+  const renderSection = (section: HomeSection) => {
+    const { slug, title, subtitle, events } = section;
+
+    if (events.length === 0) return null;
+    if (slug === 'nearby' && !location) return null;
+
+    // today_pick: 대형 카드 (첫 번째 이벤트)
+    if (slug === 'today_pick') {
+      return (
+        <View key={slug} style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>{title}</Text>
+            {subtitle ? <Text style={styles.sectionSubtitle}>{subtitle}</Text> : null}
+          </View>
+          <View style={{ paddingHorizontal: 20 }}>
+            <EventCard event={events[0]!} onPress={handleEventPress} variant="large" />
+          </View>
+        </View>
+      );
+    }
+
+    // 나머지: 가로 스크롤 소형 카드
+    return (
+      <View key={slug} style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>{title}</Text>
+          {subtitle ? <Text style={styles.sectionSubtitle}>{subtitle}</Text> : null}
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.horizontalList}
+        >
+          {events.map((event) => (
+            <EventCard key={event.id} event={event} onPress={handleEventPress} variant="small" />
+          ))}
+        </ScrollView>
+      </View>
+    );
   };
+
+  // 로딩 스켈레톤
+  const renderLoading = () => (
+    <>
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <View style={{ height: 24, width: 100, backgroundColor: adaptive.grey200, borderRadius: 4 }} />
+        </View>
+        <TodayPickSkeleton />
+      </View>
+      {[0, 1, 2].map((i) => (
+        <View key={i} style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={{ height: 20, width: 120, backgroundColor: adaptive.grey200, borderRadius: 4 }} />
+          </View>
+          <HorizontalSectionSkeleton />
+        </View>
+      ))}
+    </>
+  );
 
   return (
     <View style={styles.container}>
-      {/* 생성형 AI 사전 고지 배너 (최초 1회) */}
       {showAiNotice && (
         <View style={styles.aiNoticeBanner}>
           <Text style={styles.aiNoticeText}>페어픽은 AI를 활용해요</Text>
@@ -658,9 +329,7 @@ function HomePage() {
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         onScrollBeginDrag={handleAiNoticeConfirm}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
         {/* 헤더 */}
         <View style={styles.header}>
@@ -669,9 +338,9 @@ function HomePage() {
               <Text style={styles.title}>페어픽</Text>
               <Text style={styles.subtitle}>오늘의 재미를 찾아볼까요?</Text>
             </View>
-            {location && currentAddress && (
+            {location && currentAddress ? (
               <Pressable
-                onPress={handleLocationRefresh}
+                onPress={handleRefresh}
                 style={styles.locationButton}
                 android_ripple={{ color: adaptive.grey200, radius: 20 }}
               >
@@ -680,228 +349,19 @@ function HomePage() {
                   <Text style={styles.locationButtonText}>{currentAddress}</Text>
                 </View>
               </Pressable>
-            )}
+            ) : null}
           </View>
         </View>
 
-        {/* 오늘의 추천 */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>오늘의 추천</Text>
-          </View>
-
-          {todayPick.loading ? (
-            <TodayPickSkeleton />
-          ) : todayPick.event ? (
-            <View style={{ paddingHorizontal: 20 }}>
-              <EventCard
-                event={todayPick.event}
-                onPress={handleEventPress}
-                variant="large"
-              />
-            </View>
-          ) : (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyText}>추천할 이벤트가 없어요</Text>
-            </View>
-          )}
-        </View>
-
-        {/* 내 주변 이벤트 */}
-        {(nearby === null || nearby.length > 0) && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>내 주변 이벤트</Text>
-              <Text style={styles.sectionSubtitle}>가장 가까운 이벤트</Text>
-            </View>
-            {nearby === null ? (
-              <HorizontalSectionSkeleton />
-            ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalList}
-              >
-                {nearby.map((event) => (
-                  <EventCard
-                    key={event.id}
-                    event={event}
-                    onPress={handleEventPress}
-                    variant="small"
-                  />
-                ))}
-              </ScrollView>
-            )}
-          </View>
-        )}
-
-        {/* 지금 떠오르는 */}
-        {(trending === null || trending.length > 0) && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>지금 떠오르는</Text>
-              <Text style={styles.sectionSubtitle}>24시간 인기 급상승</Text>
-            </View>
-            {trending === null ? (
-              <HorizontalSectionSkeleton />
-            ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalList}
-              >
-                {trending.map((event) => (
-                  <EventCard
-                    key={event.id}
-                    event={event}
-                    onPress={handleEventPress}
-                    variant="small"
-                  />
-                ))}
-              </ScrollView>
-            )}
-          </View>
-        )}
-
-        {/* 곧 끝나요 */}
-        {(endingSoon === null || endingSoon.length >= 5) && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>곧 끝나요</Text>
-              <Text style={styles.sectionSubtitle}>7일 안에 마감되는 이벤트</Text>
-            </View>
-            {endingSoon === null ? (
-              <HorizontalSectionSkeleton />
-            ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalList}
-              >
-                {endingSoon.map((event) => (
-                  <EventCard
-                    key={event.id}
-                    event={event}
-                    onPress={handleEventPress}
-                    variant="small"
-                  />
-                ))}
-              </ScrollView>
-            )}
-          </View>
-        )}
-
-        {/* 전시 큐레이션 */}
-        {(exhibition === null || exhibition.length >= 3) && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>전시 큐레이션</Text>
-              <Text style={styles.sectionSubtitle}>놓치면 아쉬운 전시</Text>
-            </View>
-            {exhibition === null ? (
-              <HorizontalSectionSkeleton />
-            ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalList}
-              >
-                {exhibition.map((event) => (
-                  <EventCard
-                    key={event.id}
-                    event={event}
-                    onPress={handleEventPress}
-                    variant="small"
-                  />
-                ))}
-              </ScrollView>
-            )}
-          </View>
-        )}
-
-        {/* 이번 주말 */}
-        {(weekend === null || weekend.length > 0) && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>이번 주말</Text>
-              <Text style={styles.sectionSubtitle}>주말에 즐기기 좋은</Text>
-            </View>
-            {weekend === null ? (
-              <HorizontalSectionSkeleton />
-            ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalList}
-              >
-                {weekend.map((event) => (
-                  <EventCard
-                    key={event.id}
-                    event={event}
-                    onPress={handleEventPress}
-                    variant="small"
-                  />
-                ))}
-              </ScrollView>
-            )}
-          </View>
-        )}
-
-        {/* 무료로 즐겨요 */}
-        {(freeEvents === null || freeEvents.length >= 5) && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>무료로 즐겨요</Text>
-              <Text style={styles.sectionSubtitle}>무료 입장 이벤트 모음</Text>
-            </View>
-            {freeEvents === null ? (
-              <HorizontalSectionSkeleton />
-            ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalList}
-              >
-                {freeEvents.map((event) => (
-                  <EventCard
-                    key={event.id}
-                    event={event}
-                    onPress={handleEventPress}
-                    variant="small"
-                  />
-                ))}
-              </ScrollView>
-            )}
-          </View>
-        )}
-
-        {/* 새로 올라왔어요 */}
-        {(latest === null || latest.length > 0) && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>새로 올라왔어요</Text>
-              <Text style={styles.sectionSubtitle}>최근 추가된 이벤트</Text>
-            </View>
-            {latest === null ? (
-              <HorizontalSectionSkeleton />
-            ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalList}
-              >
-                {latest.map((event) => (
-                  <EventCard
-                    key={event.id}
-                    event={event}
-                    onPress={handleEventPress}
-                    variant="small"
-                  />
-                ))}
-              </ScrollView>
-            )}
-          </View>
-        )}
+        {sections === null
+          ? renderLoading()
+          : sections.length === 0
+            ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyText}>추천 이벤트를 불러오지 못했어요</Text>
+              </View>
+            )
+            : sections.map(renderSection)}
 
         <View style={{ height: 100 }} />
       </ScrollView>

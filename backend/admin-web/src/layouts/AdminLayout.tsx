@@ -19,6 +19,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
     { path: '/events', label: '이벤트 관리', icon: '🎫' },
     { path: '/events/create', label: '이벤트 추가', icon: '➕' },
     { path: '/hot-suggestions', label: 'Hot Suggestions', icon: '🔥' },
+    { path: '/curation-themes', label: '홈 큐레이션', icon: '🗂️' },
   ];
 
   return (

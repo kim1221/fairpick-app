@@ -406,6 +406,46 @@ export const adminApi = {
   },
 };
 
+// ─────────────────────────────────────────────────────────────
+// 큐레이션 테마 API
+// ─────────────────────────────────────────────────────────────
+
+export interface CurationTheme {
+  id: string;
+  slug: string;
+  title: string;
+  subtitle: string | null;
+  icon_name: string | null;
+  display_order: number;
+  is_active: boolean;
+  filter_config: Record<string, any>;
+  max_items: number;
+  use_vector_rerank: boolean;
+  rerank_weight: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export const curationApi = {
+  getThemes: async (): Promise<CurationTheme[]> => {
+    const { data } = await api.get('/admin/curation-themes');
+    return data.themes;
+  },
+
+  updateTheme: async (
+    id: string,
+    updates: Partial<Pick<CurationTheme, 'title' | 'subtitle' | 'is_active' | 'max_items' | 'use_vector_rerank'>>
+  ): Promise<CurationTheme> => {
+    const { data } = await api.patch(`/admin/curation-themes/${id}`, updates);
+    return data.theme;
+  },
+
+  reorder: async (orders: { id: string; display_order: number }[]): Promise<CurationTheme[]> => {
+    const { data } = await api.post('/admin/curation-themes/reorder', { orders });
+    return data.themes;
+  },
+};
+
 // Hot Suggestions API (별도 export)
 export const getHotSuggestions = async (status: 'pending' | 'approved' | 'rejected' = 'pending') => {
   const { data } = await api.get(`/admin/hot-suggestions?status=${status}`);

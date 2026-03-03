@@ -26,6 +26,9 @@ export const API_ENDPOINTS = {
     free: '/api/recommendations/v2/free',
   },
   
+  // 홈 섹션 (curation_themes 기반 통합 API)
+  homeSections: '/api/home/sections',
+
   // 사용자 행동 로그
   userEvents: '/api/user-events',
   

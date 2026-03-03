@@ -6,6 +6,7 @@ import DashboardPage from './pages/DashboardPage';
 import EventsPage from './pages/EventsPage';
 import CreateEventPage from './pages/CreateEventPage';
 import HotSuggestionsPage from './pages/HotSuggestionsPage';
+import CurationThemesPage from './pages/CurationThemesPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -75,6 +76,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <HotSuggestionsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/curation-themes"
+            element={
+              <ProtectedRoute>
+                <CurationThemesPage />
               </ProtectedRoute>
             }
           />

@@ -515,6 +515,29 @@ export async function getFreeEvents(
 }
 
 /**
+ * 홈 화면 섹션 일괄 조회 (curation_themes 기반)
+ * 기존 8개 개별 API 호출을 1회로 통합
+ */
+export async function getSections(
+  location?: Location
+): Promise<{ success: boolean; sections: Array<{ slug: string; title: string; subtitle: string | null; events: any[] }> }> {
+  try {
+    const params = new URLSearchParams();
+    if (location) {
+      params.append('lat', location.lat.toString());
+      params.append('lng', location.lng.toString());
+    }
+    const url = `${API_BASE_URL}${API_ENDPOINTS.homeSections}${params.toString() ? `?${params}` : ''}`;
+    const response = await fetchWithTimeout(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } catch (error: any) {
+    console.error('[RecommendationService] getSections error:', error);
+    return { success: false, sections: [] };
+  }
+}
+
+/**
  * 이벤트 상세 정보 조회
  */
 export async function getEventDetail(eventId: string): Promise<{ success: boolean; data: EventDetail | null; error?: string }> {
@@ -571,6 +594,7 @@ export async function clearRecommendationCache(cacheKey: keyof typeof CACHE_KEYS
 // ==================== Export ====================
 
 const recommendationService = {
+  getSections,
   getTodayPick,
   getTrending,
   getNearby,

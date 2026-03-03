@@ -7188,6 +7188,186 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 });
 
 // ============================================================
+// GET /api/home/sections
+// curation_themes 테이블 기반 홈 화면 섹션 데이터 일괄 반환
+// ============================================================
+
+app.get('/api/home/sections', async (req, res) => {
+  try {
+    const { lat, lng } = req.query;
+    const location = lat && lng
+      ? { lat: parseFloat(lat as string), lng: parseFloat(lng as string) }
+      : undefined;
+
+    // 1. 활성화된 테마 목록 조회 (display_order 순)
+    const themesResult = await pool.query(
+      'SELECT * FROM curation_themes WHERE is_active = true ORDER BY display_order ASC'
+    );
+
+    const empty = new Set<string>();
+
+    // 2. 각 테마별 이벤트 병렬 쿼리
+    const sectionPromises = themesResult.rows.map(async (theme) => {
+      const config = theme.filter_config as Record<string, any>;
+      const limit: number = theme.max_items || 10;
+      let events: any[] = [];
+
+      try {
+        switch (config.type) {
+          case 'featured': {
+            // is_featured=true 이벤트를 featured_order 순으로
+            const r = await pool.query(
+              `SELECT * FROM canonical_events
+               WHERE is_featured = true AND is_deleted = false AND end_at >= NOW()
+                 AND image_url IS NOT NULL AND image_url != ''
+                 AND image_url NOT LIKE '%placeholder%' AND image_url NOT LIKE '%/defaults/%'
+               ORDER BY COALESCE(featured_order, 999) ASC, buzz_score DESC NULLS LAST
+               LIMIT $1`,
+              [limit]
+            );
+            events = r.rows;
+            break;
+          }
+          case 'ending_soon': {
+            events = await recommender.getEndingSoon(pool, location, limit);
+            break;
+          }
+          case 'trending': {
+            events = await recommender.getTrending(pool, location, empty, limit);
+            break;
+          }
+          case 'category': {
+            const cats = config.categories as string[];
+            const orderBy = config.sort === 'buzz_score'
+              ? 'buzz_score DESC NULLS LAST, created_at DESC'
+              : 'created_at DESC';
+            const r = await pool.query(
+              `SELECT * FROM canonical_events
+               WHERE main_category = ANY($1) AND is_deleted = false AND end_at >= NOW()
+                 AND image_url IS NOT NULL AND image_url != ''
+                 AND image_url NOT LIKE '%placeholder%' AND image_url NOT LIKE '%/defaults/%'
+               ORDER BY is_featured DESC NULLS LAST, ${orderBy}
+               LIMIT $2`,
+              [cats, limit]
+            );
+            events = r.rows;
+            break;
+          }
+          case 'weekend': {
+            events = await recommender.getWeekend(pool, empty, limit, location);
+            break;
+          }
+          case 'free': {
+            events = await recommender.getFreeEvents(pool, location, limit);
+            break;
+          }
+          case 'latest': {
+            events = await recommender.getLatest(pool, empty, limit, location);
+            break;
+          }
+        }
+      } catch (err) {
+        console.error(`[home/sections] theme "${theme.slug}" failed:`, err);
+      }
+
+      return {
+        slug: theme.slug as string,
+        title: theme.title as string,
+        subtitle: theme.subtitle as string | null,
+        events: events.map(mapEventForFrontend).filter(Boolean),
+      };
+    });
+
+    const sections = await Promise.all(sectionPromises);
+
+    res.json({ success: true, sections });
+  } catch (error: any) {
+    console.error('[home/sections] Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================================
+// Admin: 큐레이션 테마 관리 API
+// ============================================================
+
+/**
+ * GET /admin/curation-themes
+ * 큐레이션 테마 목록 (display_order 순)
+ */
+app.get('/admin/curation-themes', requireAdminAuth, async (_req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM curation_themes ORDER BY display_order ASC'
+    );
+    res.json({ themes: result.rows });
+  } catch (error) {
+    console.error('[Admin] GET /admin/curation-themes failed:', error);
+    res.status(500).json({ error: 'Failed to fetch curation themes' });
+  }
+});
+
+/**
+ * PATCH /admin/curation-themes/:id
+ * 테마 개별 수정 (title, subtitle, is_active, max_items, use_vector_rerank)
+ */
+app.patch('/admin/curation-themes/:id', requireAdminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, subtitle, is_active, max_items, use_vector_rerank } = req.body;
+
+    const result = await pool.query(
+      `UPDATE curation_themes SET
+        title            = COALESCE($1, title),
+        subtitle         = COALESCE($2, subtitle),
+        is_active        = COALESCE($3, is_active),
+        max_items        = COALESCE($4, max_items),
+        use_vector_rerank = COALESCE($5, use_vector_rerank)
+      WHERE id = $6
+      RETURNING *`,
+      [title ?? null, subtitle ?? null, is_active ?? null, max_items ?? null, use_vector_rerank ?? null, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Theme not found' });
+    }
+    res.json({ theme: result.rows[0] });
+  } catch (error) {
+    console.error('[Admin] PATCH /admin/curation-themes/:id failed:', error);
+    res.status(500).json({ error: 'Failed to update curation theme' });
+  }
+});
+
+/**
+ * POST /admin/curation-themes/reorder
+ * 섹션 순서 일괄 변경
+ * body: { orders: [{id, display_order}, ...] }
+ */
+app.post('/admin/curation-themes/reorder', requireAdminAuth, async (req, res) => {
+  try {
+    const { orders } = req.body as { orders: { id: string; display_order: number }[] };
+    if (!Array.isArray(orders) || orders.length === 0) {
+      return res.status(400).json({ error: 'orders array is required' });
+    }
+
+    for (const { id, display_order } of orders) {
+      await pool.query(
+        'UPDATE curation_themes SET display_order = $1 WHERE id = $2',
+        [display_order, id]
+      );
+    }
+
+    const result = await pool.query(
+      'SELECT * FROM curation_themes ORDER BY display_order ASC'
+    );
+    res.json({ success: true, themes: result.rows });
+  } catch (error) {
+    console.error('[Admin] POST /admin/curation-themes/reorder failed:', error);
+    res.status(500).json({ error: 'Failed to reorder curation themes' });
+  }
+});
+
+// ============================================================
 // Event Loop Lag Monitoring
 // ============================================================
 
