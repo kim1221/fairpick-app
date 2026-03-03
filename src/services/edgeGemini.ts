@@ -13,7 +13,7 @@ import type { EventTraits } from './eventService';
  * Local Dev: http://172.20.10.4:5001 (Node.js Express)
  * Production: 배포된 백엔드 서버 URL
  */
-const API_BASE_URL = process.env.API_BASE_URL ?? 'http://172.20.10.4:5001';
+const API_BASE_URL = process.env.API_BASE_URL ?? 'https://fairpick-app-production.up.railway.app';
 
 /**
  * 배너 문구 생성 파라미터
