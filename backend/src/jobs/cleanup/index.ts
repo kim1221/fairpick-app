@@ -3,12 +3,14 @@ import crypto from 'crypto';
 
 /**
  * ============================================================
- * Cleanup Job - 만료 이벤트 Soft Delete
+ * Cleanup Job - 만료 이벤트 Soft Delete + Hard Delete
  * ============================================================
- * 
+ *
  * 정책:
- * - end_at < CURRENT_DATE인 이벤트를 soft delete 처리
- * - is_deleted = true, deleted_at = NOW(), deleted_reason = 'expired'
+ * 1. Soft Delete: end_at < CURRENT_DATE인 이벤트를 is_deleted = true 처리
+ * 2. Hard Delete: soft delete 후 30일 이상 지난 이벤트 완전 삭제
+ *    - user_likes, user_recent, user_events 연관 레코드 먼저 삭제
+ *    - canonical_events에서 완전 삭제 (CASCADE로 event_actions, event_views 자동 삭제)
  * - event_change_logs에 변경 이력 기록 (최대 200개)
  */
 
@@ -30,6 +32,7 @@ export async function runCleanupJob(): Promise<void> {
   }
 
   let deletedCount = 0;
+  let hardDeletedCount = 0;
   let errorMessage: string | null = null;
   let finalStatus = 'success';
 
@@ -75,6 +78,30 @@ export async function runCleanupJob(): Promise<void> {
       console.log(`[CleanupJob] Logged changes for ${Math.min(eventIds.length, 200)} events`);
     }
 
+    // Hard delete: soft delete 후 30일 이상 지난 이벤트 완전 삭제
+    const expiredIds = await pool.query(`
+      SELECT id FROM canonical_events
+      WHERE is_deleted = true
+        AND deleted_at < NOW() - INTERVAL '30 days'
+    `);
+
+    if (expiredIds.rowCount && expiredIds.rowCount > 0) {
+      const ids = expiredIds.rows.map((r: any) => r.id);
+
+      // 연관 레코드 먼저 삭제 (FK 없는 테이블)
+      await pool.query(`DELETE FROM user_likes   WHERE event_id = ANY($1)`, [ids]);
+      await pool.query(`DELETE FROM user_recent  WHERE event_id = ANY($1)`, [ids]);
+      await pool.query(`DELETE FROM user_events  WHERE event_id = ANY($1)`, [ids]);
+
+      // canonical_events 완전 삭제 (CASCADE로 event_actions, event_views 자동 삭제)
+      const hardResult = await pool.query(`
+        DELETE FROM canonical_events WHERE id = ANY($1)
+      `, [ids]);
+
+      hardDeletedCount = hardResult.rowCount || 0;
+      console.log(`[CleanupJob] Hard deleted ${hardDeletedCount} events (30d+ after soft delete)`);
+    }
+
   } catch (error: any) {
     finalStatus = 'failed';
     errorMessage = error?.message || String(error);
@@ -108,7 +135,7 @@ export async function runCleanupJob(): Promise<void> {
     console.error('[CleanupJob] Failed to update collection log:', error);
   }
 
-  console.log(`[CleanupJob] Completed - Status: ${finalStatus}, Deleted: ${deletedCount}`);
+  console.log(`[CleanupJob] Completed - Status: ${finalStatus}, Soft deleted: ${deletedCount}, Hard deleted: ${hardDeletedCount}`);
 }
 
 /**
