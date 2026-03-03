@@ -2,7 +2,7 @@ import axios from 'axios';
 import { getToken } from '../utils/authStorage';
 
 const http = axios.create({
-  baseURL: process.env.API_BASE_URL ?? 'https://fairpick-app-production.up.railway.app',
+  baseURL: process.env.API_BASE_URL ?? (__DEV__ ? 'http://172.20.10.4:5001' : 'https://fairpick-app-production.up.railway.app'),
   timeout: 5000,
 });
 
