@@ -426,6 +426,26 @@ export interface CurationTheme {
   updated_at: string;
 }
 
+export interface CurationOptions {
+  categories: string[];
+  regions: string[];
+  tags: string[];
+}
+
+export interface PreviewResult {
+  count: number;
+  preview: { id: string; title: string; category: string }[];
+}
+
+export interface CreateThemeInput {
+  slug: string;
+  title: string;
+  subtitle?: string;
+  icon_name?: string;
+  filter_config: Record<string, any>;
+  max_items?: number;
+}
+
 export const curationApi = {
   getThemes: async (): Promise<CurationTheme[]> => {
     const { data } = await api.get('/admin/curation-themes');
@@ -443,6 +463,25 @@ export const curationApi = {
   reorder: async (orders: { id: string; display_order: number }[]): Promise<CurationTheme[]> => {
     const { data } = await api.post('/admin/curation-themes/reorder', { orders });
     return data.themes;
+  },
+
+  getOptions: async (): Promise<CurationOptions> => {
+    const res = await api.get('/admin/curation-themes/options');
+    return res.data;
+  },
+
+  preview: async (conditions: Record<string, any>, sort_by: string): Promise<PreviewResult> => {
+    const res = await api.post('/admin/curation-themes/preview', { conditions, sort_by });
+    return res.data;
+  },
+
+  createTheme: async (input: CreateThemeInput): Promise<CurationTheme> => {
+    const res = await api.post('/admin/curation-themes', input);
+    return res.data.theme;
+  },
+
+  deleteTheme: async (id: string): Promise<void> => {
+    await api.delete(`/admin/curation-themes/${id}`);
   },
 };
 

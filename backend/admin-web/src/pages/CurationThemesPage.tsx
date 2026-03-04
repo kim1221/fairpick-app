@@ -1,15 +1,46 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { curationApi, type CurationTheme } from '../services/api';
+import CreateThemeModal from '../components/CreateThemeModal';
 
 // ─────────────────────────────────────────────────────────────
 // 유틸: filter_config → 사람이 읽기 쉬운 설명
 // ─────────────────────────────────────────────────────────────
 function describeFilter(config: Record<string, any>): string {
+  // 새 구조: preset
+  if (config.preset) {
+    switch (config.preset as string) {
+      case 'ending_soon': return `마감임박 알고리즘 (${config.days_to_end ?? 7}일 이내)`;
+      case 'trending':    return '인기 급상승 알고리즘 (buzz_score 기반)';
+      case 'weekend':     return '이번 주말 이벤트 알고리즘';
+      default:            return `프리셋: ${config.preset}`;
+    }
+  }
+  // 새 구조: conditions
+  if (config.conditions !== undefined) {
+    const parts: string[] = [];
+    const c = config.conditions as Record<string, any>;
+    if (c.is_featured)                              parts.push('에디터 추천');
+    if (Array.isArray(c.categories) && c.categories.length > 0) parts.push(`카테고리: ${c.categories.join(', ')}`);
+    if (Array.isArray(c.regions)    && c.regions.length > 0)    parts.push(`지역: ${c.regions.join(', ')}`);
+    if (Array.isArray(c.tags)       && c.tags.length > 0)       parts.push(`태그: ${c.tags.join(', ')}`);
+    if (c.is_free)                                  parts.push('무료입장');
+    const condStr = parts.length > 0 ? parts.join(' · ') : '전체';
+    const sortLabel: Record<string, string> = {
+      buzz_score:     '인기순',
+      created_at:     '최신순',
+      end_at:         '마감임박순',
+      start_at:       '오픈일순',
+      view_count:     '조회수순',
+      featured_order: '에디터순',
+    };
+    return `${condStr} · ${sortLabel[config.sort_by] ?? config.sort_by ?? '인기순'}`;
+  }
+  // 구 구조 호환 fallback
   const type = config.type as string;
   switch (type) {
     case 'featured':    return '에디터가 직접 고른 추천 이벤트';
-    case 'ending_soon': return `${config.days ?? 7}일 이내 마감 이벤트 · 마감순 정렬`;
+    case 'ending_soon': return `${config.days ?? 7}일 이내 마감 이벤트 · 마감순`;
     case 'trending':    return 'buzz_score 기준 인기 급상승 이벤트';
     case 'category':    return `카테고리: ${(config.categories as string[]).join(', ')} · ${config.sort === 'buzz_score' ? '인기순' : '최신순'}`;
     case 'weekend':     return '이번 주말 열리는 이벤트';
@@ -114,6 +145,7 @@ function ThemeCard({
   onUpdate,
   onMoveUp,
   onMoveDown,
+  onDelete,
 }: {
   theme: CurationTheme;
   index: number;
@@ -121,6 +153,7 @@ function ThemeCard({
   onUpdate: (id: string, updates: Partial<CurationTheme>) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  onDelete: (id: string) => void;
 }) {
   const emoji = SLUG_EMOJI[theme.slug] ?? '📌';
 
@@ -238,6 +271,21 @@ function ThemeCard({
               </span>
             </div>
           </div>
+
+          {/* 삭제 버튼 (커스텀 섹션만) */}
+          {!theme.filter_config?.preset && (
+            <button
+              onClick={() => {
+                if (window.confirm(`"${theme.title}" 섹션을 삭제할까요?`)) {
+                  onDelete(theme.id);
+                }
+              }}
+              className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg transition-colors"
+              title="섹션 삭제"
+            >
+              🗑 삭제
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -250,6 +298,7 @@ function ThemeCard({
 export default function CurationThemesPage() {
   const queryClient = useQueryClient();
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const { data: themes = [], isLoading } = useQuery({
     queryKey: ['curation-themes'],
@@ -281,6 +330,15 @@ export default function CurationThemesPage() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: curationApi.deleteTheme,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['curation-themes'] });
+      setLocalThemes(null);
+      flash('섹션이 삭제됐어요');
+    },
+  });
+
   function flash(msg: string) {
     setSaveMsg(msg);
     setTimeout(() => setSaveMsg(null), 2000);
@@ -308,6 +366,10 @@ export default function CurationThemesPage() {
     );
   }
 
+  function handleDelete(id: string) {
+    deleteMutation.mutate(id);
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -332,6 +394,14 @@ export default function CurationThemesPage() {
             <span className="font-semibold text-blue-600">{activeCount}개</span> 섹션이 지금 보여지고 있어요.
           </p>
         </div>
+
+        {/* 새 섹션 만들기 버튼 */}
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
+        >
+          <span className="text-base">＋</span> 새 섹션
+        </button>
 
         {/* 저장 알림 */}
         <div
@@ -368,6 +438,7 @@ export default function CurationThemesPage() {
             onUpdate={handleUpdate}
             onMoveUp={() => handleMove(index, 'up')}
             onMoveDown={() => handleMove(index, 'down')}
+            onDelete={handleDelete}
           />
         ))}
       </div>
@@ -389,6 +460,18 @@ export default function CurationThemesPage() {
           <div className="text-sm text-gray-500 mt-1">AI 리랭킹 ON</div>
         </div>
       </div>
+
+      {/* 새 섹션 생성 모달 */}
+      {showCreateModal && (
+        <CreateThemeModal
+          onClose={() => setShowCreateModal(false)}
+          onCreated={() => {
+            queryClient.invalidateQueries({ queryKey: ['curation-themes'] });
+            setLocalThemes(null);
+            flash('새 섹션이 추가됐어요 ✓');
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -7188,6 +7188,70 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 });
 
 // ============================================================
+// 큐레이션 조건 쿼리 빌더 (unified filter_config 구조)
+// ============================================================
+
+const CURATION_SORT_MAP: Record<string, string> = {
+  buzz_score:     'buzz_score DESC NULLS LAST, created_at DESC',
+  created_at:     'created_at DESC',
+  end_at:         'end_at ASC',
+  start_at:       'start_at ASC NULLS LAST',
+  view_count:     'view_count DESC NULLS LAST, buzz_score DESC NULLS LAST',
+  featured_order: 'COALESCE(featured_order, 999) ASC, buzz_score DESC NULLS LAST',
+};
+
+function buildWhereClause(conditions: Record<string, any>): { whereStr: string; params: any[] } {
+  const where: string[] = [
+    "is_deleted = false",
+    "status != 'cancelled'",
+    "end_at >= NOW()",
+    "image_url IS NOT NULL",
+    "image_url != ''",
+    "image_url NOT LIKE '%placeholder%'",
+    "image_url NOT LIKE '%/defaults/%'",
+  ];
+  const params: any[] = [];
+
+  if (conditions.is_featured) {
+    where.push('is_featured = true');
+  }
+  if (Array.isArray(conditions.categories) && conditions.categories.length > 0) {
+    params.push(conditions.categories);
+    where.push(`main_category = ANY($${params.length})`);
+  }
+  if (Array.isArray(conditions.regions) && conditions.regions.length > 0) {
+    params.push(conditions.regions);
+    where.push(`region = ANY($${params.length})`);
+  }
+  if (Array.isArray(conditions.tags) && conditions.tags.length > 0) {
+    params.push(conditions.tags);
+    where.push(`derived_tags ?| $${params.length}`);
+  }
+  if (conditions.is_free === true) {
+    where.push('is_free = true');
+  }
+
+  return { whereStr: where.join(' AND '), params };
+}
+
+function buildConditionsQuery(
+  conditions: Record<string, any>,
+  sortBy: string,
+  limit: number,
+): { text: string; values: any[] } {
+  const orderClause = CURATION_SORT_MAP[sortBy] ?? 'buzz_score DESC NULLS LAST, created_at DESC';
+  const { whereStr, params } = buildWhereClause(conditions);
+  params.push(limit);
+  const text = `
+    SELECT * FROM canonical_events
+    WHERE ${whereStr}
+    ORDER BY is_featured DESC NULLS LAST, ${orderClause}
+    LIMIT $${params.length}
+  `;
+  return { text, values: params };
+}
+
+// ============================================================
 // GET /api/home/sections
 // curation_themes 테이블 기반 홈 화면 섹션 데이터 일괄 반환
 // ============================================================
@@ -7213,58 +7277,26 @@ app.get('/api/home/sections', async (req, res) => {
       let events: any[] = [];
 
       try {
-        switch (config.type) {
-          case 'featured': {
-            // is_featured=true 이벤트를 featured_order 순으로
-            const r = await pool.query(
-              `SELECT * FROM canonical_events
-               WHERE is_featured = true AND is_deleted = false AND end_at >= NOW()
-                 AND image_url IS NOT NULL AND image_url != ''
-                 AND image_url NOT LIKE '%placeholder%' AND image_url NOT LIKE '%/defaults/%'
-               ORDER BY COALESCE(featured_order, 999) ASC, buzz_score DESC NULLS LAST
-               LIMIT $1`,
-              [limit]
-            );
-            events = r.rows;
-            break;
+        if (config.preset) {
+          // preset: 계산 로직이 필요한 섹션 (recommender 함수 호출)
+          switch (config.preset as string) {
+            case 'ending_soon':
+              events = await recommender.getEndingSoon(pool, location, limit);
+              break;
+            case 'trending':
+              events = await recommender.getTrending(pool, location, empty, limit);
+              break;
+            case 'weekend':
+              events = await recommender.getWeekend(pool, empty, limit, location);
+              break;
           }
-          case 'ending_soon': {
-            events = await recommender.getEndingSoon(pool, location, limit);
-            break;
-          }
-          case 'trending': {
-            events = await recommender.getTrending(pool, location, empty, limit);
-            break;
-          }
-          case 'category': {
-            const cats = config.categories as string[];
-            const orderBy = config.sort === 'buzz_score'
-              ? 'buzz_score DESC NULLS LAST, created_at DESC'
-              : 'created_at DESC';
-            const r = await pool.query(
-              `SELECT * FROM canonical_events
-               WHERE main_category = ANY($1) AND is_deleted = false AND end_at >= NOW()
-                 AND image_url IS NOT NULL AND image_url != ''
-                 AND image_url NOT LIKE '%placeholder%' AND image_url NOT LIKE '%/defaults/%'
-               ORDER BY is_featured DESC NULLS LAST, ${orderBy}
-               LIMIT $2`,
-              [cats, limit]
-            );
-            events = r.rows;
-            break;
-          }
-          case 'weekend': {
-            events = await recommender.getWeekend(pool, empty, limit, location);
-            break;
-          }
-          case 'free': {
-            events = await recommender.getFreeEvents(pool, location, limit);
-            break;
-          }
-          case 'latest': {
-            events = await recommender.getLatest(pool, empty, limit, location);
-            break;
-          }
+        } else {
+          // unified conditions: 동적 쿼리 빌더
+          const conditions = (config.conditions ?? {}) as Record<string, any>;
+          const sortBy = (config.sort_by as string) ?? 'buzz_score';
+          const { text, values } = buildConditionsQuery(conditions, sortBy, limit);
+          const r = await pool.query(text, values);
+          events = r.rows;
         }
       } catch (err) {
         console.error(`[home/sections] theme "${theme.slug}" failed:`, err);
@@ -7366,6 +7398,151 @@ app.post('/admin/curation-themes/reorder', requireAdminAuth, async (req, res) =>
     res.status(500).json({ error: 'Failed to reorder curation themes' });
   }
 });
+
+/**
+ * GET /admin/curation-themes/options
+ * 조건 빌더용 선택 가능한 값 목록 (카테고리/지역/태그)
+ */
+app.get('/admin/curation-themes/options', requireAdminAuth, async (_req, res) => {
+  try {
+    const [cats, regions, tagsResult] = await Promise.all([
+      pool.query(
+        `SELECT DISTINCT main_category FROM canonical_events
+         WHERE main_category IS NOT NULL AND is_deleted = false
+         ORDER BY main_category`
+      ),
+      pool.query(
+        `SELECT DISTINCT region FROM canonical_events
+         WHERE region IS NOT NULL AND is_deleted = false
+         ORDER BY region`
+      ),
+      pool.query(
+        `SELECT DISTINCT jsonb_array_elements_text(derived_tags) AS tag
+         FROM canonical_events
+         WHERE derived_tags IS NOT NULL AND derived_tags != 'null'::jsonb AND is_deleted = false
+         ORDER BY tag
+         LIMIT 200`
+      ),
+    ]);
+    res.json({
+      categories: cats.rows.map((r: any) => r.main_category),
+      regions: regions.rows.map((r: any) => r.region),
+      tags: tagsResult.rows.map((r: any) => r.tag),
+    });
+  } catch (error) {
+    console.error('[Admin] GET /admin/curation-themes/options failed:', error);
+    res.status(500).json({ error: 'Failed to fetch options' });
+  }
+});
+
+/**
+ * POST /admin/curation-themes/preview
+ * 조건 빌더 미리보기: 매칭 이벤트 수 + 상위 3개 제목
+ */
+app.post('/admin/curation-themes/preview', requireAdminAuth, async (req, res) => {
+  try {
+    const { conditions, sort_by = 'buzz_score' } = req.body as {
+      conditions: Record<string, any>;
+      sort_by?: string;
+    };
+    if (!conditions) return res.status(400).json({ error: 'conditions is required' });
+
+    const { whereStr, params } = buildWhereClause(conditions);
+
+    const [countResult, previewResult] = await Promise.all([
+      pool.query(`SELECT COUNT(*) FROM canonical_events WHERE ${whereStr}`, params),
+      pool.query(
+        `SELECT id, display_title, title, main_category FROM canonical_events
+         WHERE ${whereStr}
+         ORDER BY is_featured DESC NULLS LAST, ${CURATION_SORT_MAP[sort_by] ?? 'buzz_score DESC NULLS LAST, created_at DESC'}
+         LIMIT $${params.length + 1}`,
+        [...params, 3]
+      ),
+    ]);
+
+    res.json({
+      count: parseInt(countResult.rows[0].count, 10),
+      preview: previewResult.rows.map((e: any) => ({
+        id: e.id,
+        title: e.display_title || e.title,
+        category: e.main_category,
+      })),
+    });
+  } catch (error) {
+    console.error('[Admin] POST /admin/curation-themes/preview failed:', error);
+    res.status(500).json({ error: 'Failed to preview' });
+  }
+});
+
+/**
+ * POST /admin/curation-themes
+ * 새 큐레이션 테마 생성
+ */
+app.post('/admin/curation-themes', requireAdminAuth, async (req, res) => {
+  try {
+    const { slug, title, subtitle, icon_name, filter_config, max_items = 10, display_order } = req.body as {
+      slug: string;
+      title: string;
+      subtitle?: string;
+      icon_name?: string;
+      filter_config: Record<string, any>;
+      max_items?: number;
+      display_order?: number;
+    };
+
+    if (!slug || !title || !filter_config) {
+      return res.status(400).json({ error: 'slug, title, filter_config are required' });
+    }
+
+    const maxOrderResult = await pool.query(
+      'SELECT COALESCE(MAX(display_order), 0) + 1 AS next_order FROM curation_themes'
+    );
+    const nextOrder = display_order ?? maxOrderResult.rows[0].next_order;
+
+    const result = await pool.query(
+      `INSERT INTO curation_themes
+         (slug, title, subtitle, icon_name, filter_config, max_items, display_order, is_active)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, true)
+       RETURNING *`,
+      [slug, title, subtitle ?? null, icon_name ?? null, JSON.stringify(filter_config), max_items, nextOrder]
+    );
+
+    res.status(201).json({ theme: result.rows[0] });
+  } catch (error: any) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'slug already exists' });
+    }
+    console.error('[Admin] POST /admin/curation-themes failed:', error);
+    res.status(500).json({ error: 'Failed to create theme' });
+  }
+});
+
+/**
+ * DELETE /admin/curation-themes/:id
+ * 커스텀 테마 삭제 (preset 내장 섹션은 삭제 불가)
+ */
+app.delete('/admin/curation-themes/:id', requireAdminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const check = await pool.query(
+      'SELECT filter_config FROM curation_themes WHERE id = $1',
+      [id]
+    );
+    if (check.rowCount === 0) return res.status(404).json({ error: 'Theme not found' });
+
+    const config = check.rows[0].filter_config as Record<string, any>;
+    if (config.preset) {
+      return res.status(403).json({ error: '기본 내장 섹션은 삭제할 수 없어요' });
+    }
+
+    await pool.query('DELETE FROM curation_themes WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[Admin] DELETE /admin/curation-themes/:id failed:', error);
+    res.status(500).json({ error: 'Failed to delete theme' });
+  }
+});
+
 
 // ============================================================
 // Event Loop Lag Monitoring
