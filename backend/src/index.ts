@@ -7192,7 +7192,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 // ============================================================
 
 const CURATION_SORT_MAP: Record<string, string> = {
-  buzz_score:     'buzz_score DESC NULLS LAST, created_at DESC',
+  // 시간 감쇠: 0.99^경과일수 → 30일 후 26% 감소, 90일 후 60% 감소
+  buzz_score:     "buzz_score * POWER(0.99, GREATEST(0, EXTRACT(DAY FROM NOW() - created_at)::int)) DESC NULLS LAST, created_at DESC",
   created_at:     'created_at DESC',
   end_at:         'end_at ASC',
   start_at:       'start_at ASC NULLS LAST',
@@ -7357,6 +7358,13 @@ app.get('/api/home/sections', async (req, res) => {
           const { text, values } = buildConditionsQuery(conditions, sortBy, limit);
           const r = await pool.query(text, values);
           events = r.rows;
+        }
+
+        // 오늘의 픽: featured 이벤트가 부족하면 trending으로 자동 채움
+        if (theme.slug === 'today_pick' && events.length < 3) {
+          const existingIds = new Set<string>(events.map((e: any) => e.id));
+          const fallback = await recommender.getTrending(pool, location, existingIds, limit - events.length);
+          events = [...events, ...fallback];
         }
       } catch (err) {
         console.error(`[home/sections] theme "${theme.slug}" failed:`, err);

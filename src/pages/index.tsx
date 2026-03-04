@@ -361,7 +361,15 @@ function HomePage() {
                 <Text style={styles.emptyText}>추천 이벤트를 불러오지 못했어요</Text>
               </View>
             )
-            : sections.map(renderSection)}
+            : (() => {
+                // 상위 섹션에서 이미 노출된 이벤트를 하위 섹션에서 제거 (중복 방지)
+                const seenIds = new Set<string>();
+                return sections.map((section) => {
+                  const unique = section.events.filter((e) => !seenIds.has(e.id));
+                  unique.forEach((e) => seenIds.add(e.id));
+                  return renderSection({ ...section, events: unique });
+                });
+              })()}
 
         <View style={{ height: 100 }} />
       </ScrollView>
