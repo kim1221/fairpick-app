@@ -23,9 +23,9 @@ function describeFilter(config: Record<string, any>): string {
     if (c.is_featured)                              parts.push('에디터 추천');
     if (Array.isArray(c.categories) && c.categories.length > 0) parts.push(`카테고리: ${c.categories.join(', ')}`);
     if (Array.isArray(c.regions)    && c.regions.length > 0)    parts.push(`지역: ${c.regions.join(', ')}`);
+    if (Array.isArray(c.zones)      && c.zones.length > 0)      parts.push(`상권: ${c.zones.join(', ')}`);
     if (Array.isArray(c.tags)       && c.tags.length > 0)       parts.push(`태그: ${c.tags.join(', ')}`);
-    if (c.is_free)                                  parts.push('무료입장');
-    const condStr = parts.length > 0 ? parts.join(' · ') : '전체';
+    if (c.is_free)                                               parts.push('무료입장');
     const sortLabel: Record<string, string> = {
       buzz_score:     '인기순',
       created_at:     '최신순',
@@ -33,8 +33,16 @@ function describeFilter(config: Record<string, any>): string {
       start_at:       '오픈일순',
       view_count:     '조회수순',
       featured_order: '에디터순',
+      price_min:      '가격 낮은순',
     };
-    return `${condStr} · ${sortLabel[config.sort_by] ?? config.sort_by ?? '인기순'}`;
+    const extraParts: string[] = [];
+    if (typeof c.max_price === 'number') extraParts.push(`${(c.max_price / 10000).toFixed(0)}만원 이하`);
+    if (typeof c.days_to_open === 'number') extraParts.push(`${c.days_to_open}일 이내 오픈`);
+    if (c.status === 'active') extraParts.push('진행 중');
+    if (c.status === 'upcoming') extraParts.push('오픈 예정');
+    const allParts = [...parts, ...extraParts];
+    const condStr2 = allParts.length > 0 ? allParts.join(' · ') : '전체';
+    return `${condStr2} · ${sortLabel[config.sort_by] ?? config.sort_by ?? '인기순'}`;
   }
   // 구 구조 호환 fallback
   const type = config.type as string;

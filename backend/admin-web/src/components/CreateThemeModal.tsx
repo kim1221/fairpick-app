@@ -14,14 +14,29 @@ function slugify(text: string): string {
 }
 
 const SORT_OPTIONS = [
-  { value: 'buzz_score',  label: '인기순 (buzz_score)' },
-  { value: 'created_at',  label: '최신 등록순' },
-  { value: 'end_at',      label: '마감임박순' },
-  { value: 'start_at',    label: '오픈일순' },
-  { value: 'view_count',  label: '조회수순' },
+  { value: 'buzz_score', label: '인기순' },
+  { value: 'created_at', label: '최신 등록순' },
+  { value: 'end_at',     label: '마감임박순' },
+  { value: 'start_at',   label: '오픈일 빠른순' },
+  { value: 'view_count', label: '조회수순' },
+  { value: 'price_min',  label: '가격 낮은순' },
 ];
 
-const EMOJI_LIST = ['📌', '🎪', '🎨', '🎭', '🎬', '🎤', '🎮', '🛍️', '☕', '🌿', '🌸', '🏃', '✈️', '🔥', '⭐', '💫', '🎁', '🗓️', '📸', '🏛️'];
+const PRICE_PRESETS = [
+  { label: '무료', value: 0 },
+  { label: '5천원', value: 5000 },
+  { label: '1만원', value: 10000 },
+  { label: '3만원', value: 30000 },
+];
+
+const OPEN_DAY_PRESETS = [
+  { label: '오늘', value: 1 },
+  { label: '3일', value: 3 },
+  { label: '7일', value: 7 },
+  { label: '14일', value: 14 },
+];
+
+const EMOJI_LIST = ['📌','🎪','🎨','🎭','🎬','🎤','🎮','🛍️','☕','🌿','🌸','🏃','✈️','🔥','⭐','💫','🎁','🗓️','📸','🏛️','🍀','🎯','🌊','🦋','🎠'];
 
 // ─────────────────────────────────────────────────────────────
 // 멀티셀렉트 컴포넌트
@@ -31,22 +46,24 @@ function MultiSelect({
   options,
   selected,
   onChange,
+  placeholder = '선택하세요...',
 }: {
   label: string;
   options: string[];
   selected: string[];
   onChange: (v: string[]) => void;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    function handleClick(e: MouseEvent) {
+    function handle(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
   }, []);
 
   const filtered = options.filter(o => o.toLowerCase().includes(search.toLowerCase()));
@@ -60,15 +77,12 @@ function MultiSelect({
         onClick={() => setOpen(!open)}
       >
         {selected.length === 0 ? (
-          <span className="text-gray-400 text-sm self-center">선택하세요...</span>
+          <span className="text-gray-400 text-sm self-center">{placeholder}</span>
         ) : (
           selected.map(v => (
             <span key={v} className="inline-flex items-center gap-1 bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-medium">
               {v}
-              <button
-                onClick={(e) => { e.stopPropagation(); toggle(v); }}
-                className="hover:text-blue-900 leading-none"
-              >×</button>
+              <button onClick={e => { e.stopPropagation(); toggle(v); }} className="hover:text-blue-900">×</button>
             </span>
           ))
         )}
@@ -90,7 +104,7 @@ function MultiSelect({
               <div
                 key={o}
                 className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 flex items-center gap-2 ${selected.includes(o) ? 'bg-blue-50 font-medium text-blue-700' : 'text-gray-700'}`}
-                onClick={(e) => { e.stopPropagation(); toggle(o); }}
+                onClick={e => { e.stopPropagation(); toggle(o); }}
               >
                 <span className={`w-4 h-4 rounded border flex items-center justify-center text-xs flex-shrink-0 ${selected.includes(o) ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-300'}`}>
                   {selected.includes(o) ? '✓' : ''}
@@ -98,9 +112,7 @@ function MultiSelect({
                 {o}
               </div>
             ))}
-            {filtered.length === 0 && (
-              <div className="px-3 py-4 text-sm text-gray-400 text-center">결과 없음</div>
-            )}
+            {filtered.length === 0 && <div className="px-3 py-4 text-sm text-gray-400 text-center">결과 없음</div>}
           </div>
         </div>
       )}
@@ -120,14 +132,25 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
   const [title, setTitle] = useState('');
   const [subtitle, setSubtitle] = useState('');
   const [emoji, setEmoji] = useState('📌');
+
+  // 필터 조건
   const [categories, setCategories] = useState<string[]>([]);
-  const [regions, setRegions] = useState<string[]>([]);
+  const [zones, setZones] = useState<string[]>([]);
   const [tags, setTags] = useState<string[]>([]);
   const [isFree, setIsFree] = useState(false);
+  const [maxPrice, setMaxPrice] = useState<number | null>(null);
+  const [daysToOpen, setDaysToOpen] = useState<number | null>(null);
+  const [status, setStatus] = useState<'all' | 'active' | 'upcoming'>('all');
+
+  // 정렬 + 노출
   const [sortBy, setSortBy] = useState('buzz_score');
   const [maxItems, setMaxItems] = useState(10);
+
+  // 미리보기
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+
+  // 제출
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -137,56 +160,50 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
     staleTime: 60000,
   });
 
-  // 디바운스 미리보기 (500ms)
-  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 현재 조건 빌드
+  const buildConditions = useCallback(() => {
+    const c: Record<string, any> = {};
+    if (categories.length > 0)          c.categories = categories;
+    if (zones.length > 0)               c.zones = zones;
+    if (tags.length > 0)                c.tags = tags;
+    if (isFree)                         c.is_free = true;
+    if (maxPrice !== null)              c.max_price = maxPrice;
+    if (daysToOpen !== null)            c.days_to_open = daysToOpen;
+    if (status !== 'all')               c.status = status;
+    return c;
+  }, [categories, zones, tags, isFree, maxPrice, daysToOpen, status]);
 
-  const fetchPreview = useCallback(async (conditions: Record<string, any>, sb: string) => {
+  // 디바운스 미리보기 (500ms)
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fetchPreview = useCallback(async () => {
+    const conditions = buildConditions();
     setPreviewLoading(true);
     try {
-      const result = await curationApi.preview(conditions, sb);
+      const result = await curationApi.preview(conditions, sortBy);
       setPreview(result);
     } catch {
       setPreview(null);
     } finally {
       setPreviewLoading(false);
     }
-  }, []);
+  }, [buildConditions, sortBy]);
 
   useEffect(() => {
-    const conditions: Record<string, any> = {};
-    if (categories.length > 0) conditions.categories = categories;
-    if (regions.length > 0) conditions.regions = regions;
-    if (tags.length > 0) conditions.tags = tags;
-    if (isFree) conditions.is_free = true;
-
-    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-    previewTimerRef.current = setTimeout(() => {
-      fetchPreview(conditions, sortBy);
-    }, 500);
-
-    return () => {
-      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-    };
-  }, [categories, regions, tags, isFree, sortBy, fetchPreview]);
+    if (previewTimer.current) clearTimeout(previewTimer.current);
+    previewTimer.current = setTimeout(fetchPreview, 500);
+    return () => { if (previewTimer.current) clearTimeout(previewTimer.current); };
+  }, [fetchPreview]);
 
   const handleSubmit = async () => {
     if (!title.trim()) { setError('섹션 이름을 입력해 주세요'); return; }
-
-    const conditions: Record<string, any> = {};
-    if (categories.length > 0) conditions.categories = categories;
-    if (regions.length > 0) conditions.regions = regions;
-    if (tags.length > 0) conditions.tags = tags;
-    if (isFree) conditions.is_free = true;
-
     const input: CreateThemeInput = {
       slug: slugify(title),
       title: title.trim(),
       subtitle: subtitle.trim() || undefined,
       icon_name: emoji,
-      filter_config: { conditions, sort_by: sortBy, order: 'DESC' },
+      filter_config: { conditions: buildConditions(), sort_by: sortBy, order: 'DESC' },
       max_items: maxItems,
     };
-
     setSubmitting(true);
     setError('');
     try {
@@ -204,13 +221,15 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+
         {/* 헤더 */}
-        <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+        <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
           <h3 className="text-lg font-bold text-gray-900">새 섹션 만들기</h3>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">✕</button>
         </div>
 
         <div className="px-6 py-5 space-y-5">
+
           {/* 이모지 + 제목 */}
           <div className="flex gap-3">
             <div>
@@ -227,7 +246,7 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
               <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">섹션 이름 *</label>
               <input
                 className="w-full h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                placeholder="예: 서울 팝업 모음"
+                placeholder="예: 성수 팝업 모음"
                 value={title}
                 onChange={e => setTitle(e.target.value)}
               />
@@ -239,35 +258,21 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
             <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">부제목</label>
             <input
               className="w-full h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              placeholder="예: 지금 서울에서 뜨는 팝업"
+              placeholder="예: 지금 성수에서 뜨는 팝업"
               value={subtitle}
               onChange={e => setSubtitle(e.target.value)}
             />
           </div>
 
           {/* 필터 조건 */}
-          <div className="bg-gray-50 rounded-xl p-4 space-y-4">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">필터 조건</div>
+          <div className="bg-gray-50 rounded-2xl p-4 space-y-4">
+            <div className="text-xs font-bold text-gray-400 uppercase tracking-wide">필터 조건</div>
 
-            <MultiSelect
-              label="카테고리"
-              options={options?.categories ?? []}
-              selected={categories}
-              onChange={setCategories}
-            />
-            <MultiSelect
-              label="지역"
-              options={options?.regions ?? []}
-              selected={regions}
-              onChange={setRegions}
-            />
-            <MultiSelect
-              label="태그"
-              options={options?.tags ?? []}
-              selected={tags}
-              onChange={setTags}
-            />
+            <MultiSelect label="카테고리" options={options?.categories ?? []} selected={categories} onChange={setCategories} placeholder="전체 카테고리" />
+            <MultiSelect label="상세 지역 (상권)" options={options?.zones ?? []} selected={zones} onChange={setZones} placeholder="예: 성수·뚝섬, 홍대·합정·망원" />
+            <MultiSelect label="태그" options={options?.tags ?? []} selected={tags} onChange={setTags} placeholder="전체 태그" />
 
+            {/* 무료 토글 */}
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-gray-700">무료 이벤트만</label>
               <button
@@ -276,6 +281,66 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
               >
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${isFree ? 'translate-x-6' : 'translate-x-1'}`} />
               </button>
+            </div>
+
+            {/* 가격 상한 */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">최대 가격</label>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => setMaxPrice(null)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${maxPrice === null ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'}`}
+                >
+                  제한 없음
+                </button>
+                {PRICE_PRESETS.map(p => (
+                  <button
+                    key={p.value}
+                    onClick={() => setMaxPrice(p.value)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${maxPrice === p.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'}`}
+                  >
+                    {p.label} 이하
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 오픈 예정 */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">N일 이내 오픈 예정</label>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => setDaysToOpen(null)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${daysToOpen === null ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'}`}
+                >
+                  사용 안 함
+                </button>
+                {OPEN_DAY_PRESETS.map(p => (
+                  <button
+                    key={p.value}
+                    onClick={() => setDaysToOpen(p.value)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${daysToOpen === p.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'}`}
+                  >
+                    {p.label} 이내
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 진행 상태 */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">진행 상태</label>
+              <div className="flex gap-2">
+                {([['all','전체'],['active','진행 중'],['upcoming','오픈 예정']] as const).map(([v, label]) => (
+                  <button
+                    key={v}
+                    onClick={() => setStatus(v)}
+                    className={`flex-1 py-1.5 rounded-xl text-xs font-medium border transition-colors ${status === v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -302,25 +367,25 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
           </div>
 
           {/* 미리보기 */}
-          <div className="bg-blue-50 rounded-xl p-4">
-            <div className="text-xs font-bold text-blue-500 uppercase tracking-wide mb-2">미리보기</div>
+          <div className="bg-blue-50 rounded-2xl p-4">
+            <div className="text-xs font-bold text-blue-500 uppercase tracking-wide mb-2">실시간 미리보기</div>
             {previewLoading ? (
               <div className="flex items-center gap-2 text-sm text-blue-400">
                 <div className="w-3 h-3 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
-                매칭 이벤트 확인 중...
+                확인 중...
               </div>
             ) : preview ? (
               <div>
-                <div className="text-lg font-bold text-blue-700 mb-2">
+                <div className="text-xl font-bold text-blue-700 mb-2">
                   {preview.count.toLocaleString()}개 이벤트 매칭
                 </div>
                 {preview.preview.length > 0 ? (
-                  <ul className="space-y-1">
+                  <ul className="space-y-1.5">
                     {preview.preview.map(e => (
                       <li key={e.id} className="text-sm text-blue-600 flex items-center gap-2">
-                        <span className="text-blue-300">•</span>
+                        <span className="text-blue-300 flex-shrink-0">•</span>
                         <span className="flex-1 truncate">{e.title}</span>
-                        <span className="text-xs text-blue-400 flex-shrink-0">{e.category}</span>
+                        <span className="text-xs text-blue-400 flex-shrink-0 bg-blue-100 px-1.5 py-0.5 rounded-full">{e.category}</span>
                       </li>
                     ))}
                   </ul>
@@ -335,18 +400,13 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
 
           {/* 에러 */}
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
-              {error}
-            </div>
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">{error}</div>
           )}
         </div>
 
         {/* 푸터 */}
         <div className="sticky bottom-0 bg-white border-t border-gray-100 px-6 py-4 flex gap-3 rounded-b-2xl">
-          <button
-            onClick={onClose}
-            className="flex-1 h-11 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors"
-          >
+          <button onClick={onClose} className="flex-1 h-11 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors">
             취소
           </button>
           <button

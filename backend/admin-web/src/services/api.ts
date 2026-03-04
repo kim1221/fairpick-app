@@ -429,6 +429,7 @@ export interface CurationTheme {
 export interface CurationOptions {
   categories: string[];
   regions: string[];
+  zones: string[];
   tags: string[];
 }
 

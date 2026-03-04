@@ -7198,6 +7198,33 @@ const CURATION_SORT_MAP: Record<string, string> = {
   start_at:       'start_at ASC NULLS LAST',
   view_count:     'view_count DESC NULLS LAST, buzz_score DESC NULLS LAST',
   featured_order: 'COALESCE(featured_order, 999) ASC, buzz_score DESC NULLS LAST',
+  price_min:      'price_min ASC NULLS LAST, buzz_score DESC NULLS LAST',
+};
+
+// 상세 지역(상권) 매핑: 존 이름 → address 검색 키워드 배열
+const DETAILED_ZONES: Record<string, string[]> = {
+  // 서울
+  '성수·뚝섬':        ['성수', '성동구', '뚝섬'],
+  '홍대·합정·망원':   ['홍대', '합정동', '망원동', '마포구'],
+  '강남·역삼·선릉':   ['강남구', '역삼동', '선릉'],
+  '이태원·한남':      ['이태원', '한남동', '경리단'],
+  '잠실·송파':        ['잠실', '송파구'],
+  '연남·연희·신촌':   ['연남동', '연희동', '신촌'],
+  '을지로·DDP·명동':  ['을지로', 'DDP', '명동', '중구'],
+  '광화문·종로·인사동': ['광화문', '종로구', '인사동'],
+  '압구정·청담':      ['압구정', '청담동'],
+  '서촌·경복궁':      ['서촌', '통의동', '효자동', '체부동'],
+  '건대·뚝섬유원지':  ['건대', '광진구', '화양동'],
+  '여의도·영등포':    ['여의도', '영등포'],
+  // 부산
+  '부산 해운대':      ['해운대'],
+  '부산 광안리':      ['광안리', '수영구'],
+  '부산 서면·남포':   ['서면', '남포동', '부산 중구'],
+  // 기타
+  '인천 송도':        ['송도'],
+  '경기 판교·분당':   ['판교', '분당', '성남시'],
+  '경기 수원':        ['수원'],
+  '제주':             ['제주'],
 };
 
 function buildWhereClause(conditions: Record<string, any>): { whereStr: string; params: any[] } {
@@ -7219,9 +7246,22 @@ function buildWhereClause(conditions: Record<string, any>): { whereStr: string; 
     params.push(conditions.categories);
     where.push(`main_category = ANY($${params.length})`);
   }
+  // 광역 지역 (서울, 경기 등) - 하위 호환용
   if (Array.isArray(conditions.regions) && conditions.regions.length > 0) {
     params.push(conditions.regions);
     where.push(`region = ANY($${params.length})`);
+  }
+  // 상세 지역 (성수, 홍대 등 상권 단위) - address ILIKE 매칭
+  if (Array.isArray(conditions.zones) && conditions.zones.length > 0) {
+    // 서버 사이드 상수에 정의된 존만 허용 (injection 방지)
+    const keywords = conditions.zones
+      .filter((z: string) => z in DETAILED_ZONES)
+      .flatMap((z: string) => DETAILED_ZONES[z]);
+    if (keywords.length > 0) {
+      // 키워드를 regex-safe하게 escape 후 ~* 패턴 매칭
+      const escaped = keywords.map((k: string) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      where.push(`address ~* '(${escaped.join('|')})'`);
+    }
   }
   if (Array.isArray(conditions.tags) && conditions.tags.length > 0) {
     params.push(conditions.tags);
@@ -7229,6 +7269,26 @@ function buildWhereClause(conditions: Record<string, any>): { whereStr: string; 
   }
   if (conditions.is_free === true) {
     where.push('is_free = true');
+  }
+  // 최대 가격 (price_min이 max_price 이하이거나 무료인 이벤트)
+  if (typeof conditions.max_price === 'number' && conditions.max_price >= 0) {
+    params.push(conditions.max_price);
+    where.push(`(price_min IS NULL OR price_min = 0 OR price_min <= $${params.length} OR is_free = true)`);
+  }
+  // N일 이내 오픈 예정 (start_at 기준)
+  if (typeof conditions.days_to_open === 'number' && conditions.days_to_open > 0) {
+    where.push(`start_at >= NOW() AND start_at <= NOW() + INTERVAL '${Math.floor(conditions.days_to_open)} days'`);
+  }
+  // 진행 상태 (active: 진행 중, upcoming: 오픈 예정)
+  if (conditions.status === 'active') {
+    where.push("start_at <= NOW()");
+  } else if (conditions.status === 'upcoming') {
+    where.push("start_at > NOW()");
+  }
+  // 최소 buzz_score (품질 게이팅)
+  if (typeof conditions.min_buzz_score === 'number' && conditions.min_buzz_score > 0) {
+    params.push(conditions.min_buzz_score);
+    where.push(`buzz_score >= $${params.length}`);
   }
 
   return { whereStr: where.join(' AND '), params };
@@ -7427,6 +7487,7 @@ app.get('/admin/curation-themes/options', requireAdminAuth, async (_req, res) =>
     res.json({
       categories: cats.rows.map((r: any) => r.main_category),
       regions: regions.rows.map((r: any) => r.region),
+      zones: Object.keys(DETAILED_ZONES),
       tags: tagsResult.rows.map((r: any) => r.tag),
     });
   } catch (error) {
