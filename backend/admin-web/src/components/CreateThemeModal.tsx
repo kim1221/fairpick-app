@@ -135,6 +135,7 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
 
   // 필터 조건
   const [categories, setCategories] = useState<string[]>([]);
+  const [regions, setRegions] = useState<string[]>([]);
   const [zones, setZones] = useState<string[]>([]);
   const [tags, setTags] = useState<string[]>([]);
   const [isFree, setIsFree] = useState(false);
@@ -164,6 +165,7 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
   const buildConditions = useCallback(() => {
     const c: Record<string, any> = {};
     if (categories.length > 0)          c.categories = categories;
+    if (regions.length > 0)             c.regions = regions;
     if (zones.length > 0)               c.zones = zones;
     if (tags.length > 0)                c.tags = tags;
     if (isFree)                         c.is_free = true;
@@ -171,7 +173,7 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
     if (daysToOpen !== null)            c.days_to_open = daysToOpen;
     if (status !== 'all')               c.status = status;
     return c;
-  }, [categories, zones, tags, isFree, maxPrice, daysToOpen, status]);
+  }, [categories, regions, zones, tags, isFree, maxPrice, daysToOpen, status]);
 
   // 디바운스 미리보기 (500ms)
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -269,6 +271,7 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
             <div className="text-xs font-bold text-gray-400 uppercase tracking-wide">필터 조건</div>
 
             <MultiSelect label="카테고리" options={options?.categories ?? []} selected={categories} onChange={setCategories} placeholder="전체 카테고리" />
+            <MultiSelect label="광역 지역" options={options?.regions ?? []} selected={regions} onChange={setRegions} placeholder="예: 서울, 경기, 부산" />
             <MultiSelect label="상세 지역 (상권)" options={options?.zones ?? []} selected={zones} onChange={setZones} placeholder="예: 성수·뚝섬, 홍대·합정·망원" />
             <MultiSelect label="태그" options={options?.tags ?? []} selected={tags} onChange={setTags} placeholder="전체 태그" />
 
