@@ -151,6 +151,9 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  // AI 카피 생성
+  const [copyLoading, setCopyLoading] = useState(false);
+
   // 제출
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -195,6 +198,21 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
     previewTimer.current = setTimeout(fetchPreview, 500);
     return () => { if (previewTimer.current) clearTimeout(previewTimer.current); };
   }, [fetchPreview]);
+
+  const handleGenerateCopy = async () => {
+    setCopyLoading(true);
+    try {
+      const conditions = buildConditions();
+      const events = preview?.preview ?? [];
+      const result = await curationApi.generateCopy(conditions, sortBy, events);
+      if (result.title) setTitle(result.title);
+      if (result.subtitle) setSubtitle(result.subtitle);
+    } catch {
+      setError('AI 제목 생성에 실패했어요. 다시 시도해 보세요.');
+    } finally {
+      setCopyLoading(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!title.trim()) { setError('섹션 이름을 입력해 주세요'); return; }
@@ -255,9 +273,26 @@ export default function CreateThemeModal({ onClose, onCreated }: Props) {
             </div>
           </div>
 
-          {/* 부제목 */}
+          {/* 부제목 + AI 추천 버튼 */}
           <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">부제목</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">부제목</label>
+              <button
+                type="button"
+                onClick={handleGenerateCopy}
+                disabled={copyLoading}
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-gradient-to-r from-violet-500 to-blue-500 text-white hover:from-violet-600 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+              >
+                {copyLoading ? (
+                  <>
+                    <span className="w-3 h-3 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                    생성 중...
+                  </>
+                ) : (
+                  <>✨ AI 제목 추천</>
+                )}
+              </button>
+            </div>
             <input
               className="w-full h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
               placeholder="예: 지금 성수에서 뜨는 팝업"

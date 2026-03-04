@@ -7597,6 +7597,81 @@ app.post('/admin/curation-themes/preview', requireAdminAuth, async (req, res) =>
 });
 
 /**
+ * POST /admin/curation-themes/generate-copy
+ * Gemini AI로 섹션 제목 + 부제목 자동 생성
+ */
+app.post('/admin/curation-themes/generate-copy', requireAdminAuth, async (req, res) => {
+  try {
+    const { conditions = {}, sort_by = 'buzz_score', preview_events = [] } = req.body as {
+      conditions?: Record<string, any>;
+      sort_by?: string;
+      preview_events?: { id: string; title: string; category: string }[];
+    };
+
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    if (!GEMINI_API_KEY) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
+    }
+
+    // 조건을 자연어로 변환
+    const conditionLines: string[] = [];
+    if (conditions.categories?.length)  conditionLines.push(`카테고리: ${conditions.categories.join(', ')}`);
+    if (conditions.regions?.length)     conditionLines.push(`광역 지역: ${conditions.regions.join(', ')}`);
+    if (conditions.zones?.length)       conditionLines.push(`상세 지역: ${conditions.zones.join(', ')}`);
+    if (conditions.tags?.length)        conditionLines.push(`태그: ${conditions.tags.join(', ')}`);
+    if (conditions.is_free)             conditionLines.push('무료 이벤트만');
+    if (conditions.max_price)           conditionLines.push(`최대 가격: ${Number(conditions.max_price).toLocaleString()}원`);
+    if (conditions.status === 'active')   conditionLines.push('현재 진행 중인 이벤트');
+    if (conditions.status === 'upcoming') conditionLines.push('오픈 예정 이벤트');
+    if (conditions.days_to_open)        conditionLines.push(`${conditions.days_to_open}일 이내 오픈 예정`);
+
+    const SORT_LABEL: Record<string, string> = {
+      buzz_score: '인기순', created_at: '최신 등록순', end_at: '마감임박순',
+      start_at: '오픈일 빠른순', view_count: '조회수순', price_min: '가격 낮은순',
+    };
+
+    const eventsText = preview_events.length
+      ? preview_events.map((e) => `- "${e.title}" (${e.category})`).join('\n')
+      : '(이벤트 샘플 없음)';
+
+    const prompt = `앱 홈 화면 큐레이션 섹션의 제목과 부제목을 추천해줘.
+
+[필터 조건]
+${conditionLines.length > 0 ? conditionLines.join('\n') : '(전체 이벤트)'}
+
+[정렬 기준]
+${SORT_LABEL[sort_by] ?? sort_by}
+
+[매칭 이벤트 예시]
+${eventsText}
+
+요구사항:
+- 제목: 15자 이내, 감성적이고 클릭하고 싶게 만드는 한국어 (이모지 1개 포함 가능)
+- 부제목: 25자 이내, 섹션 특성을 자연스럽게 설명하는 한국어
+- 앱 사용자가 이 섹션을 발견했을 때 호기심이 생기도록 작성
+
+반드시 아래 JSON 형식으로만 응답해:
+{"title": "...", "subtitle": "..."}`;
+
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-2.0-flash' });
+    const result = await model.generateContent(prompt);
+    const text = result.response.text().trim();
+
+    const jsonMatch = text.match(/\{[\s\S]*?\}/);
+    if (!jsonMatch) {
+      return res.status(500).json({ error: 'AI 응답 파싱 실패' });
+    }
+    const parsed = JSON.parse(jsonMatch[0]);
+    res.json({ title: parsed.title ?? '', subtitle: parsed.subtitle ?? '' });
+  } catch (error: any) {
+    console.error('[Admin] POST /admin/curation-themes/generate-copy failed:', error);
+    res.status(500).json({ error: 'AI 카피 생성 실패' });
+  }
+});
+
+/**
  * POST /admin/curation-themes
  * 새 큐레이션 테마 생성
  */

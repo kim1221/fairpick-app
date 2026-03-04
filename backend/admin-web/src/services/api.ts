@@ -484,6 +484,19 @@ export const curationApi = {
   deleteTheme: async (id: string): Promise<void> => {
     await api.delete(`/admin/curation-themes/${id}`);
   },
+
+  generateCopy: async (
+    conditions: Record<string, any>,
+    sort_by: string,
+    preview_events: { id: string; title: string; category: string }[],
+  ): Promise<{ title: string; subtitle: string }> => {
+    const res = await api.post('/admin/curation-themes/generate-copy', {
+      conditions,
+      sort_by,
+      preview_events,
+    });
+    return res.data;
+  },
 };
 
 // Hot Suggestions API (별도 export)
