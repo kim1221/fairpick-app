@@ -519,13 +519,17 @@ export async function getFreeEvents(
  * 기존 8개 개별 API 호출을 1회로 통합
  */
 export async function getSections(
-  location?: Location
+  location?: Location,
+  userId?: string,
 ): Promise<{ success: boolean; sections: Array<{ slug: string; title: string; subtitle: string | null; events: any[] }> }> {
   try {
     const params = new URLSearchParams();
     if (location) {
       params.append('lat', location.lat.toString());
       params.append('lng', location.lng.toString());
+    }
+    if (userId) {
+      params.append('userId', userId);
     }
     const url = `${API_BASE_URL}${API_ENDPOINTS.homeSections}${params.toString() ? `?${params}` : ''}`;
     const response = await fetchWithTimeout(url);

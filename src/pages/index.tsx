@@ -166,7 +166,7 @@ function HomePage() {
 
   // null = 로딩 중, [] = 실패/빈 상태, [...] = 로드 완료
   const [sections, setSections] = useState<HomeSection[] | null>(null);
-  const [_userId, setUserId] = useState('');
+  const [userId, setUserId] = useState('');
   const [location, setLocation] = useState<Location | undefined>(undefined);
   const [currentAddress, setCurrentAddress] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -194,7 +194,7 @@ function HomePage() {
       const uid = await getCurrentUserId();
       setUserId(uid);
       const loc = await requestLocation();
-      await loadSections(loc);
+      await loadSections(loc, uid);
     } catch (error) {
       console.error('[Home] init error:', error);
       await loadSections();
@@ -225,9 +225,9 @@ function HomePage() {
     }
   };
 
-  const loadSections = async (loc?: Location) => {
+  const loadSections = async (loc?: Location, uid?: string) => {
     setSections(null);
-    const response = await recommendationService.getSections(loc);
+    const response = await recommendationService.getSections(loc, uid);
     setSections(response.success ? response.sections : []);
   };
 
@@ -243,7 +243,7 @@ function HomePage() {
     try {
       excludedIds.current.clear();
       const loc = await requestLocation();
-      await loadSections(loc);
+      await loadSections(loc, userId);
     } finally {
       setRefreshing(false);
     }

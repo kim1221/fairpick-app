@@ -7313,16 +7313,64 @@ function buildConditionsQuery(
 }
 
 // ============================================================
+// 랜덤 샘플링 헬퍼
+// ============================================================
+
+/** Fisher-Yates 셔플 (원본 배열 불변) */
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j]!, a[i]!];
+  }
+  return a;
+}
+
+/**
+ * 클릭 다운랭킹 + 랜덤 샘플링
+ * - 클릭하지 않은 이벤트를 먼저 채운 후, 남은 자리를 클릭 이벤트로 채움
+ * - 각 풀 내부는 셔플 → 매 세션마다 다른 조합 노출
+ */
+function sampleWithClickDownrank<T extends { id: string }>(
+  arr: T[],
+  n: number,
+  clickedIds: Set<string>,
+): T[] {
+  if (arr.length <= n) return arr;
+  const notClicked = shuffleArray(arr.filter((e) => !clickedIds.has(e.id)));
+  const clicked    = shuffleArray(arr.filter((e) =>  clickedIds.has(e.id)));
+  const result = notClicked.slice(0, n);
+  if (result.length < n) result.push(...clicked.slice(0, n - result.length));
+  return result;
+}
+
+// ============================================================
 // GET /api/home/sections
 // curation_themes 테이블 기반 홈 화면 섹션 데이터 일괄 반환
 // ============================================================
 
 app.get('/api/home/sections', async (req, res) => {
   try {
-    const { lat, lng } = req.query;
+    const { lat, lng, userId } = req.query;
     const location = lat && lng
       ? { lat: parseFloat(lat as string), lng: parseFloat(lng as string) }
       : undefined;
+
+    // 사용자 클릭 이력 조회 (최근 14일) → 클릭 다운랭킹에 사용
+    const clickedIds = new Set<string>();
+    if (userId) {
+      try {
+        const clickResult = await pool.query(
+          `SELECT DISTINCT event_id FROM user_events
+           WHERE user_id = $1 AND action_type = 'click'
+           AND created_at > NOW() - INTERVAL '14 days'`,
+          [userId as string],
+        );
+        clickResult.rows.forEach((r: any) => clickedIds.add(r.event_id));
+      } catch {
+        // 클릭 이력 조회 실패해도 섹션 로딩 계속
+      }
+    }
 
     // 1. 활성화된 테마 목록 조회 (display_order 순)
     const themesResult = await pool.query(
@@ -7335,6 +7383,8 @@ app.get('/api/home/sections', async (req, res) => {
     const sectionPromises = themesResult.rows.map(async (theme) => {
       const config = theme.filter_config as Record<string, any>;
       const limit: number = theme.max_items || 10;
+      // 후보를 limit의 3배 fetch → 랜덤 샘플링 풀 확보 (최대 50개)
+      const fetchLimit = Math.min(limit * 3, 50);
       let events: any[] = [];
 
       try {
@@ -7342,20 +7392,20 @@ app.get('/api/home/sections', async (req, res) => {
           // preset: 계산 로직이 필요한 섹션 (recommender 함수 호출)
           switch (config.preset as string) {
             case 'ending_soon':
-              events = await recommender.getEndingSoon(pool, location, limit);
+              events = await recommender.getEndingSoon(pool, location, fetchLimit);
               break;
             case 'trending':
-              events = await recommender.getTrending(pool, location, empty, limit);
+              events = await recommender.getTrending(pool, location, empty, fetchLimit);
               break;
             case 'weekend':
-              events = await recommender.getWeekend(pool, empty, limit, location);
+              events = await recommender.getWeekend(pool, empty, fetchLimit, location);
               break;
           }
         } else {
           // unified conditions: 동적 쿼리 빌더
           const conditions = (config.conditions ?? {}) as Record<string, any>;
           const sortBy = (config.sort_by as string) ?? 'buzz_score';
-          const { text, values } = buildConditionsQuery(conditions, sortBy, limit);
+          const { text, values } = buildConditionsQuery(conditions, sortBy, fetchLimit);
           const r = await pool.query(text, values);
           events = r.rows;
         }
@@ -7363,9 +7413,12 @@ app.get('/api/home/sections', async (req, res) => {
         // 오늘의 픽: featured 이벤트가 부족하면 trending으로 자동 채움
         if (theme.slug === 'today_pick' && events.length < 3) {
           const existingIds = new Set<string>(events.map((e: any) => e.id));
-          const fallback = await recommender.getTrending(pool, location, existingIds, limit - events.length);
+          const fallback = await recommender.getTrending(pool, location, existingIds, fetchLimit - events.length);
           events = [...events, ...fallback];
         }
+
+        // 클릭 다운랭킹 + 랜덤 샘플링 (limit개만 최종 반환)
+        events = sampleWithClickDownrank(events, limit, clickedIds);
       } catch (err) {
         console.error(`[home/sections] theme "${theme.slug}" failed:`, err);
       }
