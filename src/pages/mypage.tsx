@@ -1,7 +1,7 @@
 import { createRoute } from '@granite-js/react-native';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl, Alert } from 'react-native';
-import { Loader, Icon } from '@toss/tds-react-native';
+import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl, Switch } from 'react-native';
+import { Loader, Icon, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { useAuth } from '../hooks/useAuth';
 import { BottomTabBar } from '../components/BottomTabBar';
@@ -12,6 +12,7 @@ import {
   subscribeStorageChange,
 } from '../utils/storage';
 import eventService from '../services/eventService';
+import http from '../lib/http';
 import { isStoredItemActive, getTodayMidnight } from '../utils/eventStatus';
 import { EventCardData } from '../data/events';
 import { EventImage } from '../components/EventImage';
@@ -61,28 +62,37 @@ function ThumbnailListItem({
 
 function MyPage() {
   const navigation = Route.useNavigation();
-  const { isLoggedIn, isLoading: authLoading, login, logout } = useAuth();
+  const { isLoggedIn, user, isLoading: authLoading, login, logout } = useAuth();
   const [loginLoading, setLoginLoading] = useState(false);
 
   const adaptive = useAdaptive();
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
+  const dialog = useDialog();
 
   const handleLogin = async () => {
     setLoginLoading(true);
     try {
       await login();
-    } catch {
-      Alert.alert('로그인 실패', '잠시 후 다시 시도해 주세요.');
+    } catch (err) {
+      // 사용자가 직접 닫기를 선택한 경우(취소)는 에러 표시 안 함
+      const msg = err instanceof Error ? err.message.toLowerCase() : '';
+      const isCancelled = msg.includes('cancel') || msg.includes('close') || msg.includes('dismiss');
+      if (!isCancelled) {
+        await dialog.openAlert({ title: '로그인 실패', description: '잠시 후 다시 시도해 주세요.' });
+      }
     } finally {
       setLoginLoading(false);
     }
   };
 
-  const handleLogout = () => {
-    Alert.alert('로그아웃', '로그아웃할까요?', [
-      { text: '취소', style: 'cancel' },
-      { text: '로그아웃', style: 'destructive', onPress: logout },
-    ]);
+  const handleLogout = async () => {
+    const confirmed = await dialog.openConfirm({
+      title: '로그아웃',
+      description: '로그아웃할까요?',
+      rightButton: '로그아웃',
+      leftButton: '취소',
+    });
+    if (confirmed) logout();
   };
 
   // 찜/최근 각각 독립적인 카운트 + 로딩 상태
@@ -96,6 +106,9 @@ function MyPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [likesError, setLikesError] = useState(false);
   const [recentError, setRecentError] = useState(false);
+
+  const [pushEnabled, setPushEnabled] = useState(true);
+  const [pushLoading, setPushLoading] = useState(false);
 
   const smokeTestRanRef = useRef<boolean>(false);
 
@@ -222,6 +235,35 @@ function MyPage() {
     return unsubscribe;
   }, [loadLikes, loadRecent]);
 
+  const loadNotificationSettings = useCallback(async () => {
+    try {
+      const { data } = await http.get<{ pushEnabled: boolean }>('/users/me/notifications');
+      setPushEnabled(data.pushEnabled);
+    } catch {
+      // 기본값 true 유지
+    }
+  }, []);
+
+  const handlePushToggle = useCallback(async (value: boolean) => {
+    if (pushLoading) return;
+    setPushEnabled(value);
+    setPushLoading(true);
+    try {
+      await http.patch('/users/me/notifications', { pushEnabled: value });
+    } catch {
+      setPushEnabled(!value);
+      dialog.openAlert({ title: '오류', description: '설정 변경에 실패했어요. 다시 시도해 주세요.' });
+    } finally {
+      setPushLoading(false);
+    }
+  }, [pushLoading]);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      loadNotificationSettings();
+    }
+  }, [isLoggedIn, loadNotificationSettings]);
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     await Promise.all([loadLikes(), loadRecent()]);
@@ -252,7 +294,7 @@ function MyPage() {
             <Loader size="small" customStrokeColor={adaptive.grey500} style={{ marginTop: 8 }} />
           ) : isLoggedIn ? (
             <>
-              <Text style={styles.welcomeText}>반가워요!</Text>
+              <Text style={styles.welcomeText}>{user?.name ? `${user.name}님, 반가워요!` : '반가워요!'}</Text>
               <Text style={styles.infoText}>찜한 목록과 최근 본 이벤트를 확인해보세요.</Text>
               <TouchableOpacity onPress={handleLogout} style={styles.logoutButton} activeOpacity={0.7}>
                 <Text style={styles.logoutButtonText}>로그아웃</Text>
@@ -436,6 +478,32 @@ function MyPage() {
               )}
             </View>
           </>
+        )}
+
+        {/* 알림 설정 (로그인 시만) */}
+        {isLoggedIn && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>알림 설정</Text>
+            </View>
+            <View style={styles.settingsCard}>
+              <View style={styles.settingsRow}>
+                <View style={styles.settingsRowInfo}>
+                  <Text style={styles.settingsRowTitle}>이벤트 종료 알림</Text>
+                  <Text style={styles.settingsRowDesc}>
+                    찜한 이벤트가 3일 후 종료되면 알려드려요.
+                  </Text>
+                </View>
+                <Switch
+                  value={pushEnabled}
+                  onValueChange={handlePushToggle}
+                  disabled={pushLoading}
+                  trackColor={{ false: adaptive.grey200, true: adaptive.blue500 }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+            </View>
+          </View>
         )}
 
         <View style={{ height: 100 }} />
@@ -731,6 +799,37 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: a.blue500,
+  },
+  settingsCard: {
+    backgroundColor: a.background,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  settingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  settingsRowInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  settingsRowTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: a.grey900,
+    marginBottom: 4,
+  },
+  settingsRowDesc: {
+    fontSize: 13,
+    color: a.grey500,
+    lineHeight: 18,
   },
   loginNoticeBanner: {
     marginTop: 12,

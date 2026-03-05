@@ -12,6 +12,7 @@ const KEY_USER = 'auth:user';
 export interface StoredUser {
   id: string;
   userKey: number;
+  name?: string | null;
 }
 
 export async function getToken(): Promise<string | null> {

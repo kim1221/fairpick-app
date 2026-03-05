@@ -20,9 +20,6 @@ export const config = {
   // ── 토스 로그인 (앱인토스 파트너 API) ──────────────────────────────
   toss: {
     apiBaseUrl: 'https://apps-in-toss-api.toss.im',
-    // 앱인토스 개발자센터에서 발급받은 OAuth2 클라이언트 자격증명
-    clientId: process.env.TOSS_CLIENT_ID ?? '',
-    clientSecret: process.env.TOSS_CLIENT_SECRET ?? '',
     // 개인정보 복호화 키 (콘솔 이메일로 받아요, AES-256-GCM, base64 인코딩)
     decryptKey: process.env.TOSS_DECRYPT_KEY ?? '',
     decryptAad: process.env.TOSS_DECRYPT_AAD ?? '',

@@ -54,17 +54,6 @@ function unwrap<T>(res: TossResponse<T>, label: string): T {
   return res.success;
 }
 
-// ─── 파트너 API 인증 헤더 ───────────────────────────────────────────────────
-// 앱인토스 파트너 API는 Basic 인증(clientId:clientSecret)을 사용해요.
-// 개발자센터에서 정확한 인증 방식을 확인 후 필요하면 수정하세요.
-
-function partnerAuthHeader(): Record<string, string> {
-  const creds = Buffer.from(
-    `${config.toss.clientId}:${config.toss.clientSecret}`
-  ).toString('base64');
-  return { Authorization: `Basic ${creds}` };
-}
-
 // ─── 타입 정의 ──────────────────────────────────────────────────────────────
 
 export interface TossTokens {
@@ -94,7 +83,7 @@ export async function generateTossToken(
   const { data } = await axios.post<TossResponse<TossTokens>>(
     `${BASE}/api-partner/v1/apps-in-toss/user/oauth2/generate-token`,
     { authorizationCode, referrer },
-    { headers: { 'Content-Type': 'application/json', ...partnerAuthHeader() }, httpsAgent: mtlsAgent }
+    { headers: { 'Content-Type': 'application/json' }, httpsAgent: mtlsAgent }
   );
   return unwrap(data, 'generateTossToken');
 }
@@ -110,7 +99,7 @@ export async function refreshTossToken(refreshToken: string): Promise<TossTokens
   const { data } = await axios.post<TossResponse<TossTokens>>(
     `${BASE}/api-partner/v1/apps-in-toss/user/oauth2/refresh-token`,
     { refreshToken },
-    { headers: { 'Content-Type': 'application/json', ...partnerAuthHeader() }, httpsAgent: mtlsAgent }
+    { headers: { 'Content-Type': 'application/json' }, httpsAgent: mtlsAgent }
   );
   return unwrap(data, 'refreshTossToken');
 }

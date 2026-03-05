@@ -31,33 +31,18 @@ function createStyles(a: Adaptive) {
     },
     header: {
       backgroundColor: a.background,
-      flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      justifyContent: 'center',
       paddingHorizontal: 12,
       paddingVertical: 12,
       paddingTop: 50,
       borderBottomWidth: 1,
       borderBottomColor: a.grey200,
     },
-    backButton: {
-      width: 40,
-      height: 40,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    backIcon: {
-      fontSize: 32,
-      color: a.grey900,
-      fontWeight: '300',
-    },
     headerTitle: {
       fontSize: 18,
       fontWeight: '700',
       color: a.grey900,
-    },
-    headerRight: {
-      width: 40,
     },
     scrollView: {
       flex: 1,
@@ -383,8 +368,6 @@ function LikesPage() {
     setRefreshing(false);
   }, [loadLikes]);
 
-  const handleBack = () => navigation.goBack();
-
   const handleEventPress = (event: RenderableEventItem) => {
     if (event.isPlaceholder) return; // deleted: real data 없음
     navigation.navigate('/events/:id', { id: event.id });
@@ -512,11 +495,7 @@ function LikesPage() {
     <View style={styles.container}>
       {/* 헤더 */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backButton} activeOpacity={0.7}>
-          <Text style={styles.backIcon}>‹</Text>
-        </TouchableOpacity>
         <Text style={styles.headerTitle}>찜한 목록</Text>
-        <View style={styles.headerRight} />
       </View>
 
       <ScrollView

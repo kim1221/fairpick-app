@@ -94,7 +94,6 @@ router.post('/login', async (req, res) => {
     const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000);
 
     // 3. users 테이블 upsert (신규 or 재로그인)
-    //    기존 스키마: id(uuid), toss_user_key(bigint), name(varchar)
     const { rows } = await pool.query<{ id: string }>(
       `INSERT INTO users (toss_user_key, name, toss_access_token, toss_refresh_token, token_expires_at)
        VALUES ($1, $2, $3, $4, $5)
@@ -114,7 +113,7 @@ router.post('/login', async (req, res) => {
 
     res.json({
       token,
-      user: { id: userId, userKey: tossUser.userKey },
+      user: { id: userId, userKey: tossUser.userKey, name: tossUser.name ?? null },
     });
   } catch (err) {
     console.error('[auth/login]', err);
@@ -142,6 +141,11 @@ router.get('/me', requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('[auth/me]', err);
+    // DB에 토큰 없음 (콜백으로 폐기됐거나 로그아웃된 경우) → 재로그인 필요
+    if (err instanceof Error && err.message.includes('다시 로그인')) {
+      res.status(401).json({ error: 'TokenNotFound', message: err.message });
+      return;
+    }
     res.status(500).json({ error: 'FetchFailed', message: '사용자 정보를 가져오지 못했어요.' });
   }
 });

@@ -1,7 +1,7 @@
 import { createRoute } from '@granite-js/react-native';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View, Text, Pressable, Image, Alert } from 'react-native';
-import { Loader, Icon } from '@toss/tds-react-native';
+import { ScrollView, StyleSheet, View, Text, Pressable, Image } from 'react-native';
+import { Loader, Icon, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { Accuracy, getCurrentLocation, GetCurrentLocationPermissionError } from '@apps-in-toss/framework';
 import eventService from '../services/eventService';
@@ -187,6 +187,7 @@ function NearbyPage() {
 
   const adaptive = useAdaptive();
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
+  const dialog = useDialog();
 
   useEffect(() => {
     // 앱 진입 시 위치 자동 감지 1회
@@ -233,11 +234,10 @@ function NearbyPage() {
         // 위치 권한 거부 또는 실패
         if (error instanceof GetCurrentLocationPermissionError) {
           console.warn('[GPS] 위치 권한 거부 - 기본 위치 사용');
-          Alert.alert(
-            '위치 권한 필요',
-            '주변 이벤트를 보려면 위치 권한이 필요해요. 지금은 서울 기준으로 표시할게요.',
-            [{ text: '확인' }]
-          );
+          dialog.openAlert({
+            title: '위치 권한 필요',
+            description: '주변 이벤트를 보려면 위치 권한이 필요해요. 지금은 서울 기준으로 표시할게요.',
+          });
         } else {
           console.error('[GPS] 위치 가져오기 실패:', error);
         }
@@ -271,11 +271,10 @@ function NearbyPage() {
         const newPermission = await getCurrentLocation.openPermissionDialog();
 
         if (newPermission === 'denied') {
-          Alert.alert(
-            '위치 권한 필요',
-            '주변 이벤트를 보려면 위치 권한이 필요해요.',
-            [{ text: '확인' }]
-          );
+          await dialog.openAlert({
+            title: '위치 권한 필요',
+            description: '주변 이벤트를 보려면 위치 권한이 필요해요.',
+          });
           setRefreshing(false);
           return;
         }
@@ -337,7 +336,7 @@ function NearbyPage() {
       setEvents(within5km);
     } catch (error) {
       console.error('Failed to load nearby events:', error);
-      Alert.alert('오류', '주변 이벤트를 불러오지 못했어요. 잠시 후 다시 시도해주세요.');
+      dialog.openAlert({ title: '오류', description: '주변 이벤트를 불러오지 못했어요. 잠시 후 다시 시도해주세요.' });
     } finally {
       setLoading(false);
     }

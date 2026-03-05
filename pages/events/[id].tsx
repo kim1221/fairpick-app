@@ -5,7 +5,6 @@ import {
   ScrollView,
   StyleSheet,
   View,
-  Alert,
   Dimensions,
   TouchableOpacity,
   Text,
@@ -13,7 +12,7 @@ import {
   Platform,
   Pressable
 } from 'react-native';
-import { Txt, Badge, Post, BottomSheet, Loader, Button, Icon, IconButton } from '@toss/tds-react-native';
+import { Txt, Badge, Post, BottomSheet, Loader, Button, Icon, IconButton, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
@@ -220,6 +219,7 @@ function EventDetailPage() {
   const [activeSheet, setActiveSheet] = useState<'price' | 'hours' | 'overview' | null>(null);
   const { isLiked, toggle: toggleLikeWithSync } = useLike({ eventId: params?.id });
   const { isLoggedIn } = useAuth();
+  const dialog = useDialog();
 
   useEffect(() => {
     let mounted = true;
@@ -309,7 +309,7 @@ function EventDetailPage() {
   const handleOpenLink = async (url?: string) => {
     const targetUrl = url ?? getPrimaryCTALink(event!)?.url;
     if (!targetUrl) {
-      Alert.alert('링크 없음', '연결된 링크가 없어요.');
+      await dialog.openAlert({ title: '링크 없음', description: '연결된 링크가 없어요.' });
       return;
     }
 
@@ -320,7 +320,7 @@ function EventDetailPage() {
       }
       await Linking.openURL(targetUrl);
     } catch {
-      Alert.alert('열기 실패', '외부 페이지를 열 수 없어요. 잠시 후 다시 시도해주세요.');
+      await dialog.openAlert({ title: '열기 실패', description: '외부 페이지를 열 수 없어요. 잠시 후 다시 시도해주세요.' });
     }
   };
 
@@ -347,7 +347,7 @@ function EventDetailPage() {
       }
     } catch (error) {
       console.error('[EventDetail] Failed to toggle like:', error);
-      Alert.alert('오류', '찜하기에 실패했어요. 다시 시도해주세요.');
+      await dialog.openAlert({ title: '오류', description: '찜하기에 실패했어요. 다시 시도해주세요.' });
     }
   };
 
@@ -355,7 +355,8 @@ function EventDetailPage() {
     if (!event) return;
 
     try {
-      const message = `${event.title}\n${event.venue || event.region}\n${event.periodText || ''}`;
+      const deeplink = `intoss://fairpick-app/events/${event.id}`;
+      const message = `${event.title}\n${event.venue || event.region}\n${event.periodText || ''}\n${deeplink}`;
       await Share.share({
         message,
         title: event.title,
@@ -664,11 +665,13 @@ function EventDetailPage() {
                 <View style={styles.mapButtons}>
                   <TouchableOpacity
                     style={styles.mapButton}
-                    onPress={() => {
+                    onPress={async () => {
                       const url = `https://map.kakao.com/link/map/${encodeURIComponent(event.venue || '')},${event.lat},${event.lng}`;
-                      Linking.openURL(url).catch(() =>
-                        Alert.alert('오류', '지도를 열 수 없어요.')
-                      );
+                      try {
+                        await Linking.openURL(url);
+                      } catch {
+                        await dialog.openAlert({ title: '오류', description: '지도를 열 수 없어요.' });
+                      }
                     }}
                   >
                     <Text style={styles.mapButtonText}>지도에서 보기</Text>

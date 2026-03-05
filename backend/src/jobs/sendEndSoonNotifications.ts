@@ -56,7 +56,8 @@ export async function sendEndSoonNotifications(): Promise<void> {
      JOIN users u ON u.id = ul.user_id
      JOIN canonical_events e ON e.id = ul.event_id
      WHERE e.end_at::date = (CURRENT_DATE + ($1::int * INTERVAL '1 day'))::date
-       AND u.toss_user_key IS NOT NULL`,
+       AND u.toss_user_key IS NOT NULL
+       AND u.push_notifications_enabled = TRUE`,
     [DAYS_BEFORE_END]
   );
 
@@ -80,12 +81,27 @@ export async function sendEndSoonNotifications(): Promise<void> {
     }
 
     try {
-      await sendMessage(target.toss_user_key, templateCode, {
+      const result = await sendMessage(target.toss_user_key, templateCode, {
         eventTitle: target.event_title,
         eventId: target.event_id,
         daysLeft: String(DAYS_BEFORE_END),
       });
-      successCount++;
+
+      // 부분 실패 (resultType=SUCCESS이나 개별 채널 실패) 로깅
+      const failedPush = result.fail?.sentPush ?? [];
+      if (failedPush.length > 0) {
+        failedPush.forEach((f) =>
+          console.warn(
+            `[sendEndSoon] 채널 실패 userKey=${target.toss_user_key} contentId=${f.contentId} reason=${f.reachFailReason}`
+          )
+        );
+        failCount++;
+      } else {
+        console.log(
+          `[sendEndSoon] 발송 성공 userKey=${target.toss_user_key} msgCount=${result.msgCount} sentPush=${result.sentPushCount}`
+        );
+        successCount++;
+      }
     } catch (err: any) {
       console.error(`[sendEndSoon] 발송 실패 userKey=${target.toss_user_key}:`, err.message);
       failCount++;

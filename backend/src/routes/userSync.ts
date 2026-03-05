@@ -261,4 +261,57 @@ router.delete('/me/recent', async (req, res) => {
   }
 });
 
+// ════════════════════════════════════════════════════════
+// 알림 설정
+// ════════════════════════════════════════════════════════
+
+/**
+ * GET /users/me/notifications
+ * 푸시 알림 수신 설정 조회
+ *
+ * response: { pushEnabled: boolean }
+ */
+router.get('/me/notifications', async (req, res) => {
+  const userId = req.user!.userId;
+
+  try {
+    const { rows } = await pool.query<{ push_notifications_enabled: boolean }>(
+      'SELECT push_notifications_enabled FROM users WHERE id = $1',
+      [userId]
+    );
+    res.json({ pushEnabled: rows[0]?.push_notifications_enabled ?? true });
+  } catch (err) {
+    console.error('[userSync/notifications GET]', err);
+    res.status(500).json({ error: 'FetchFailed', message: '설정을 불러오지 못했어요.' });
+  }
+});
+
+/**
+ * PATCH /users/me/notifications
+ * 푸시 알림 수신 설정 변경
+ *
+ * body: { pushEnabled: boolean }
+ * response: { ok: true }
+ */
+router.patch('/me/notifications', async (req, res) => {
+  const userId = req.user!.userId;
+  const { pushEnabled } = req.body as { pushEnabled?: boolean };
+
+  if (typeof pushEnabled !== 'boolean') {
+    res.status(400).json({ error: 'BadRequest', message: 'pushEnabled(boolean)가 필요해요.' });
+    return;
+  }
+
+  try {
+    await pool.query(
+      'UPDATE users SET push_notifications_enabled = $1 WHERE id = $2',
+      [pushEnabled, userId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[userSync/notifications PATCH]', err);
+    res.status(500).json({ error: 'UpdateFailed', message: '설정 변경에 실패했어요.' });
+  }
+});
+
 export default router;

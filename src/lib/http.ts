@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getToken } from '../utils/authStorage';
+import { getToken, clearToken, clearStoredUser } from '../utils/authStorage';
 
 const http = axios.create({
   baseURL: process.env.API_BASE_URL ?? (__DEV__ ? 'http://172.20.10.4:5001' : 'https://fairpick-app-production.up.railway.app'),
@@ -29,6 +29,17 @@ http.interceptors.request.use(
   },
   (error) => {
     console.error('[HTTP][Request][Error]', error);
+    return Promise.reject(error);
+  }
+);
+
+// 응답 인터셉터: 401 → 로컬 세션 삭제 (다음 렌더링에서 useAuth가 isLoggedIn=false로 전환)
+http.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response?.status === 401) {
+      await Promise.all([clearToken(), clearStoredUser()]).catch(() => {});
+    }
     return Promise.reject(error);
   }
 );

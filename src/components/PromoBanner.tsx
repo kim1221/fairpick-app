@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
@@ -7,9 +8,10 @@ type Adaptive = ReturnType<typeof useAdaptive>;
 export const PromoBanner: React.FC = () => {
   const adaptive = useAdaptive();
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
+  const dialog = useDialog();
 
-  const handlePress = () => {
-    Alert.alert('준비 중', '프로모션 상세 페이지는 곧 추가될 예정입니다.');
+  const handlePress = async () => {
+    await dialog.openAlert({ title: '준비 중', description: '프로모션 상세 페이지는 곧 추가될 예정입니다.' });
   };
 
   return (

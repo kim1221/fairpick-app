@@ -38,31 +38,19 @@ function createStyles(a: Adaptive) {
       backgroundColor: a.background,
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      justifyContent: 'center',
       paddingHorizontal: 12,
       paddingVertical: 12,
       paddingTop: 50,
       borderBottomWidth: 1,
       borderBottomColor: a.grey200,
     },
-    backButton: {
-      width: 40,
-      height: 40,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    backIcon: {
-      fontSize: 32,
-      color: a.grey900,
-      fontWeight: '300',
-    },
     headerTitle: {
       fontSize: 18,
       fontWeight: '700',
       color: a.grey900,
-    },
-    headerRight: {
-      width: 60,
+      flex: 1,
+      textAlign: 'center',
     },
     clearAllButton: {
       width: 60,
@@ -312,8 +300,6 @@ function RecentPage() {
     setRefreshing(false);
   }, [loadRecent]);
 
-  const handleBack = () => navigation.goBack();
-
   const handleEventPress = (event: RenderableEventItem) => {
     if (event.isPlaceholder) return;
     navigation.navigate('/events/:id', { id: event.id });
@@ -481,16 +467,11 @@ function RecentPage() {
     <View style={styles.container}>
       {/* 헤더 */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backButton} activeOpacity={0.7}>
-          <Text style={styles.backIcon}>‹</Text>
-        </TouchableOpacity>
         <Text style={styles.headerTitle}>최근 본 이벤트</Text>
-        {!loading && events.length > 0 ? (
+        {!loading && events.length > 0 && (
           <TouchableOpacity onPress={handleClearAll} style={styles.clearAllButton} activeOpacity={0.7}>
             <Text style={styles.clearAllText}>전체 삭제</Text>
           </TouchableOpacity>
-        ) : (
-          <View style={styles.headerRight} />
         )}
       </View>
 

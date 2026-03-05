@@ -16,17 +16,47 @@ const BASE = config.toss.apiBaseUrl;
 
 type TossResultType = 'SUCCESS' | 'HTTP_TIMEOUT' | 'NETWORK_ERROR' | 'EXECUTION_FAIL' | 'INTERRUPTED' | 'INTERNAL_ERROR' | 'FAIL';
 
+interface SentMessageItem {
+  contentId: string;
+}
+
+interface FailedMessageItem {
+  contentId: string;
+  reachFailReason: string;
+}
+
+interface MessengerResult {
+  msgCount: number;
+  sentPushCount: number;
+  sentInboxCount: number;
+  sentSmsCount: number;
+  sentAlimtalkCount: number;
+  sentFriendtalkCount: number;
+  detail: {
+    sentPush?: SentMessageItem[];
+    sentInbox?: SentMessageItem[];
+    sentSms?: SentMessageItem[];
+    sentAlimtalk?: SentMessageItem[];
+    sentFriendtalk?: SentMessageItem[];
+  };
+  fail: {
+    sentPush?: FailedMessageItem[];
+    sentInbox?: FailedMessageItem[];
+    sentSms?: FailedMessageItem[];
+    sentAlimtalk?: FailedMessageItem[];
+    sentFriendtalk?: FailedMessageItem[];
+  };
+}
+
 interface MessengerResponse {
   resultType: TossResultType;
-  success?: {
-    channels?: Array<{
-      channel: string;
-      sentCount: number;
-      successMessages?: unknown[];
-      failMessages?: unknown[];
-    }>;
+  result?: MessengerResult;
+  error?: {
+    errorType?: number;
+    errorCode?: string;
+    reason?: string;
+    title?: string;
   };
-  error?: { code: string; message: string };
 }
 
 // ─── 실제 메시지 발송 ────────────────────────────────────────────────────────
@@ -38,12 +68,13 @@ interface MessengerResponse {
  * @param tossUserKey - users.toss_user_key (bigint)
  * @param templateSetCode - 콘솔에서 승인된 템플릿 코드
  * @param context - 템플릿 변수 ({ eventTitle, daysLeft, ... })
+ * @returns MessengerResult — msgCount, sentPushCount 등 발송 결과
  */
 export async function sendMessage(
   tossUserKey: number,
   templateSetCode: string,
   context: Record<string, string>
-): Promise<void> {
+): Promise<MessengerResult> {
   const { data } = await axios.post<MessengerResponse>(
     `${BASE}/api-partner/v1/apps-in-toss/messenger/send-message`,
     { templateSetCode, context },
@@ -56,9 +87,12 @@ export async function sendMessage(
     }
   );
 
-  if (data.resultType !== 'SUCCESS') {
-    throw new Error(`[tossMessenger] 발송 실패: ${data.error?.message ?? data.resultType}`);
+  if (data.resultType !== 'SUCCESS' || !data.result) {
+    const reason = data.error?.reason ?? data.error?.errorCode ?? data.resultType;
+    throw new Error(`[tossMessenger] 발송 실패: ${reason}`);
   }
+
+  return data.result;
 }
 
 // ─── 테스트 메시지 발송 ──────────────────────────────────────────────────────
@@ -70,13 +104,14 @@ export async function sendMessage(
  * @param templateSetCode - 콘솔에서 승인된 템플릿 코드
  * @param deploymentId - 콘솔 앱 출시 메뉴의 번들 UUID
  * @param context - 템플릿 변수
+ * @returns MessengerResult
  */
 export async function sendTestMessage(
   tossUserKey: number,
   templateSetCode: string,
   deploymentId: string,
   context: Record<string, string>
-): Promise<void> {
+): Promise<MessengerResult> {
   const { data } = await axios.post<MessengerResponse>(
     `${BASE}/api-partner/v1/apps-in-toss/messenger/send-test-message`,
     { templateSetCode, deploymentId, context },
@@ -89,7 +124,10 @@ export async function sendTestMessage(
     }
   );
 
-  if (data.resultType !== 'SUCCESS') {
-    throw new Error(`[tossMessenger] 테스트 발송 실패: ${data.error?.message ?? data.resultType}`);
+  if (data.resultType !== 'SUCCESS' || !data.result) {
+    const reason = data.error?.reason ?? data.error?.errorCode ?? data.resultType;
+    throw new Error(`[tossMessenger] 테스트 발송 실패: ${reason}`);
   }
+
+  return data.result;
 }

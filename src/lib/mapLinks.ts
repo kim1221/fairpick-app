@@ -1,4 +1,4 @@
-import { Linking, Alert } from 'react-native';
+import { Linking } from 'react-native';
 
 /**
  * 지도 앱 딥링크 생성 및 실행 유틸리티
@@ -33,7 +33,7 @@ export async function openKakaoMap({ lat, lng, name }: MapLinkParams): Promise<v
     }
   } catch (error) {
     console.error('[MapLinks] Failed to open KakaoMap:', error);
-    Alert.alert('오류', '카카오맵을 열 수 없습니다.');
+    throw new Error('카카오맵을 열 수 없습니다.');
   }
 }
 
@@ -62,7 +62,7 @@ export async function openNaverMap({ lat, lng, name, address }: MapLinkParams): 
     }
   } catch (error) {
     console.error('[MapLinks] Failed to open NaverMap:', error);
-    Alert.alert('오류', '네이버지도를 열 수 없습니다.');
+    throw new Error('네이버지도를 열 수 없습니다.');
   }
 }
 
@@ -70,14 +70,8 @@ export async function openNaverMap({ lat, lng, name, address }: MapLinkParams): 
  * 주소 복사하기
  */
 export async function copyAddress(address: string): Promise<void> {
-  try {
-    // React Native에서 Clipboard API 사용
-    // @ts-ignore - Clipboard는 react-native 0.60+ 에서 사용 가능
-    const Clipboard = await import('@react-native-clipboard/clipboard');
-    Clipboard.default.setString(address);
-    Alert.alert('복사 완료', '주소가 클립보드에 복사되었습니다.');
-  } catch (error) {
-    console.error('[MapLinks] Failed to copy address:', error);
-    Alert.alert('오류', '주소 복사에 실패했습니다.');
-  }
+  // React Native에서 Clipboard API 사용
+  // @ts-ignore - Clipboard는 react-native 0.60+ 에서 사용 가능
+  const Clipboard = await import('@react-native-clipboard/clipboard');
+  Clipboard.default.setString(address);
 }

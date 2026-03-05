@@ -38,11 +38,23 @@ export function useAuth() {
     isLoading: true,
   });
 
-  // 앱 시작 시 저장된 세션 복원
+  // 앱 시작 시 저장된 세션 복원 + Toss 연결 끊기 감지
   useEffect(() => {
     (async () => {
       const [token, user] = await Promise.all([getToken(), getStoredUser()]);
-      setState({ isLoggedIn: !!token && !!user, user: user ?? null, isLoading: false });
+      if (!token || !user) {
+        setState({ isLoggedIn: false, user: null, isLoading: false });
+        return;
+      }
+      // /auth/me로 Toss 토큰 유효성 확인 (unlink 시 401 → http 인터셉터가 토큰 자동 삭제)
+      try {
+        const { data } = await http.get<{ id: string; userKey: number; name?: string | null }>('/auth/me');
+        const freshUser: StoredUser = { ...user, name: data.name ?? null };
+        await setStoredUser(freshUser);
+        setState({ isLoggedIn: true, user: freshUser, isLoading: false });
+      } catch {
+        setState({ isLoggedIn: false, user: null, isLoading: false });
+      }
     })();
   }, []);
 
