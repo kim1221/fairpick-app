@@ -11,7 +11,7 @@ import {
   toggleLike,
 } from '../../utils/storage';
 import eventService from '../../services/eventService';
-import { isEventEnded, isStoredItemActive, getTodayMidnight } from '../../utils/eventStatus';
+import { isEventEnded, isStoredItemActive, getTodayMidnight, getDaysUntilEnd } from '../../utils/eventStatus';
 import { MyPageEventCard, RenderableEventItem } from '../../components/MyPageEventCard';
 import { useAuth } from '../../hooks/useAuth';
 import http from '../../lib/http';
@@ -215,6 +215,39 @@ function createStyles(a: Adaptive) {
       color: a.blue300,
       fontWeight: '700',
     },
+    urgentSection: {
+      marginBottom: 4,
+    },
+    urgentHeader: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      paddingHorizontal: 20,
+      paddingTop: 4,
+      paddingBottom: 12,
+    },
+    urgentDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: '#F97316',
+      marginRight: 8,
+    },
+    urgentTitle: {
+      fontSize: 16,
+      fontWeight: '700' as const,
+      color: a.grey900,
+      marginRight: 6,
+    },
+    urgentCount: {
+      fontSize: 14,
+      color: a.grey500,
+    },
+    urgentDivider: {
+      height: 8,
+      backgroundColor: a.grey100,
+      marginTop: 8,
+      marginBottom: 16,
+    },
   });
 }
 
@@ -235,6 +268,24 @@ function LikesPage() {
 
   const adaptive = useAdaptive();
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
+
+  const today = React.useMemo(() => getTodayMidnight(), []);
+
+  // D-3 이내 마감 임박 이벤트 (active 상태만)
+  const soonEndingEvents = React.useMemo(
+    () => events.filter((e) => {
+      if (e.lastKnownStatus !== 'active') return false;
+      const days = getDaysUntilEnd(e.endAt, today);
+      return days !== null && days <= 3;
+    }),
+    [events, today]
+  );
+
+  // 마감 임박 제외한 나머지 이벤트
+  const regularEvents = React.useMemo(() => {
+    const soonIds = new Set(soonEndingEvents.map((e) => e.id));
+    return events.filter((e) => !soonIds.has(e.id));
+  }, [events, soonEndingEvents]);
 
   const loadLikes = useCallback(async () => {
     setLoading(true);
@@ -531,6 +582,34 @@ function LikesPage() {
           </View>
         ) : (
           <>
+            {/* 마감 임박 섹션 (D-3 이내) */}
+            {soonEndingEvents.length > 0 && (
+              <View style={styles.urgentSection}>
+                <View style={styles.urgentHeader}>
+                  <View style={styles.urgentDot} />
+                  <Text style={styles.urgentTitle}>마감 임박</Text>
+                  <Text style={styles.urgentCount}>{soonEndingEvents.length}개</Text>
+                </View>
+                <View style={styles.cardList}>
+                  {soonEndingEvents.map((event) => {
+                    const days = getDaysUntilEnd(event.endAt, today);
+                    const urgentLabel = days === null ? '' : days === 0 ? 'D-Day' : `D-${days}`;
+                    return (
+                      <MyPageEventCard
+                        key={event.id}
+                        event={event}
+                        onPress={() => handleEventPress(event)}
+                        onDelete={() => handleUnlike(event.id)}
+                        deleteStyle="heart"
+                        urgentLabel={urgentLabel}
+                      />
+                    );
+                  })}
+                </View>
+                <View style={styles.urgentDivider} />
+              </View>
+            )}
+
             {/* 전부 종료된 경우 */}
             {activeCount === 0 && endedCount > 0 && (
               <View style={styles.endedNotice}>
@@ -572,7 +651,7 @@ function LikesPage() {
             )}
 
             <View style={styles.cardList}>
-              {events.map((event) => (
+              {regularEvents.map((event) => (
                 <MyPageEventCard
                   key={event.id}
                   event={event}

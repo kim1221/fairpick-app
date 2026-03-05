@@ -7,9 +7,7 @@
 // iOS 시뮬레이터: localhost 사용 가능
 // Android 에뮬레이터: 10.0.2.2 사용
 // 실제 기기: 컴퓨터의 로컬 IP 주소 사용 (172.20.10.4)
-export const API_BASE_URL = __DEV__
-  ? 'http://172.20.10.4:5001'  // 개발 환경 (로컬 IP)
-  : 'https://fairpick-app-production.up.railway.app';  // 프로덕션 (Railway)
+export const API_BASE_URL = 'https://fairpick-app-production.up.railway.app';
 
 // API 엔드포인트
 export const API_ENDPOINTS = {

@@ -291,6 +291,7 @@ export async function updateBuzzScore(): Promise<void> {
 
       WHERE ce.is_deleted = false
         AND ce.end_at >= NOW()  -- 종료되지 않은 이벤트만
+        AND (ce.buzz_updated_at IS NULL OR ce.buzz_updated_at < NOW() - INTERVAL '23 hours')  -- 23시간 이내 처리된 이벤트 스킵
       ORDER BY ce.created_at DESC
     `, [CONFIG.LOOKBACK_DAYS]);
 
@@ -303,6 +304,11 @@ export async function updateBuzzScore(): Promise<void> {
     let zeroScoreCount = 0;
     let maxBuzzScore = 0;
     let totalBuzzScore = 0;
+
+    // 배치 UPDATE용 누적 배열 (루프 내 개별 쿼리 제거)
+    const batchIds: string[] = [];
+    const batchScores: number[] = [];
+    const batchComponents: string[] = [];
 
     for (const event of aggregatedData.rows) {
       // 3-1. 기존: 내부 buzz_score (사용자 행동)
@@ -406,28 +412,33 @@ export async function updateBuzzScore(): Promise<void> {
       hotComponents.freshness_multiplier = parseFloat(freshnessMultiplier.toFixed(3));
       hotComponents.stale_multiplier = parseFloat(staleMultiplier.toFixed(3));
 
-      // 3-6. DB 업데이트 (기존 컬럼 재활용)
-      await pool.query(
-        `
-        UPDATE canonical_events
-        SET
-          buzz_score = $1,
-          buzz_updated_at = NOW(),
-          buzz_components = $2::jsonb
-        WHERE id = $3
-        `,
-        [finalScore, JSON.stringify(hotComponents), event.event_id]
-      );
+      // 3-6. 배치 UPDATE용 누적 (개별 쿼리 X)
+      batchIds.push(event.event_id);
+      batchScores.push(finalScore);
+      batchComponents.push(JSON.stringify(hotComponents));
 
       totalEventsProcessed++;
       if (finalScore === 0) zeroScoreCount++;
       if (finalScore > maxBuzzScore) maxBuzzScore = finalScore;
       totalBuzzScore += finalScore;
+    }
 
-      // 진행률 로깅 (매 10개마다)
-      if (totalEventsProcessed % 10 === 0) {
-        console.log(`[UpdateBuzzScore] Progress: ${totalEventsProcessed}/${aggregatedData.rowCount}`);
-      }
+    // 3-7. 배치 UPDATE (이벤트 수와 무관하게 쿼리 1번)
+    if (batchIds.length > 0) {
+      await pool.query(
+        `UPDATE canonical_events AS ce
+         SET buzz_score      = u.score::int,
+             buzz_updated_at = NOW(),
+             buzz_components = u.components::jsonb
+         FROM (
+           SELECT UNNEST($1::text[]) AS id,
+                  UNNEST($2::int[])  AS score,
+                  UNNEST($3::text[]) AS components
+         ) AS u
+         WHERE ce.id::text = u.id`,
+        [batchIds, batchScores, batchComponents],
+      );
+      console.log(`[UpdateBuzzScore] Batch updated ${batchIds.length} events (1 query)`);
     }
 
     const avgBuzzScore = totalEventsProcessed > 0

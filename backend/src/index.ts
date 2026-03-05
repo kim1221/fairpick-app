@@ -7349,6 +7349,90 @@ function sampleWithClickDownrank<T extends { id: string }>(
 // curation_themes 테이블 기반 홈 화면 섹션 데이터 일괄 반환
 // ============================================================
 
+// ── 서버사이드 인메모리 캐시 ──────────────────────────────────
+// 테마 이벤트 풀(모든 사용자 공통)을 5분간 캐시해 DB 쿼리를 최소화.
+// 클릭 다운랭킹은 캐시된 풀에 요청마다 적용 (사용자별 경량 연산).
+interface SectionPool {
+  slug: string;
+  title: string;
+  subtitle: string | null;
+  rawEvents: any[];  // 클릭 다운랭킹 전 풀 (최대 50개)
+  limit: number;
+}
+interface SectionsCache {
+  pools: SectionPool[];
+  cachedAt: number;
+}
+const sectionsCacheMap = new Map<string, SectionsCache>();
+const SECTIONS_CACHE_TTL_MS = 5 * 60 * 1000; // 5분
+
+function getSectionsCacheKey(location?: { lat: number; lng: number }): string {
+  if (!location) return 'no-location';
+  // 소수점 1자리 버킷 (약 11km 격자) — 같은 도시면 동일 캐시 사용
+  return `${location.lat.toFixed(1)},${location.lng.toFixed(1)}`;
+}
+
+async function buildSectionPools(
+  location?: { lat: number; lng: number },
+): Promise<SectionPool[]> {
+  const themesResult = await pool.query(
+    'SELECT * FROM curation_themes WHERE is_active = true ORDER BY display_order ASC',
+  );
+  const empty = new Set<string>();
+
+  const pools = await Promise.all(
+    themesResult.rows.map(async (theme): Promise<SectionPool> => {
+      const config = theme.filter_config as Record<string, any>;
+      const limit: number = theme.max_items || 10;
+      const fetchLimit = Math.min(limit * 3, 50);
+      let events: any[] = [];
+
+      try {
+        if (config.preset) {
+          switch (config.preset as string) {
+            case 'ending_soon':
+              events = await recommender.getEndingSoon(pool, location, fetchLimit);
+              break;
+            case 'trending':
+              events = await recommender.getTrending(pool, location, empty, fetchLimit);
+              break;
+            case 'weekend':
+              events = await recommender.getWeekend(pool, empty, fetchLimit, location);
+              break;
+          }
+        } else {
+          const conditions = (config.conditions ?? {}) as Record<string, any>;
+          const sortBy = (config.sort_by as string) ?? 'buzz_score';
+          const { text, values } = buildConditionsQuery(conditions, sortBy, fetchLimit);
+          const r = await pool.query(text, values);
+          events = r.rows;
+        }
+
+        // 오늘의 픽: featured 이벤트가 부족하면 trending으로 자동 채움
+        if (theme.slug === 'today_pick' && events.length < 3) {
+          const existingIds = new Set<string>(events.map((e: any) => e.id));
+          const fallback = await recommender.getTrending(
+            pool, location, existingIds, fetchLimit - events.length,
+          );
+          events = [...events, ...fallback];
+        }
+      } catch (err) {
+        console.error(`[home/sections] theme "${theme.slug}" pool build failed:`, err);
+      }
+
+      return {
+        slug: theme.slug as string,
+        title: theme.title as string,
+        subtitle: theme.subtitle as string | null,
+        rawEvents: events,
+        limit,
+      };
+    }),
+  );
+
+  return pools;
+}
+
 app.get('/api/home/sections', async (req, res) => {
   try {
     const { lat, lng, userId } = req.query;
@@ -7356,7 +7440,7 @@ app.get('/api/home/sections', async (req, res) => {
       ? { lat: parseFloat(lat as string), lng: parseFloat(lng as string) }
       : undefined;
 
-    // 사용자 클릭 이력 조회 (최근 14일) → 클릭 다운랭킹에 사용
+    // 1. 사용자 클릭 이력 조회 (최근 14일) — 요청마다 실행 (사용자별 고유)
     const clickedIds = new Set<string>();
     if (userId) {
       try {
@@ -7372,66 +7456,33 @@ app.get('/api/home/sections', async (req, res) => {
       }
     }
 
-    // 1. 활성화된 테마 목록 조회 (display_order 순)
-    const themesResult = await pool.query(
-      'SELECT * FROM curation_themes WHERE is_active = true ORDER BY display_order ASC'
-    );
+    // 2. 이벤트 풀 캐시 확인 (5분 TTL)
+    const cacheKey = getSectionsCacheKey(location);
+    const now = Date.now();
+    let cached = sectionsCacheMap.get(cacheKey);
 
-    const empty = new Set<string>();
-
-    // 2. 각 테마별 이벤트 병렬 쿼리
-    const sectionPromises = themesResult.rows.map(async (theme) => {
-      const config = theme.filter_config as Record<string, any>;
-      const limit: number = theme.max_items || 10;
-      // 후보를 limit의 3배 fetch → 랜덤 샘플링 풀 확보 (최대 50개)
-      const fetchLimit = Math.min(limit * 3, 50);
-      let events: any[] = [];
-
-      try {
-        if (config.preset) {
-          // preset: 계산 로직이 필요한 섹션 (recommender 함수 호출)
-          switch (config.preset as string) {
-            case 'ending_soon':
-              events = await recommender.getEndingSoon(pool, location, fetchLimit);
-              break;
-            case 'trending':
-              events = await recommender.getTrending(pool, location, empty, fetchLimit);
-              break;
-            case 'weekend':
-              events = await recommender.getWeekend(pool, empty, fetchLimit, location);
-              break;
-          }
-        } else {
-          // unified conditions: 동적 쿼리 빌더
-          const conditions = (config.conditions ?? {}) as Record<string, any>;
-          const sortBy = (config.sort_by as string) ?? 'buzz_score';
-          const { text, values } = buildConditionsQuery(conditions, sortBy, fetchLimit);
-          const r = await pool.query(text, values);
-          events = r.rows;
-        }
-
-        // 오늘의 픽: featured 이벤트가 부족하면 trending으로 자동 채움
-        if (theme.slug === 'today_pick' && events.length < 3) {
-          const existingIds = new Set<string>(events.map((e: any) => e.id));
-          const fallback = await recommender.getTrending(pool, location, existingIds, fetchLimit - events.length);
-          events = [...events, ...fallback];
-        }
-
-        // 클릭 다운랭킹 + 랜덤 샘플링 (limit개만 최종 반환)
-        events = sampleWithClickDownrank(events, limit, clickedIds);
-      } catch (err) {
-        console.error(`[home/sections] theme "${theme.slug}" failed:`, err);
+    if (!cached || now - cached.cachedAt > SECTIONS_CACHE_TTL_MS) {
+      // 캐시 MISS → DB 쿼리 실행 후 캐시 저장
+      const pools = await buildSectionPools(location);
+      cached = { pools, cachedAt: now };
+      sectionsCacheMap.set(cacheKey, cached);
+      console.log(`[home/sections] cache MISS → built (key=${cacheKey})`);
+    } else {
+      if (process.env.NODE_ENV !== 'production') {
+        const ageS = ((now - cached.cachedAt) / 1000).toFixed(0);
+        console.log(`[home/sections] cache HIT (key=${cacheKey}, age=${ageS}s)`);
       }
+    }
 
-      return {
-        slug: theme.slug as string,
-        title: theme.title as string,
-        subtitle: theme.subtitle as string | null,
-        events: events.map(mapEventForFrontend).filter(Boolean),
-      };
-    });
-
-    const sections = await Promise.all(sectionPromises);
+    // 3. 캐시된 풀에 사용자별 클릭 다운랭킹 적용 (DB 쿼리 없음)
+    const sections = cached.pools.map((pool_) => ({
+      slug: pool_.slug,
+      title: pool_.title,
+      subtitle: pool_.subtitle,
+      events: sampleWithClickDownrank(pool_.rawEvents, pool_.limit, clickedIds)
+        .map(mapEventForFrontend)
+        .filter(Boolean),
+    }));
 
     res.json({ success: true, sections });
   } catch (error: any) {

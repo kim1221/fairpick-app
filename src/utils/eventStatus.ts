@@ -25,6 +25,18 @@ export function isEventEnded(
 }
 
 /**
+ * endAt 기준으로 오늘부터 며칠 남았는지 반환
+ * - 이미 종료됐거나 endAt이 없으면 null
+ * - 오늘 종료 → 0, 내일 → 1, ...
+ */
+export function getDaysUntilEnd(endAt: string | null | undefined, today: Date = getTodayMidnight()): number | null {
+  if (!endAt) return null;
+  const endDate = new Date(endAt);
+  if (endDate < today) return null;
+  return Math.floor((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+/**
  * [Pattern B] 스토리지 아이템의 활성 여부 판정
  * - snapshot.endAt이 있으면 날짜 직접 비교, 없으면 lastKnownStatus fallback
  * - mypage.tsx activeCount 계산, likes.tsx handleClearEnded 필터링에 사용

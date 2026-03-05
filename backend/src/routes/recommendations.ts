@@ -175,44 +175,40 @@ router.get('/', async (req, res) => {
  */
 router.get('/filters', async (req, res) => {
   try {
-    // 1. Companions
-    const companionsResult = await pool.query(`
-      SELECT DISTINCT jsonb_array_elements_text(
-        metadata->'internal'->'matching'->'companions'
-      ) as value
-      FROM canonical_events
-      WHERE is_deleted = false 
-        AND end_at >= CURRENT_DATE
-        AND metadata->'internal'->'matching'->'companions' IS NOT NULL
-      ORDER BY value
+    // 테이블을 한 번만 스캔해서 regions, categories, companions 한꺼번에 집계
+    const result = await pool.query(`
+      WITH active AS (
+        SELECT
+          region,
+          main_category,
+          metadata->'internal'->'matching'->'companions' AS companions_arr
+        FROM canonical_events
+        WHERE is_deleted = false
+          AND end_at >= CURRENT_DATE
+      ),
+      companion_values AS (
+        SELECT DISTINCT c.value
+        FROM active
+        CROSS JOIN LATERAL jsonb_array_elements_text(companions_arr) AS c(value)
+        WHERE companions_arr IS NOT NULL
+      )
+      SELECT
+        (SELECT array_agg(DISTINCT region ORDER BY region)
+           FROM active WHERE region IS NOT NULL)        AS regions,
+        (SELECT array_agg(DISTINCT main_category ORDER BY main_category)
+           FROM active)                                  AS categories,
+        (SELECT array_agg(value ORDER BY value)
+           FROM companion_values)                        AS companions
     `);
 
-    // 2. Regions
-    const regionsResult = await pool.query(`
-      SELECT DISTINCT region
-      FROM canonical_events
-      WHERE is_deleted = false 
-        AND end_at >= CURRENT_DATE
-        AND region IS NOT NULL
-      ORDER BY region
-    `);
-
-    // 3. Categories
-    const categoriesResult = await pool.query(`
-      SELECT DISTINCT main_category
-      FROM canonical_events
-      WHERE is_deleted = false 
-        AND end_at >= CURRENT_DATE
-      ORDER BY main_category
-    `);
-
+    const row = result.rows[0] ?? {};
     res.json({
       success: true,
       filters: {
-        companions: companionsResult.rows.map((r: any) => r.value),
+        companions: row.companions ?? [],
         time: ['morning', 'afternoon', 'evening', 'night'],
-        regions: regionsResult.rows.map((r: any) => r.region),
-        categories: categoriesResult.rows.map((r: any) => r.main_category),
+        regions: row.regions ?? [],
+        categories: row.categories ?? [],
         indoor: [true, false],
       },
     });

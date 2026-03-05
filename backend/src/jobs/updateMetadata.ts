@@ -16,6 +16,9 @@ export async function updateMetadata(): Promise<void> {
 
   try {
     // 1. is_ending_soon 업데이트
+    // 값이 바뀔 수 있는 이벤트만 처리:
+    //   - 이미 true인 것 (종료되거나 구간 벗어나면 false로 바꿔야 함)
+    //   - end_at이 마감 임박 구간에 막 진입한 것 (최대 4일 여유)
     const endingSoonResult = await pool.query(`
       UPDATE canonical_events
       SET is_ending_soon = (
@@ -24,12 +27,21 @@ export async function updateMetadata(): Promise<void> {
         end_at <= CURRENT_DATE + INTERVAL '3 days'
       )
       WHERE is_deleted = false
+        AND (
+          is_ending_soon = true
+          OR end_at BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '4 days'
+        )
       RETURNING id
     `);
 
     console.log(`[UpdateMetadata] Updated is_ending_soon: ${endingSoonResult.rowCount} rows`);
 
     // 3. popularity_score 업데이트 (개선된 공식 - 임박 행사 강조)
+    // 점수가 바뀔 수 있는 이벤트만 처리:
+    //   - 최신성: 등록 후 30일 이내 (created_at 기반 점수가 매일 감소)
+    //   - 긴급도: 시작일 90일 이내 (구간 전환 시 점수 변동)
+    //   - 종료 임박 구간: end_at 4일 이내
+    // 나머지(오래되고 먼 미래 이벤트)는 점수가 고정되므로 스킵
     const popularityResult = await pool.query(`
       UPDATE canonical_events
       SET popularity_score = LEAST(1000, GREATEST(0, (
@@ -65,6 +77,11 @@ export async function updateMetadata(): Promise<void> {
         END
       )))
       WHERE is_deleted = false
+        AND (
+          created_at >= CURRENT_DATE - INTERVAL '30 days'
+          OR start_at <= CURRENT_DATE + INTERVAL '90 days'
+          OR end_at <= CURRENT_DATE + INTERVAL '4 days'
+        )
       RETURNING id
     `);
 

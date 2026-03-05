@@ -21,6 +21,7 @@ interface MyPageEventCardProps {
   onPress: () => void;
   onDelete?: () => void; // 찜 해제(likes) 또는 기록 삭제(recent) — 없으면 버튼 미표시
   deleteStyle?: 'x' | 'heart'; // 기본값 'x' — likes 목록은 'heart' 사용
+  urgentLabel?: string; // D-Day, D-1, D-2, D-3 — 마감 임박 배지
 }
 
 // ─────────────────────────────────────────────────────────
@@ -46,7 +47,7 @@ function formatRelativeTime(isoString: string): string {
 // 컴포넌트
 // ─────────────────────────────────────────────────────────
 
-export function MyPageEventCard({ event, onPress, onDelete, deleteStyle = 'x' }: MyPageEventCardProps) {
+export function MyPageEventCard({ event, onPress, onDelete, deleteStyle = 'x', urgentLabel }: MyPageEventCardProps) {
   const isDeleted = event.lastKnownStatus === 'deleted';
   const isEnded = event.lastKnownStatus === 'ended';
   const isNonActive = isDeleted || isEnded;
@@ -97,6 +98,13 @@ export function MyPageEventCard({ event, onPress, onDelete, deleteStyle = 'x' }:
             <Text style={styles.statusBadgeText}>
               {isDeleted ? '종료/삭제됨' : '종료됨'}
             </Text>
+          </View>
+        )}
+
+        {/* 마감 임박 D-뱃지 */}
+        {urgentLabel && !isNonActive && (
+          <View style={styles.urgentBadge}>
+            <Text style={styles.urgentBadgeText}>{urgentLabel}</Text>
           </View>
         )}
 
@@ -276,5 +284,19 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   relativeTime: {
     fontSize: 12,
     color: a.grey400,
+  },
+  urgentBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: '#F97316',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  urgentBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });

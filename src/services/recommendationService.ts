@@ -49,6 +49,7 @@ const CACHE_KEYS = {
   ENDING_SOON: 'fairpick_api_ending_soon',
   EXHIBITION: 'fairpick_api_exhibition',
   FREE: 'fairpick_api_free',
+  HOME_SECTIONS: 'fairpick_api_home_sections',
 } as const;
 
 /**
@@ -522,6 +523,11 @@ export async function getSections(
   location?: Location,
   userId?: string,
 ): Promise<{ success: boolean; sections: Array<{ slug: string; title: string; subtitle: string | null; events: any[] }> }> {
+  const cacheParams = createCacheParams({ userId, location });
+
+  const cached = await getCachedRecommendation(CACHE_KEYS.HOME_SECTIONS, cacheParams);
+  if (cached) return cached;
+
   try {
     const params = new URLSearchParams();
     if (location) {
@@ -534,7 +540,11 @@ export async function getSections(
     const url = `${API_BASE_URL}${API_ENDPOINTS.homeSections}${params.toString() ? `?${params}` : ''}`;
     const response = await fetchWithTimeout(url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
+    const data = await response.json();
+    if (data.success) {
+      await saveCachedRecommendation(CACHE_KEYS.HOME_SECTIONS, cacheParams, data, 5);
+    }
+    return data;
   } catch (error: any) {
     console.error('[RecommendationService] getSections error:', error);
     return { success: false, sections: [] };
