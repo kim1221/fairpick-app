@@ -1,4 +1,5 @@
-import { createRoute } from '@granite-js/react-native';
+import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
+import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl, Animated } from 'react-native';
 import { Loader, Icon } from '@toss/tds-react-native';
@@ -41,7 +42,6 @@ function createStyles(a: Adaptive) {
       justifyContent: 'center',
       paddingHorizontal: 12,
       paddingVertical: 12,
-      paddingTop: 50,
       borderBottomWidth: 1,
       borderBottomColor: a.grey200,
     },
@@ -182,6 +182,7 @@ function RecentPage() {
   const toastOpacity = useRef(new Animated.Value(0));
 
   const adaptive = useAdaptive();
+  const { top } = useSafeAreaInsets();
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   const loadRecent = useCallback(async () => {
@@ -466,7 +467,7 @@ function RecentPage() {
   return (
     <View style={styles.container}>
       {/* 헤더 */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: top }]}>
         <Text style={styles.headerTitle}>최근 본 이벤트</Text>
         {!loading && events.length > 0 && (
           <TouchableOpacity onPress={handleClearAll} style={styles.clearAllButton} activeOpacity={0.7}>
@@ -480,6 +481,7 @@ function RecentPage() {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
+        <ScrollViewInertialBackground topColor={adaptive.grey100} bottomColor={adaptive.grey100} />
         {loading ? (
           <View style={styles.loadingContainer}>
             <Loader size="large" type="primary" />

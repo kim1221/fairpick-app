@@ -655,7 +655,7 @@ function ExplorePage() {
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-      const data: EventsApiResponse = await response.json();
+      const data: EventsApiResponse = await response.json() as any;
       const newEvents = data.items.map(mapApiResponseToEventCard);
 
       if (reset) {

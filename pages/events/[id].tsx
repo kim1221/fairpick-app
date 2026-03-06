@@ -8,13 +8,12 @@ import {
   Dimensions,
   TouchableOpacity,
   Text,
-  Share,
   Platform,
   Pressable
 } from 'react-native';
 import { Txt, Badge, Post, BottomSheet, Loader, Button, Icon, IconButton, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
-import { InlineAd } from '@apps-in-toss/framework';
+import { InlineAd, share, getTossShareLink } from '@apps-in-toss/framework';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
 type EventStyles = ReturnType<typeof createStyles>;
@@ -358,12 +357,17 @@ function EventDetailPage() {
     if (!event) return;
 
     try {
-      const deeplink = `intoss://fairpick-app/events/${event.id}`;
-      const message = `${event.title}\n${event.venue || event.region}\n${event.periodText || ''}\n${deeplink}`;
-      await Share.share({
-        message,
-        title: event.title,
-      });
+      let message: string;
+      try {
+        message = await getTossShareLink(
+          `intoss://fairpick-app/events/${event.id}`,
+          event.thumbnailUrl ?? undefined,
+        );
+      } catch {
+        // 앱 미출시 환경(샌드박스/개발)에서는 단순 메시지로 폴백
+        message = `${event.title}\n${event.venue || event.region}\n${event.periodText || ''}`;
+      }
+      await share({ message });
     } catch (error) {
       console.error('[EventDetail] Failed to share:', error);
     }

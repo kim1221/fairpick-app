@@ -138,6 +138,7 @@ export interface Event {
   is_featured: boolean;
   featured_order: number | null;
   featured_at: string | null;
+  featured_score: number | null;
   tags_context: any; // JSON
   metadata: EventMetadata; // 🆕 Phase 3: 구조화된 metadata
   source_priority_winner?: string;

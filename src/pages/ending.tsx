@@ -1,4 +1,5 @@
-import { createRoute } from '@granite-js/react-native';
+import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
+import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View, Text, Pressable, Image } from 'react-native';
 import { Loader, Icon } from '@toss/tds-react-native';
@@ -27,7 +28,6 @@ function createStyles(a: Adaptive) {
     header: {
       backgroundColor: a.background,
       paddingHorizontal: 20,
-      paddingTop: 50,
       paddingBottom: 16,
     },
     headerTitle: {
@@ -141,6 +141,7 @@ function EndingPage() {
   const [loading, setLoading] = useState(true);
 
   const adaptive = useAdaptive();
+  const { top } = useSafeAreaInsets();
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   useEffect(() => {
@@ -205,8 +206,9 @@ function EndingPage() {
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <ScrollViewInertialBackground topColor={adaptive.background} bottomColor={adaptive.grey100} />
         {/* 헤더 */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: top }]}>
           <Text style={styles.headerTitle}>마감임박</Text>
           <Text style={styles.headerSubtitle}>곧 마감되는 이벤트를 놓치지 마세요</Text>
         </View>

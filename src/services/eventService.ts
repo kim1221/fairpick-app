@@ -38,8 +38,15 @@ export interface EventListResult {
   searchMode?: 'text' | 'vector';
 }
 
+// 이벤트 상세 메모리 캐시 (앱 세션 동안 유지)
+const eventDetailCache = new Map<string, EventCardData>();
+
 const eventService: EventService = {
   async getEventById(id: string) {
+    if (eventDetailCache.has(id)) {
+      return eventDetailCache.get(id);
+    }
+
     const response = await http.get<EventResponse>(`/events/${id}`);
     if (__DEV__) {
       console.log('[EventService] getEventById raw response:', {
@@ -56,6 +63,9 @@ const eventService: EventService = {
         category: mapped?.category,
         thumbnailUrl: mapped?.thumbnailUrl?.substring(0, 60),
       });
+    }
+    if (mapped) {
+      eventDetailCache.set(id, mapped);
     }
     return mapped;
   },

@@ -35,6 +35,7 @@ import * as recommender from './lib/recommender';
 import { calculateConsensusLight, calculateStructuralScore } from './lib/hotScoreCalculator';
 import { calculateDataCompleteness, DataCompletenessScore } from './lib/dataQuality';
 import { embedQuery, toVectorLiteral } from './lib/embeddingService';
+import { buildTodayPickPool, pickTodayPickCandidate, buildTodayPickPoolV2, pickTodayPickCandidateV2, USE_TODAY_PICK_V2, type ScoredTodayPickCandidate } from './lib/todayPickSelector';
 
 /**
  * 카테고리별 기본 운영시간 반환
@@ -1407,7 +1408,7 @@ app.get('/admin/events', requireAdminAuth, async (req, res) => {
     const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
 
     // 🆕 정렬 처리
-    const validSortFields = ['start_at', 'end_at', 'created_at', 'updated_at', 'buzz_score'];
+    const validSortFields = ['start_at', 'end_at', 'created_at', 'updated_at', 'buzz_score', 'featured_score'];
     let orderByClause = 'ORDER BY updated_at DESC'; // 기본값
 
     if (sort) {
@@ -7388,7 +7389,11 @@ async function buildSectionPools(
       let events: any[] = [];
 
       try {
-        if (config.preset) {
+        if (theme.slug === 'today_pick') {
+          events = USE_TODAY_PICK_V2
+            ? await buildTodayPickPoolV2(pool, location)
+            : await buildTodayPickPool(pool, location);
+        } else if (config.preset) {
           switch (config.preset as string) {
             case 'ending_soon':
               events = await recommender.getEndingSoon(pool, location, fetchLimit);
@@ -7406,15 +7411,6 @@ async function buildSectionPools(
           const { text, values } = buildConditionsQuery(conditions, sortBy, fetchLimit);
           const r = await pool.query(text, values);
           events = r.rows;
-        }
-
-        // 오늘의 픽: featured 이벤트가 부족하면 trending으로 자동 채움
-        if (theme.slug === 'today_pick' && events.length < 3) {
-          const existingIds = new Set<string>(events.map((e: any) => e.id));
-          const fallback = await recommender.getTrending(
-            pool, location, existingIds, fetchLimit - events.length,
-          );
-          events = [...events, ...fallback];
         }
       } catch (err) {
         console.error(`[home/sections] theme "${theme.slug}" pool build failed:`, err);
@@ -7442,15 +7438,24 @@ app.get('/api/home/sections', async (req, res) => {
 
     // 1. 사용자 클릭 이력 조회 (최근 14일) — 요청마다 실행 (사용자별 고유)
     const clickedIds = new Set<string>();
+    const recentClickedIds = new Set<string>(); // 최근 3일
     if (userId) {
       try {
         const clickResult = await pool.query(
-          `SELECT DISTINCT event_id FROM user_events
+          `SELECT event_id, MAX(created_at) as last_clicked
+           FROM user_events
            WHERE user_id = $1 AND action_type = 'click'
-           AND created_at > NOW() - INTERVAL '14 days'`,
+             AND created_at > NOW() - INTERVAL '14 days'
+           GROUP BY event_id`,
           [userId as string],
         );
-        clickResult.rows.forEach((r: any) => clickedIds.add(r.event_id));
+        const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+        clickResult.rows.forEach((r: any) => {
+          clickedIds.add(r.event_id);
+          if (new Date(r.last_clicked).getTime() > threeDaysAgo) {
+            recentClickedIds.add(r.event_id);
+          }
+        });
       } catch {
         // 클릭 이력 조회 실패해도 섹션 로딩 계속
       }
@@ -7475,14 +7480,35 @@ app.get('/api/home/sections', async (req, res) => {
     }
 
     // 3. 캐시된 풀에 사용자별 클릭 다운랭킹 적용 (DB 쿼리 없음)
-    const sections = cached.pools.map((pool_) => ({
-      slug: pool_.slug,
-      title: pool_.title,
-      subtitle: pool_.subtitle,
-      events: sampleWithClickDownrank(pool_.rawEvents, pool_.limit, clickedIds)
-        .map(mapEventForFrontend)
-        .filter(Boolean),
-    }));
+    const sections = cached.pools.map((pool_) => {
+      if (pool_.slug === 'today_pick') {
+        let pickedEvent: any;
+        if (USE_TODAY_PICK_V2) {
+          const picked = pickTodayPickCandidateV2(
+            pool_.rawEvents as ScoredTodayPickCandidate[],
+            recentClickedIds,
+            clickedIds,
+          );
+          pickedEvent = picked?.event ?? null;
+        } else {
+          pickedEvent = pickTodayPickCandidate(pool_.rawEvents, recentClickedIds, clickedIds);
+        }
+        return {
+          slug: pool_.slug,
+          title: pool_.title,
+          subtitle: pool_.subtitle,
+          events: pickedEvent ? [mapEventForFrontend(pickedEvent)].filter(Boolean) : [],
+        };
+      }
+      return {
+        slug: pool_.slug,
+        title: pool_.title,
+        subtitle: pool_.subtitle,
+        events: sampleWithClickDownrank(pool_.rawEvents, pool_.limit, clickedIds)
+          .map(mapEventForFrontend)
+          .filter(Boolean),
+      };
+    });
 
     res.json({ success: true, sections });
   } catch (error: any) {

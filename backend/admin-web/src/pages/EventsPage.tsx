@@ -745,6 +745,8 @@ export default function EventsPage() {
           >
             <option value="updated_at_desc">최근 수정순</option>
             <option value="created_at_desc">최근 생성순</option>
+            <option value="featured_score_desc">피처링 점수 높은순</option>
+            <option value="buzz_score_desc">Buzz 점수 높은순</option>
             <option value="start_at_asc">시작일 빠른순</option>
             <option value="start_at_desc">시작일 늦은순</option>
             <option value="end_at_asc">종료일 빠른순</option>
@@ -859,6 +861,11 @@ export default function EventsPage() {
                             )}
                             {isPlaceholderImage(event.image_url) && (
                               <span className="badge badge-yellow text-xs">⚠️ 이미지 필요</span>
+                            )}
+                            {event.featured_score != null && (
+                              <span className="text-xs text-amber-600 font-medium">
+                                ★ {event.featured_score}
+                              </span>
                             )}
                           </div>
                         </td>

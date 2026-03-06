@@ -38,7 +38,7 @@ async function logUserAction(
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
-    });
+    } as RequestInit);
     
     clearTimeout(timeoutId);
     
@@ -46,7 +46,7 @@ async function logUserAction(
       throw new Error(`HTTP ${response.status}`);
     }
     
-    const data = await response.json();
+    const data = await response.json() as any;
     return data;
   } catch (error: any) {
     console.error('[UserEventService] Failed to log action:', error);
@@ -118,7 +118,7 @@ export async function logSearchQuery(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, query, resultCount, searchMode, metadata }),
       signal: controller.signal,
-    }).finally(() => clearTimeout(timeoutId));
+    } as RequestInit).finally(() => clearTimeout(timeoutId));
   } catch {
     // fire-and-forget: 실패해도 무시
   }

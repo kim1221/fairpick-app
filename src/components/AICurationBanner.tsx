@@ -32,7 +32,7 @@ export function AICurationBanner({ onBannerPress }: AICurationBannerProps) {
   // Debug toggle state (DEV only)
   const [debugEnabled, setDebugEnabled] = useState(false);
   const [tapCount, setTapCount] = useState(0);
-  const tapTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const tapTimerRef = useRef<number | null>(null);
 
   // Load debug enabled state from storage
   useEffect(() => {

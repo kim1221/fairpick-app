@@ -102,7 +102,7 @@ export async function generateBannerCopyWithGemini(
         traits: params.traits, // Traits 전달
       }),
       signal: controller.signal,
-    });
+    } as RequestInit);
     
     clearTimeout(timeoutId);
     
@@ -114,7 +114,7 @@ export async function generateBannerCopyWithGemini(
       return null;
     }
     
-    const result: BackendApiResponse = await response.json();
+    const result: BackendApiResponse = await response.json() as any;
     
     if (result.success && result.copy && result.metadata?.model) {
       console.log('[AIClient] AI generation successful:', {

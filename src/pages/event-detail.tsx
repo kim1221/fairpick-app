@@ -27,8 +27,8 @@ import userEventService from '../services/userEventService';
 // 타입
 import type { ScoredEvent } from '../types/recommendation';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const Route = (createRoute as any)('/event-detail', {
+export const Route = createRoute('/event-detail', {
+  validateParams: (params) => params as { id: string },
   component: EventDetailPage,
 });
 
@@ -44,7 +44,7 @@ function EventDetailPage() {
   console.log('❌ LEGACY event-detail.tsx HIT - 이 파일은 렌더링되면 안 됨!');
 
   const navigation = Route.useNavigation();
-  const params = (Route.useParams as () => RouteParams)();
+  const params = Route.useParams();
   const eventId = params?.id;
 
   const adaptive = useAdaptive();

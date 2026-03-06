@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { generateHapticFeedback } from '@apps-in-toss/framework';
 import { getLikesV2, toggleLike } from '../utils/storage';
 import { useAuth } from './useAuth';
 import http from '../lib/http';
@@ -38,6 +39,7 @@ export function useLike({ eventId }: UseLikeOptions): UseLikeResult {
 
     const result = await toggleLike(eventId);
     setIsLiked(result.liked);
+    generateHapticFeedback({ type: 'tickWeak' }).catch(() => {});
 
     // 로그인 상태면 서버에도 반영 (fire-and-forget)
     if (isLoggedIn) {

@@ -73,7 +73,7 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise
     const response = await fetch(url, {
       ...options,
       signal: controller.signal,
-    });
+    } as RequestInit);
     clearTimeout(timeoutId);
     return response;
   } catch (error: any) {
@@ -255,11 +255,11 @@ export async function getTodayPick(
       throw new Error(`HTTP ${response.status}`);
     }
     
-    const data = await response.json();
-    
+    const data = await response.json() as any;
+
     // 4. 캐시 저장 (30분)
     await saveCachedRecommendation(CACHE_KEYS.TODAY_PICK, cacheParams, data, 30);
-    
+
     return data;
   } catch (error) {
     return handleApiError(error);
@@ -293,11 +293,11 @@ export async function getTrending(
       throw new Error(`HTTP ${response.status}`);
     }
     
-    const data = await response.json();
-    
+    const data = await response.json() as any;
+
     // 4. 캐시 저장 (5분)
     await saveCachedRecommendation(CACHE_KEYS.TRENDING, cacheParams, data, 5);
-    
+
     return data;
   } catch (error) {
     return handleApiError(error);
@@ -332,11 +332,11 @@ export async function getNearby(
       throw new Error(`HTTP ${response.status}`);
     }
     
-    const data = await response.json();
-    
+    const data = await response.json() as any;
+
     // 4. 캐시 저장 (3분 - 위치 기반이라 짧게)
     await saveCachedRecommendation(CACHE_KEYS.NEARBY, cacheParams, data, 3);
-    
+
     return data;
   } catch (error) {
     return handleApiError(error);
@@ -360,7 +360,7 @@ export async function getPersonalized(
       throw new Error(`HTTP ${response.status}`);
     }
     
-    const data = await response.json();
+    const data = await response.json() as any;
     return data;
   } catch (error) {
     return handleApiError(error);
@@ -394,7 +394,7 @@ export async function getWeekend(
       throw new Error(`HTTP ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
 
     // 4. 캐시 저장 (5분)
     await saveCachedRecommendation(CACHE_KEYS.WEEKEND, cacheParams, data, 5);
@@ -432,11 +432,11 @@ export async function getLatest(
       throw new Error(`HTTP ${response.status}`);
     }
     
-    const data = await response.json();
-    
+    const data = await response.json() as any;
+
     // 4. 캐시 저장 (10분)
     await saveCachedRecommendation(CACHE_KEYS.LATEST, cacheParams, data, 10);
-    
+
     return data;
   } catch (error) {
     return handleApiError(error);
@@ -459,7 +459,7 @@ export async function getEndingSoon(
     const url = `${API_BASE_URL}${API_ENDPOINTS.recommendations.endingSoon}${queryParams ? `?${queryParams}` : ''}`;
     const response = await fetchWithTimeout(url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
+    const data = await response.json() as any;
     await saveCachedRecommendation(CACHE_KEYS.ENDING_SOON, cacheParams, data, 5);
     return data;
   } catch (error) {
@@ -483,7 +483,7 @@ export async function getExhibition(
     const url = `${API_BASE_URL}${API_ENDPOINTS.recommendations.exhibition}${queryParams ? `?${queryParams}` : ''}`;
     const response = await fetchWithTimeout(url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
+    const data = await response.json() as any;
     await saveCachedRecommendation(CACHE_KEYS.EXHIBITION, cacheParams, data, 10);
     return data;
   } catch (error) {
@@ -507,7 +507,7 @@ export async function getFreeEvents(
     const url = `${API_BASE_URL}${API_ENDPOINTS.recommendations.free}${queryParams ? `?${queryParams}` : ''}`;
     const response = await fetchWithTimeout(url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
+    const data = await response.json() as any;
     await saveCachedRecommendation(CACHE_KEYS.FREE, cacheParams, data, 10);
     return data;
   } catch (error) {
@@ -540,7 +540,7 @@ export async function getSections(
     const url = `${API_BASE_URL}${API_ENDPOINTS.homeSections}${params.toString() ? `?${params}` : ''}`;
     const response = await fetchWithTimeout(url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
+    const data = await response.json() as any;
     if (data.success) {
       await saveCachedRecommendation(CACHE_KEYS.HOME_SECTIONS, cacheParams, data, 5);
     }
@@ -569,7 +569,7 @@ export async function getEventDetail(eventId: string): Promise<{ success: boolea
       throw new Error(`HTTP ${response.status}`);
     }
     
-    const data = await response.json();
+    const data = await response.json() as any;
     console.log('[RecommendationService] Event detail fetched successfully');
     return data;
   } catch (error: any) {

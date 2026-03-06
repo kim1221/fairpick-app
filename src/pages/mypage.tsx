@@ -1,4 +1,5 @@
-import { createRoute } from '@granite-js/react-native';
+import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
+import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl, Switch } from 'react-native';
 import { Loader, Icon, useDialog } from '@toss/tds-react-native';
@@ -66,6 +67,7 @@ function MyPage() {
   const [loginLoading, setLoginLoading] = useState(false);
 
   const adaptive = useAdaptive();
+  const { top } = useSafeAreaInsets();
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
   const dialog = useDialog();
 
@@ -279,8 +281,9 @@ function MyPage() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
+        <ScrollViewInertialBackground topColor={adaptive.background} bottomColor={adaptive.grey100} />
         {/* 헤더 */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: top }]}>
           <Text style={styles.headerTitle}>내 활동</Text>
         </View>
 
@@ -526,7 +529,6 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     backgroundColor: a.background,
     paddingHorizontal: 20,
     paddingVertical: 16,
-    paddingTop: 50,
     borderBottomWidth: 1,
     borderBottomColor: a.grey200,
   },

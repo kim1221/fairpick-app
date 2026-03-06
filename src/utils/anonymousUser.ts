@@ -4,7 +4,7 @@
  * Toss MiniApp Storage API를 사용하여 익명 ID를 생성/관리합니다.
  */
 
-import { Storage } from '@apps-in-toss/framework';
+import { Storage, getDeviceId } from '@apps-in-toss/framework';
 
 // Storage 키
 const STORAGE_KEYS = {
@@ -44,8 +44,8 @@ export async function getOrCreateAnonymousId(): Promise<string> {
     return anonymousId;
   } catch (error) {
     console.error('[AnonymousUser] Failed to get/create anonymous ID:', error);
-    // 임시 메모리 ID 반환 (Storage 실패 시)
-    return `temp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    // Storage 실패 시 기기 고유 ID를 fallback으로 사용 (세션 간 일관성 유지)
+    return getDeviceId();
   }
 }
 

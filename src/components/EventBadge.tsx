@@ -27,7 +27,7 @@ export const EventBadge: React.FC<EventBadgeProps> = ({ type }) => {
   );
 };
 
-const createStyles = (a: Adaptive) => StyleSheet.create({
+const createStyles = (_a: Adaptive) => StyleSheet.create({
   badge: {
     position: 'absolute',
     top: 12,

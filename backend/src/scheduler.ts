@@ -11,6 +11,7 @@ import { runPopupDiscovery } from './scripts/ai-popup-discovery';
 import { runHotRating } from './scripts/ai-hot-rating';
 import { embedNewEvents } from './jobs/embedNewEvents';
 import { sendEndSoonNotifications } from './jobs/sendEndSoonNotifications';
+import { runAutoFeaturedScore } from './jobs/autoFeaturedScore';
 
 /**
  * ============================================================
@@ -135,6 +136,14 @@ export function initScheduler() {
     });
     console.log('[Scheduler] registered: Metadata update @ 02:00 KST');
 
+    // 매일 02:15 KST - featured_score 자동 계산
+    cron.schedule('15 2 * * *', async () => {
+      await runJobSafely('auto-featured-score', runAutoFeaturedScore);
+    }, {
+      timezone: 'Asia/Seoul'
+    });
+    console.log('[Scheduler] registered: Auto featured score @ 02:15 KST');
+
     // 매일 02:30 KST - Buzz Score 업데이트
     cron.schedule('30 2 * * *', async () => {
       await runJobSafely('buzz-score', updateBuzzScore);
@@ -239,6 +248,7 @@ export function initScheduler() {
     console.log('[Scheduler] Scheduled jobs:');
     console.log('  - 01:00 KST: Cleanup (auto-unfeature, soft delete)');
     console.log('  - 02:00 KST: Metadata update (is_ending_soon, popularity_score)');
+    console.log('  - 02:15 KST: Auto featured score (featured_score 자동 계산)');
     console.log('  - 02:30 KST: Buzz score update (Hot Score calculation)');
     console.log('  - 03:00 KST: Geo refresh pipeline (collect + geoBackfill + venueBackfill + dedupe + AI enrichment)');
     console.log('  - 03:30 KST: Price info backfill (extract from API payloads)');

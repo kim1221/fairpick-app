@@ -3,7 +3,8 @@
  * curation_themes 기반 동적 섹션 렌더링
  */
 
-import { createRoute } from '@granite-js/react-native';
+import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
+import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
 import { Icon, AnimateSkeleton } from '@toss/tds-react-native';
@@ -11,7 +12,7 @@ import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { EventCard } from '../components/EventCard';
 
-import { Accuracy, getCurrentLocation, GetCurrentLocationPermissionError } from '@apps-in-toss/framework';
+import { Accuracy, getCurrentLocation, GetCurrentLocationPermissionError, InlineAd, getNetworkStatus } from '@apps-in-toss/framework';
 
 import recommendationService from '../services/recommendationService';
 import userEventService from '../services/userEventService';
@@ -79,7 +80,6 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   header: {
     backgroundColor: a.background,
     paddingHorizontal: 20,
-    paddingTop: 50,
     paddingBottom: 16,
   },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
@@ -162,6 +162,7 @@ function HorizontalSectionSkeleton() {
 function HomePage() {
   const navigation = Route.useNavigation();
   const adaptive = useAdaptive();
+  const { top } = useSafeAreaInsets();
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   // null = 로딩 중, [] = 실패/빈 상태, [...] = 로드 완료
@@ -171,6 +172,8 @@ function HomePage() {
   const [currentAddress, setCurrentAddress] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [showAiNotice, setShowAiNotice] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
+  const [feedAdRendered, setFeedAdRendered] = useState(false);
 
   const excludedIds = useRef<Set<string>>(new Set());
 
@@ -193,8 +196,18 @@ function HomePage() {
     try {
       const uid = await getCurrentUserId();
       setUserId(uid);
-      const loc = await requestLocation();
-      await loadSections(loc, uid);
+
+      // 위치 요청과 섹션 로드를 병렬 실행
+      // - 위치 없이 즉시 섹션 표시 → 체감 속도 개선
+      // - 위치 확보되면 스켈레톤 없이 조용히 갱신
+      const locPromise = requestLocation();
+      await loadSections(undefined, uid);
+
+      const loc = await locPromise;
+      if (loc) {
+        const response = await recommendationService.getSections(loc, uid);
+        if (response.success) setSections(response.sections);
+      }
     } catch (error) {
       console.error('[Home] init error:', error);
       await loadSections();
@@ -227,6 +240,13 @@ function HomePage() {
 
   const loadSections = async (loc?: Location, uid?: string) => {
     setSections(null);
+    const networkStatus = await getNetworkStatus();
+    if (networkStatus === 'OFFLINE') {
+      setIsOffline(true);
+      setSections([]);
+      return;
+    }
+    setIsOffline(false);
     const response = await recommendationService.getSections(loc, uid);
     setSections(response.success ? response.sections : []);
   };
@@ -331,8 +351,9 @@ function HomePage() {
         onScrollBeginDrag={handleAiNoticeConfirm}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
+        <ScrollViewInertialBackground topColor={adaptive.background} bottomColor={adaptive.grey100} />
         {/* 헤더 */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: top }]}>
           <View style={styles.headerTop}>
             <View>
               <Text style={styles.title}>페어픽</Text>
@@ -358,17 +379,40 @@ function HomePage() {
           : sections.length === 0
             ? (
               <View style={styles.emptyCard}>
-                <Text style={styles.emptyText}>추천 이벤트를 불러오지 못했어요</Text>
+                <Text style={styles.emptyText}>
+                  {isOffline ? '네트워크 연결을 확인해 주세요' : '추천 이벤트를 불러오지 못했어요'}
+                </Text>
               </View>
             )
             : (() => {
                 // 상위 섹션에서 이미 노출된 이벤트를 하위 섹션에서 제거 (중복 방지)
                 const seenIds = new Set<string>();
-                return sections.map((section) => {
+                const rendered: React.ReactNode[] = [];
+                let visibleCount = 0;
+                sections.forEach((section) => {
                   const unique = section.events.filter((e) => !seenIds.has(e.id));
                   unique.forEach((e) => seenIds.add(e.id));
-                  return renderSection({ ...section, events: unique });
+                  const el = renderSection({ ...section, events: unique });
+                  if (el !== null) {
+                    rendered.push(el);
+                    visibleCount++;
+                    // 2번째 섹션 이후 피드형 배너 1개 삽입
+                    if (visibleCount === 2) {
+                      rendered.push(
+                        <View key="feed-ad" style={{ width: '100%', marginVertical: feedAdRendered ? 8 : 0 }}>
+                          <InlineAd
+                            adGroupId="ait-ad-test-native-image-id"
+                            impressFallbackOnMount={true}
+                            onAdRendered={() => setFeedAdRendered(true)}
+                            onAdFailedToRender={() => setFeedAdRendered(false)}
+                            onNoFill={() => setFeedAdRendered(false)}
+                          />
+                        </View>
+                      );
+                    }
+                  }
                 });
+                return rendered;
               })()}
 
         <View style={{ height: 100 }} />

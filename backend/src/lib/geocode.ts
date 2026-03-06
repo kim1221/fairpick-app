@@ -202,7 +202,7 @@ export async function geocodeBestEffort(
 /**
  * region 추출 헬퍼 (주소 문자열에서 시/도 단위 추출)
  */
-function extractRegion(address: string): string | null {
+export function extractRegion(address: string): string | null {
   if (!address) return null;
 
   const match = address.match(

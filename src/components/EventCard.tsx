@@ -9,6 +9,7 @@ import { View, Text, StyleSheet, Pressable, Image, ViewStyle } from 'react-nativ
 import type { ScoredEvent } from '../types/recommendation';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { formatEventPeriodHuman, getDateUrgency, type DateUrgency } from '../lib/dateUtils';
+import { Analytics } from '@apps-in-toss/framework';
 
 // ==================== 타입 정의 ====================
 
@@ -370,25 +371,29 @@ export const EventCard: React.FC<EventCardProps> = ({ event, onPress, variant = 
 
   if (variant === 'horizontal') {
     return (
+      <Analytics.Press params={{ log_name: 'event_card', text: event.title }}>
+        <Pressable
+          style={styles.horizontalCard}
+          onPress={() => onPress(event.id)}
+          android_ripple={{ color: '#E5E7EB' }}
+        >
+          {renderImage()}
+          {renderContent()}
+        </Pressable>
+      </Analytics.Press>
+    );
+  }
+
+  return (
+    <Analytics.Press params={{ log_name: 'event_card', text: event.title }}>
       <Pressable
-        style={styles.horizontalCard}
+        style={[styles.card, getCardStyle(variant)]}
         onPress={() => onPress(event.id)}
         android_ripple={{ color: '#E5E7EB' }}
       >
         {renderImage()}
         {renderContent()}
       </Pressable>
-    );
-  }
-
-  return (
-    <Pressable
-      style={[styles.card, getCardStyle(variant)]}
-      onPress={() => onPress(event.id)}
-      android_ripple={{ color: '#E5E7EB' }}
-    >
-      {renderImage()}
-      {renderContent()}
-    </Pressable>
+    </Analytics.Press>
   );
 };

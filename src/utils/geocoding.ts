@@ -32,7 +32,7 @@ export async function reverseGeocode(
       throw new Error(`Backend API error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
 
     // 백엔드 응답: { gu, dong, label }
     // label = "송파구 삼전동" 형태
