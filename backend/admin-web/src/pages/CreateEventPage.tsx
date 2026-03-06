@@ -290,6 +290,8 @@ export default function CreateEventPage() {
             openingHours: shouldUpdate('opening_hours', prev.openingHours) && enriched.opening_hours ? enriched.opening_hours : prev.openingHours,
             priceMin: shouldUpdate('price_min', prev.priceMin) && enriched.price_min != null ? enriched.price_min : prev.priceMin,
             priceMax: shouldUpdate('price_max', prev.priceMax) && enriched.price_max != null ? enriched.price_max : prev.priceMax,
+            parkingAvailable: shouldUpdate('parking_available', prev.parkingAvailable) && enriched.parking_available != null ? enriched.parking_available : prev.parkingAvailable,
+            parkingInfo: shouldUpdate('parking_info', prev.parkingInfo) && enriched.parking_info ? enriched.parking_info : prev.parkingInfo,
             externalLinks: {
               official: (shouldUpdate('external_links.official', prev.externalLinks?.official) && enriched['external_links.official']) || prev.externalLinks?.official || '',
               ticket: (shouldUpdate('external_links.ticket', prev.externalLinks?.ticket) && enriched['external_links.ticket']) || prev.externalLinks?.ticket || '',
@@ -298,7 +300,7 @@ export default function CreateEventPage() {
             // 🆕 metadata 적용
             metadata: Object.keys(updatedMetadata).length > 0 ? updatedMetadata : prev.metadata,
           };
-          // AI로 변경된 필드 추적
+          // AI로 변경된 필드 추적 (실제로 변경된 필드만 카운트)
           const aiKeys: string[] = [];
           if (next.startAt !== prev.startAt) aiKeys.push('start_at');
           if (next.endAt !== prev.endAt) aiKeys.push('end_at');
@@ -309,6 +311,8 @@ export default function CreateEventPage() {
           if (next.openingHours !== prev.openingHours) aiKeys.push('opening_hours');
           if (next.priceMin !== prev.priceMin) aiKeys.push('price_min');
           if (next.priceMax !== prev.priceMax) aiKeys.push('price_max');
+          if (next.parkingAvailable !== prev.parkingAvailable) aiKeys.push('parking_available');
+          if (next.parkingInfo !== prev.parkingInfo) aiKeys.push('parking_info');
           if (aiKeys.length > 0) {
             // setFieldSources는 상태 업데이트라 여기서 직접 호출 불가 → setTimeout으로 처리
             setTimeout(() => {
@@ -323,8 +327,15 @@ export default function CreateEventPage() {
         });
 
         const modeLabel = isForceAll ? '전체 재생성' : isEmptyFieldsOnly ? '빈 필드 보완' : '선택 필드 재생성';
-        const appliedCount = Object.keys(result.suggestions).filter(k => !captionLockedFields.has(k)).length;
-        alert(`✅ ${modeLabel} 완료!\n\n보완된 필드: ${appliedCount}개`);
+        // result.suggestions 개수가 아니라 실제 API가 값을 찾아온 필드 수 (null 제외)
+        const foundCount = Object.keys(result.suggestions).filter(k => {
+          if (captionLockedFields.has(k)) return false;
+          return result.suggestions[k]?.value != null;
+        }).length;
+        const msg = foundCount > 0
+          ? `✅ ${modeLabel} 완료!\n\n채워진 필드: ${foundCount}개`
+          : `ℹ️ AI가 정보를 찾지 못했습니다.\n\n검색 결과가 없거나 아직 공개되지 않은 이벤트일 수 있어요.\n캡션 파싱이나 직접 입력을 이용해 주세요.`;
+        alert(msg);
         return;
       }
 
