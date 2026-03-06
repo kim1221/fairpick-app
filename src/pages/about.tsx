@@ -60,7 +60,9 @@ function Page() {
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   const handleGoBack = () => {
-    navigation.goBack();
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    }
   };
 
   return (

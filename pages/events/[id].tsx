@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Txt, Badge, Post, BottomSheet, Loader, Button, Icon, IconButton, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
+import { InlineAd } from '@apps-in-toss/framework';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
 type EventStyles = ReturnType<typeof createStyles>;
@@ -33,6 +34,7 @@ type EventDetailParams = {
 };
 
 export const Route = createRoute('/events/:id', {
+  validateParams: (params) => params as { id: string },
   component: EventDetailPage,
 });
 
@@ -217,6 +219,7 @@ function EventDetailPage() {
   const [event, setEvent] = useState<EventCardData | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [activeSheet, setActiveSheet] = useState<'price' | 'hours' | 'overview' | null>(null);
+  const [adRendered, setAdRendered] = useState(false);
   const { isLiked, toggle: toggleLikeWithSync } = useLike({ eventId: params?.id });
   const { isLoggedIn } = useAuth();
   const dialog = useDialog();
@@ -683,21 +686,31 @@ function EventDetailPage() {
 
         </View>
 
-        {/* Bottom Spacer — 링크 있을 때만 바텀바 높이만큼 여백 */}
-        <View style={{ height: primaryCTALink ? 90 : 20 }} />
+        {/* Bottom Spacer — 광고 로드 여부에 따라 동적 높이 */}
+        <View style={{ height: primaryCTALink ? (adRendered ? 186 : 90) : 20 }} />
       </ScrollView>
 
-      {/* Sticky Bottom Action Bar — 링크 있을 때만 표시 */}
+      {/* 하단 영역: 배너 광고 + Sticky Action Bar */}
       {primaryCTALink && (
-        <View style={[styles.stickyBar, { backgroundColor: adaptive.background }]}>
-          <Button
-            type="primary"
-            size="big"
-            viewStyle={{ width: '100%' }}
-            onPress={() => handleOpenLink(primaryCTALink.url)}
-          >
-            {primaryCTALink.label}
-          </Button>
+        <View style={styles.bottomArea}>
+          {/* 광고가 실제로 로드됐을 때만 96px 공간 차지 */}
+          <View style={[styles.adBannerContainer, { height: adRendered ? 96 : 0 }]}>
+            <InlineAd
+              adGroupId="ait-ad-test-banner-id"
+              impressFallbackOnMount={true}
+              onAdRendered={() => setAdRendered(true)}
+            />
+          </View>
+          <View style={[styles.stickyBar, { backgroundColor: adaptive.background }]}>
+            <Button
+              type="primary"
+              size="big"
+              viewStyle={{ width: '100%' }}
+              onPress={() => handleOpenLink(primaryCTALink.url)}
+            >
+              {primaryCTALink.label}
+            </Button>
+          </View>
         </View>
       )}
 
@@ -1116,11 +1129,20 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   bottomSpacer: {
     height: 20,
   },
-  stickyBar: {
+  bottomArea: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
+    zIndex: 10,
+    elevation: 10,
+    backgroundColor: a.background,
+  },
+  adBannerContainer: {
+    width: '100%',
+    overflow: 'hidden',
+  },
+  stickyBar: {
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 30 : 12,

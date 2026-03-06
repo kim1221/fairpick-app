@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { Loader } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
+import { InlineAd } from '@apps-in-toss/framework';
 
 // API 서비스
 import recommendationService from '../services/recommendationService';
@@ -36,7 +37,6 @@ interface RouteParams {
 }
 
 type Adaptive = ReturnType<typeof useAdaptive>;
-type EventStyles = ReturnType<typeof createStyles>;
 
 // ==================== 메인 컴포넌트 ====================
 
@@ -132,7 +132,9 @@ function EventDetailPage() {
   };
 
   const handleBack = () => {
-    navigation.goBack();
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    }
   };
 
   // 로딩 상태
@@ -397,39 +399,47 @@ function EventDetailPage() {
               - 기타 메타데이터 */}
         </View>
 
-        {/* Phase 2A: 하단 여백 증가 (Sticky Bar 가리지 않게) */}
-        <View style={{ height: 140 }} />
+        {/* 하단 여백: 배너(96) + 액션바 높이만큼 확보 */}
+        <View style={{ height: 200 }} />
       </ScrollView>
 
-      {/* Phase 2A: Sticky Bar (강화) */}
-      <View style={styles.bottomActions}>
-        <Pressable
-          style={[styles.saveButton, saved && styles.saveButtonActive]}
-          onPress={handleSave}
-        >
-          <Text style={[styles.saveButtonText, saved && styles.saveButtonTextActive]}>
-            {saved ? '💙' : '🤍'}
-          </Text>
-        </Pressable>
+      {/* 하단 영역: 배너 광고 + 액션 바 */}
+      <View style={styles.bottomArea}>
+        <View style={styles.adBannerContainer}>
+          <InlineAd
+            adGroupId="ait-ad-test-banner-id"
+            impressFallbackOnMount={true}
+          />
+        </View>
+        <View style={styles.bottomActions}>
+          <Pressable
+            style={[styles.saveButton, saved && styles.saveButtonActive]}
+            onPress={handleSave}
+          >
+            <Text style={[styles.saveButtonText, saved && styles.saveButtonTextActive]}>
+              {saved ? '💙' : '🤍'}
+            </Text>
+          </Pressable>
 
-        <Pressable
-          style={styles.shareButton2}
-          onPress={handleShare}
-        >
-          <Text style={styles.shareButtonText2}>🔗</Text>
-        </Pressable>
+          <Pressable
+            style={styles.shareButton2}
+            onPress={handleShare}
+          >
+            <Text style={styles.shareButtonText2}>🔗</Text>
+          </Pressable>
 
-        <Pressable
-          style={styles.primaryButton}
-          onPress={() => {
-            // TODO: 티켓 예매 또는 상세 링크로 이동
-            if (event.detail_link) {
-              Alert.alert('알림', '외부 링크로 이동합니다.');
-            }
-          }}
-        >
-          <Text style={styles.primaryButtonText}>[CTA] 예매하기</Text>
-        </Pressable>
+          <Pressable
+            style={styles.primaryButton}
+            onPress={() => {
+              // TODO: 티켓 예매 또는 상세 링크로 이동
+              if (event.detail_link) {
+                Alert.alert('알림', '외부 링크로 이동합니다.');
+              }
+            }}
+          >
+            <Text style={styles.primaryButtonText}>[CTA] 예매하기</Text>
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -642,12 +652,23 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     color: a.grey700,
   },
 
-  // 하단 액션
-  bottomActions: {
+  // 하단 영역 (배너 + 액션바 wrapper)
+  bottomArea: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
+    zIndex: 99999,
+    elevation: 99999,
+    backgroundColor: a.background,
+  },
+  adBannerContainer: {
+    width: '100%',
+    height: 96,
+    overflow: 'hidden',
+  },
+  // 하단 액션
+  bottomActions: {
     flexDirection: 'row',
     padding: 16,
     paddingBottom: 24,
@@ -655,8 +676,6 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: a.grey200,
     gap: 12,
-    zIndex: 99999, // Phase 2A: 절대 안 가려지게
-    elevation: 99999, // Android
   },
   saveButton: {
     flex: 1,
