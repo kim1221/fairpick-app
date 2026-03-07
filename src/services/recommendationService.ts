@@ -130,7 +130,7 @@ function createCacheParams(params: RecommendationParams, additionalData?: Record
   const parts: string[] = [];
   
   if (params.userId) parts.push(`u:${params.userId}`);
-  if (params.location) parts.push(`loc:${params.location.lat.toFixed(3)},${params.location.lng.toFixed(3)}`);
+  if (params.location) parts.push(`loc:${params.location.lat.toFixed(1)},${params.location.lng.toFixed(1)}`); // 11km 버킷 — 백엔드 sectionsCacheMap 키와 동일
   if (params.limit) parts.push(`lim:${params.limit}`);
   if (params.excludeIds?.length) parts.push(`exc:${params.excludeIds.length}`);
   
