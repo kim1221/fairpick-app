@@ -7591,8 +7591,8 @@ app.get('/api/home/sections', async (req, res) => {
           .filter(Boolean);
       }
 
-      // today_pick / ending_soon 노출 ID 수집 → this_weekend 중복 제거에 사용
-      if (pool_.slug === 'today_pick' || pool_.slug === 'ending_soon') {
+      // today_pick / ending_soon / trending 노출 ID 수집 → 이후 섹션 중복 제거에 사용
+      if (pool_.slug === 'today_pick' || pool_.slug === 'ending_soon' || pool_.slug === 'trending') {
         events.forEach((e: any) => { if (e?.id) shownIds.add(e.id); });
       }
 

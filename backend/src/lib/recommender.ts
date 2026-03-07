@@ -82,12 +82,19 @@ const FREE_SLOT_CAP: Record<string, number> = {
   '기타': 2,
 };
 
-const TRENDING_SLOT_DEFAULT = 1; // 축제, 행사 등 기타
+const SLOT_CAP_DEFAULT = 1; // 축제, 행사 등 정의되지 않은 카테고리 기본 최대치
 
 /**
- * 슬롯 캡 적용: 카테고리별 최대 개수 제한 후 total 개수 반환
- * - 1pass: 각 카테고리 캡 적용
- * - 2pass: 슬롯 미달 시(팝업/기타 이벤트 부족) buzz 순으로 나머지 채움
+ * 카테고리 soft cap 적용
+ *
+ * cap은 "최대 허용치"이지 "보장 할당량"이 아님.
+ * 특정 카테고리 후보가 없거나 적으면 해당 슬롯은 비워두고,
+ * 남은 슬롯은 cap 초과 이벤트 중 score 상위 순으로 채움.
+ *
+ * 품질 필터(buzz_score > 0 등)는 pool 단계(SQL)에서 섹션별로 적용.
+ *
+ * - 1pass: dateSeededShuffle 순서로 순회하며 카테고리별 cap 적용
+ * - 2pass: 잔여 슬롯 → cap 초과 이벤트 중 score DESC 순으로 보충
  */
 function applySlotCap(
   events: ScoredEvent[],
@@ -98,10 +105,10 @@ function applySlotCap(
   const result: ScoredEvent[] = [];
   const overflow: ScoredEvent[] = [];
 
-  // 1pass: 슬롯 캡 적용
+  // 1pass: 카테고리 soft cap — 후보가 없으면 해당 카테고리는 0개
   for (const event of events) {
     const cat = event.main_category;
-    const maxForCat = cap[cat] ?? TRENDING_SLOT_DEFAULT;
+    const maxForCat = cap[cat] ?? SLOT_CAP_DEFAULT;
     counts[cat] = counts[cat] ?? 0;
     if (counts[cat] < maxForCat) {
       result.push(event);
@@ -111,9 +118,10 @@ function applySlotCap(
     }
   }
 
-  // 2pass: 슬롯 미달이면 overflow에서 buzz 순으로 채움
+  // 2pass: 잔여 슬롯 → score 상위 overflow로 보충 (품질 순서 보장)
   if (result.length < total) {
-    for (const event of overflow) {
+    const sortedOverflow = overflow.slice().sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    for (const event of sortedOverflow) {
       if (result.length >= total) break;
       result.push(event);
     }
@@ -630,25 +638,19 @@ export async function getTrending(
     }
   }
 
-  // buzz=0 fallback 제거: 인기 없는 마감 이벤트가 1000점으로 상위 차지하는 문제 수정
-  // buzz=0 이벤트는 buzz_score 그대로 0점 → 하위 정렬
+  // buzz_score > 0 조건: 사회적 증거가 없는 이벤트는 trending 후보 제외
+  // (슬롯캡이 buzz=0 이벤트를 팝업/전시 슬롯에 강제 삽입하는 문제 방지)
   //
-  // [Phase 2] view_count 반영:
-  //   trend_score = buzz_score * 0.8 + view_count_bonus * 0.2
+  // trend_score = buzz_score * 0.8 + view_count_bonus * 0.2
   //   view_count_bonus = LEAST(view_count / 100.0, 100) → 최대 100점, 1만 조회수에서 포화
-  //   현재 view_count=0(사용자 없음)이면 trend_score = buzz_score (기존 동작 유지)
   const fetchLimit = 80; // 날짜 기반 셔플을 위해 후보 풀 확장 (기존 limit*5=50 → 80)
   const query = `
     SELECT *,
-      (buzz_score * 0.8 + LEAST(COALESCE(view_count, 0)::float / 100.0, 100.0) * 0.2) AS trend_score,
-      CASE
-        WHEN buzz_score = 0 AND (end_at - NOW()) <= INTERVAL '3 days' THEN 'deadline'
-        WHEN buzz_score = 0 AND (NOW() - created_at) <= INTERVAL '3 days' THEN 'fresh'
-        ELSE 'normal'
-      END AS fallback_group
+      (buzz_score * 0.8 + LEAST(COALESCE(view_count, 0)::float / 100.0, 100.0) * 0.2) AS trend_score
     FROM canonical_events
     WHERE end_at >= NOW()
       AND is_deleted = false
+      AND buzz_score > 0
       AND image_url IS NOT NULL
       AND image_url != ''
       AND image_url NOT LIKE '%placeholder%'
@@ -675,26 +677,7 @@ export async function getTrending(
 
   // 날짜 기반 셔플: 같은 날 새로고침해도 순서 고정, 다음 날 자동 갱신
   const mappedRows = dateSeededShuffle(trendingRows).map(row => {
-    let reason: string[];
-    if (row.buzz_score > 0) {
-      reason = ['인기 급상승'];
-    } else {
-      switch (row.fallback_group) {
-        case 'deadline': {
-          const daysUntilEnd = Math.ceil((new Date(row.end_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-          reason = ['마감 임박', `D-${daysUntilEnd}`];
-          break;
-        }
-        case 'fresh': {
-          reason = ['새로 등록'];
-          break;
-        }
-        default: {
-          reason = ['추천'];
-          break;
-        }
-      }
-    }
+    const reason = ['인기 급상승'];
 
     let distance_km: number | undefined;
     if (location && row.lat && row.lng) {
