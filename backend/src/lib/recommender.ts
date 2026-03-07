@@ -707,6 +707,11 @@ export async function getTrending(
  * - price_min IS NULL은 제외 (가격 불명 이벤트가 섹션 의미를 깨뜨림)
  * - is_free=true는 price_min이 NULL이어도 허용 (실제 무료 이벤트)
  *
+ * 카테고리 정책: 팝업(팝업) 제외
+ * - 팝업은 입장 무료인 경우가 많지만, 실질 경험이 굿즈/식음료/소비 중심
+ * - "1만원 이하 / 부담 없이" 섹션 취지와 맞지 않아 명시적으로 제외
+ * - 앱 내 무료 뱃지 표시(effectiveIsFree)와는 독립적인 budget_pick 전용 정책
+ *
  * 정렬: buzz_score × time_decay DESC (가성비 + 인기 기준)
  */
 export async function getBudgetPick(
@@ -738,6 +743,7 @@ export async function getBudgetPick(
       AND status != 'cancelled'
       AND end_at >= NOW()
       AND (is_free = true OR price_min = 0 OR price_min <= $1)
+      AND main_category != '팝업'   -- 정책: 팝업은 입장 무료여도 실질 경험이 굿즈/소비 중심이므로 budget_pick 제외
       AND image_url IS NOT NULL
       AND image_url != ''
       AND image_url NOT LIKE '%placeholder%'
