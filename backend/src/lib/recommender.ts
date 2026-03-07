@@ -1064,7 +1064,7 @@ export async function getEndingSoon(
   limit: number = 10
 ): Promise<ScoredEvent[]> {
   const fetchLimit = limit * 5;
-  const MIN_COUNT = 5;
+  const MIN_COUNT = 1; // 초기 서비스: 1개 이상이면 노출 (기존 5 → 1)
 
   const qualityGate = `
     AND image_url IS NOT NULL
