@@ -7471,7 +7471,37 @@ app.get('/api/home/sections', async (req, res) => {
       }
     }
 
-    // 1-b. today_pick 개인화용: 최근 14일 카테고리 클릭 집계
+    // 1-b. today_pick 전용 클릭 제외 이력 (same-day stickiness)
+    //   - 당일 클릭은 제외하지 않음 → 같은 날 새로고침해도 base candidate 유지
+    //   - 이전 날 today_pick 클릭만 제외 → next-day exclusion
+    const todayPickRecentIds = new Set<string>(); // 이전 날 기준 3일
+    const todayPickClickedIds = new Set<string>(); // 이전 날 기준 14일
+    if (userId && USE_TODAY_PICK_V2) {
+      try {
+        const tpResult = await pool.query(
+          `SELECT event_id, MAX(created_at) AS last_clicked
+           FROM user_events
+           WHERE user_id = $1
+             AND action_type = 'click'
+             AND section_slug = 'today_pick'
+             AND created_at < CURRENT_DATE
+             AND created_at > NOW() - INTERVAL '14 days'
+           GROUP BY event_id`,
+          [userId as string],
+        );
+        const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+        tpResult.rows.forEach((r: any) => {
+          todayPickClickedIds.add(r.event_id);
+          if (new Date(r.last_clicked).getTime() > threeDaysAgo) {
+            todayPickRecentIds.add(r.event_id);
+          }
+        });
+      } catch {
+        // 실패해도 무시 (제외 없이 진행)
+      }
+    }
+
+    // 1-c. today_pick 개인화용: 최근 14일 카테고리 클릭 집계
     const categoryClickCounts = new Map<string, number>();
     if (userId && USE_TODAY_PICK_V2) {
       try {
@@ -7524,7 +7554,7 @@ app.get('/api/home/sections', async (req, res) => {
         if (USE_TODAY_PICK_V2) {
           const rawCandidates = pool_.rawEvents as ScoredTodayPickCandidate[];
           const personalized = applyPersonalizationV2(rawCandidates, categoryClickCounts);
-          const picked = pickTodayPickCandidateV2(personalized, recentClickedIds, clickedIds);
+          const picked = pickTodayPickCandidateV2(personalized, todayPickRecentIds, todayPickClickedIds);
           pickedEvent = picked?.event ?? null;
         } else {
           pickedEvent = pickTodayPickCandidate(pool_.rawEvents, recentClickedIds, clickedIds);
