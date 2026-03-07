@@ -7282,10 +7282,11 @@ function buildWhereClause(conditions: Record<string, any>): { whereStr: string; 
   if (conditions.is_free === true) {
     where.push('is_free = true');
   }
-  // 최대 가격 (price_min이 max_price 이하이거나 무료인 이벤트)
+  // 최대 가격 (무료이거나 실제 가격이 max_price 이하인 이벤트)
+  // price_min IS NULL은 가격 불명이므로 제외 — is_free=true일 때만 NULL 허용
   if (typeof conditions.max_price === 'number' && conditions.max_price >= 0) {
     params.push(conditions.max_price);
-    where.push(`(price_min IS NULL OR price_min = 0 OR price_min <= $${params.length} OR is_free = true)`);
+    where.push(`(is_free = true OR price_min = 0 OR price_min <= $${params.length})`);
   }
   // N일 이내 오픈 예정 (start_at 기준)
   if (typeof conditions.days_to_open === 'number' && conditions.days_to_open > 0) {
@@ -7403,6 +7404,8 @@ async function buildSectionPools(
           events = USE_TODAY_PICK_V2
             ? await buildTodayPickPoolV2(pool, location)
             : await buildTodayPickPool(pool, location);
+        } else if (theme.slug === 'budget_pick') {
+          events = await recommender.getBudgetPick(pool, location, limit);
         } else if (config.preset) {
           switch (config.preset as string) {
             case 'ending_soon':

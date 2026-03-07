@@ -697,6 +697,73 @@ export async function getTrending(
 }
 
 /**
+ * "1만원 이하" 가성비 추천
+ *
+ * 위치 정책: 권역(도시권) 우선 → 결과 부족 시 전국 폴백
+ * - 1만원 이하 풀이 권역별로 얇아 20km보다 권역이 안정적
+ * - trending과 동일한 getCityZone + buildCityZoneFilter 인프라 사용
+ *
+ * 가격 조건: is_free=true OR price_min=0 OR price_min <= 10000
+ * - price_min IS NULL은 제외 (가격 불명 이벤트가 섹션 의미를 깨뜨림)
+ * - is_free=true는 price_min이 NULL이어도 허용 (실제 무료 이벤트)
+ *
+ * 정렬: buzz_score × time_decay DESC (가성비 + 인기 기준)
+ */
+export async function getBudgetPick(
+  pool: Pool,
+  location?: Location,
+  limit: number = 10,
+): Promise<ScoredEvent[]> {
+  const MAX_PRICE = 10000;
+  const fetchLimit = Math.min(limit * 3, 40); // serve-time click downranking용 후보 풀
+
+  let cityZoneFilter = '';
+  if (location) {
+    try {
+      const address = await reverseGeocode(location.lat, location.lng);
+      const cityZone = getCityZone(address);
+      if (cityZone.length > 0) {
+        cityZoneFilter = buildCityZoneFilter(cityZone);
+      }
+    } catch (error: any) {
+      console.error('[getBudgetPick] city zone error:', error.message);
+    }
+  }
+
+  const buildQuery = (zoneFilter: string) => `
+    SELECT *,
+      buzz_score * POWER(0.99, GREATEST(0, EXTRACT(DAY FROM NOW() - created_at)::int)) AS decayed_buzz
+    FROM canonical_events
+    WHERE is_deleted = false
+      AND status != 'cancelled'
+      AND end_at >= NOW()
+      AND (is_free = true OR price_min = 0 OR price_min <= $1)
+      AND image_url IS NOT NULL
+      AND image_url != ''
+      AND image_url NOT LIKE '%placeholder%'
+      AND image_url NOT LIKE '%/defaults/%'
+      ${zoneFilter}
+    ORDER BY is_featured DESC NULLS LAST,
+      decayed_buzz DESC NULLS LAST,
+      created_at DESC
+    LIMIT $2
+  `;
+
+  let rows = (await pool.query(buildQuery(cityZoneFilter), [MAX_PRICE, fetchLimit])).rows;
+
+  if (cityZoneFilter && rows.length < limit) {
+    console.log(`[getBudgetPick] 권역 결과 ${rows.length}개 < ${limit} → 전국 폴백`);
+    rows = (await pool.query(buildQuery(''), [MAX_PRICE, fetchLimit])).rows;
+  }
+
+  return rows.map(row => ({
+    ...row,
+    score: row.decayed_buzz ?? 0,
+    reason: ['가성비 추천'],
+  }));
+}
+
+/**
  * "근처 이벤트" - 거리 기반 (단계적 반경 확장)
  *
  * 반경을 5 → 10 → 20km 순으로 확장하며 최소 MIN_NEARBY개를 확보.
