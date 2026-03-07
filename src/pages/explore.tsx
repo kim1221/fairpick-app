@@ -451,6 +451,26 @@ function GridFooterSkeleton() {
   );
 }
 
+// ─── Explore page 0 캐시 (탭 복귀 시 skeleton 방지) ──────────────────────
+// 캐시 범위: reset=true(page 0) 요청만 / 페이지네이션(page 1+)은 캐시 안 함
+// pull-to-refresh 추가 시: _exploreCache.delete(buildExploreCacheKey(filters)) 로 무효화
+interface ExploreFirstPageCache {
+  events: EventCardData[];
+  totalCount: number;
+  expiresAt: number;
+}
+const _exploreCache = new Map<string, ExploreFirstPageCache>();
+const EXPLORE_CACHE_TTL_MS = 2 * 60 * 1000; // 2분
+
+function buildExploreCacheKey(filters: ActiveFilters): string {
+  return [
+    filters.quickFilter ?? 'none',
+    filters.region ?? 'none',
+    filters.category ?? 'none',
+  ].join('|');
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ─────────────────────────────────────────────────
 // 그리드 카드 — useLike 훅 사용을 위해 별도 컴포넌트
 // ─────────────────────────────────────────────────
@@ -647,6 +667,22 @@ function ExplorePage() {
   const loadEvents = async (_targetPage: number, reset = false) => {
     if (!reset && isFetchingRef.current) return;
     isFetchingRef.current = true;
+
+    // ── page 0 캐시 확인 (탭 복귀 시 skeleton 방지) ──
+    if (reset) {
+      const cacheKey = buildExploreCacheKey(activeFilters);
+      const cached = _exploreCache.get(cacheKey);
+      if (cached && Date.now() < cached.expiresAt) {
+        if (__DEV__) console.log(`[Explore] cache HIT (key=${cacheKey})`);
+        setEvents(cached.events);
+        setTotalCount(cached.totalCount);
+        setLoading(false);
+        isFetchingRef.current = false;
+        return;
+      }
+      if (__DEV__) console.log(`[Explore] cache MISS (key=${cacheKey})`);
+    }
+
     setLoading(true);
     try {
       const url = buildApiUrl();
@@ -661,6 +697,13 @@ function ExplorePage() {
       if (reset) {
         setEvents(newEvents);
         setTotalCount(data.pageInfo.totalCount);
+        // ── page 0 캐시 저장 ──
+        const cacheKey = buildExploreCacheKey(activeFilters);
+        _exploreCache.set(cacheKey, {
+          events: newEvents,
+          totalCount: data.pageInfo.totalCount,
+          expiresAt: Date.now() + EXPLORE_CACHE_TTL_MS,
+        });
       } else {
         setEvents(prev => {
           const existingIds = new Set(prev.map(item => item.id));
