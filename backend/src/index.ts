@@ -7377,6 +7377,8 @@ interface SectionsCache {
 }
 const sectionsCacheMap = new Map<string, SectionsCache>();
 const SECTIONS_CACHE_TTL_MS = 5 * 60 * 1000; // 5분
+// single-flight: 동일 캐시 키에 대한 중복 빌드 방지
+const buildInFlightMap = new Map<string, Promise<SectionsCache>>();
 
 // ─── 유저 클릭 이력 캐시 (1분 TTL) ──────────────────────────────────────────
 // 기존 3쿼리(직렬) → 1쿼리 병합 + 인메모리 분류로 대체
@@ -7569,11 +7571,28 @@ app.get('/api/home/sections', async (req, res) => {
     let cached = sectionsCacheMap.get(cacheKey);
 
     if (!cached || now - cached.cachedAt > SECTIONS_CACHE_TTL_MS) {
-      // 캐시 MISS → DB 쿼리 실행 후 캐시 저장
-      const pools = await buildSectionPools(location);
-      cached = { pools, cachedAt: now };
-      sectionsCacheMap.set(cacheKey, cached);
-      console.log(`[home/sections] cache MISS → built (key=${cacheKey})`);
+      // 캐시 MISS → single-flight: 동일 키 중복 빌드 방지
+      let buildPromise = buildInFlightMap.get(cacheKey);
+      if (!buildPromise) {
+        // 첫 미스 요청: 빌드 시작 후 Promise를 맵에 등록
+        buildPromise = buildSectionPools(location)
+          .then(pools => {
+            const newCache: SectionsCache = { pools, cachedAt: Date.now() };
+            sectionsCacheMap.set(cacheKey, newCache);
+            console.log(`[home/sections] cache MISS → built (key=${cacheKey})`);
+            return newCache;
+          })
+          .catch(err => {
+            console.error(`[home/sections] build FAILED (key=${cacheKey}):`, err);
+            throw err;
+          })
+          .finally(() => buildInFlightMap.delete(cacheKey));
+        buildInFlightMap.set(cacheKey, buildPromise);
+      } else {
+        // 빌드 중: 같은 Promise에 합류 (DB 재호출 없음)
+        console.log(`[home/sections] in-flight → joined (key=${cacheKey})`);
+      }
+      cached = await buildPromise;
     } else {
       if (process.env.NODE_ENV !== 'production') {
         const ageS = ((now - cached.cachedAt) / 1000).toFixed(0);
