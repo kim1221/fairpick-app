@@ -7548,7 +7548,11 @@ app.get('/api/home/sections', async (req, res) => {
     }
 
     // 3. 캐시된 풀에 사용자별 클릭 다운랭킹 적용 (DB 쿼리 없음)
+    // shownIds: today_pick / ending_soon에서 노출된 event_id → this_weekend 중복 제거용
+    const shownIds = new Set<string>();
     const sections = cached.pools.map((pool_) => {
+      let events: any[];
+
       if (pool_.slug === 'today_pick') {
         let pickedEvent: any;
         if (USE_TODAY_PICK_V2) {
@@ -7559,20 +7563,44 @@ app.get('/api/home/sections', async (req, res) => {
         } else {
           pickedEvent = pickTodayPickCandidate(pool_.rawEvents, recentClickedIds, clickedIds);
         }
-        return {
-          slug: pool_.slug,
-          title: pool_.title,
-          subtitle: pool_.subtitle,
-          events: pickedEvent ? [mapEventForFrontend(pickedEvent)].filter(Boolean) : [],
-        };
+        events = pickedEvent ? [mapEventForFrontend(pickedEvent)].filter(Boolean) : [];
+
+      } else if (pool_.slug === 'this_weekend') {
+        // 상위 섹션(today_pick, ending_soon) 중복 제거
+        const deduped = pool_.rawEvents.filter((e: any) => !shownIds.has(e.id));
+
+        // 카테고리 친화도 소폭 가점 (+2~3, 최대 +5)
+        const boosted = categoryClickCounts.size > 0
+          ? deduped
+            .map((e: any) => {
+              const cnt = categoryClickCounts.get(e.main_category ?? '') ?? 0;
+              const boost = Math.min(cnt >= 3 ? 3 : cnt >= 1 ? 2 : 0, 5);
+              return boost > 0 ? { ...e, score: (e.score ?? 0) + boost } : e;
+            })
+            .sort((a: any, b: any) => (b.score ?? 0) - (a.score ?? 0))
+          : deduped;
+
+        // 최근 3일 클릭 다운랭킹 (제외가 아니라 후순위)
+        events = sampleWithClickDownrank(boosted, pool_.limit, recentClickedIds)
+          .map(mapEventForFrontend)
+          .filter(Boolean);
+
+      } else {
+        events = sampleWithClickDownrank(pool_.rawEvents, pool_.limit, clickedIds)
+          .map(mapEventForFrontend)
+          .filter(Boolean);
       }
+
+      // today_pick / ending_soon 노출 ID 수집 → this_weekend 중복 제거에 사용
+      if (pool_.slug === 'today_pick' || pool_.slug === 'ending_soon') {
+        events.forEach((e: any) => { if (e?.id) shownIds.add(e.id); });
+      }
+
       return {
         slug: pool_.slug,
         title: pool_.title,
         subtitle: pool_.subtitle,
-        events: sampleWithClickDownrank(pool_.rawEvents, pool_.limit, clickedIds)
-          .map(mapEventForFrontend)
-          .filter(Boolean),
+        events,
       };
     });
 

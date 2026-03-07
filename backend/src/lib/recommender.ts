@@ -923,10 +923,33 @@ export async function getWeekend(
     LIMIT $${limitIndex}
   `;
 
-  const result = await pool.query(query, queryParams);
+  let rows = (await pool.query(query, queryParams)).rows;
+
+  // 20km 결과 없으면 전국 폴백
+  if (rows.length === 0 && location) {
+    console.log('[getWeekend] 20km 결과 없음 → 전국 폴백');
+    const nExclude = excludeIdsArray.length > 0
+      ? `AND id NOT IN (${excludeIdsArray.map((_, i) => `$${i + 3}`).join(',')})`
+      : '';
+    const fallbackResult = await pool.query(
+      `SELECT * FROM canonical_events
+       WHERE end_at >= $1
+         AND start_at <= $2
+         AND is_deleted = false
+         AND image_url IS NOT NULL
+         AND image_url != ''
+         AND image_url NOT LIKE '%placeholder%'
+         AND image_url NOT LIKE '%/defaults/%'
+         ${nExclude}
+       ORDER BY is_featured DESC NULLS LAST, buzz_score DESC NULLS LAST, id ASC
+       LIMIT $${excludeIdsArray.length + 3}`,
+      [weekend.start, weekend.end, ...excludeIdsArray, fetchLimit],
+    );
+    rows = fallbackResult.rows;
+  }
 
   // 날짜 기반 셔플: 같은 날 새로고침해도 순서 고정, 다음 날 자동 갱신
-  const scoredEvents = dateSeededShuffle(result.rows).map(event => {
+  const scoredEvents = dateSeededShuffle(rows).map(event => {
     let distance_km: number | undefined;
     if (location && event.lat && event.lng) {
       distance_km = calculateDistance(location.lat, location.lng, event.lat, event.lng);
