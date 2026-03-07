@@ -62,13 +62,17 @@ export type FreeEventsResponse = ApiResponse<ScoredEvent[]>;
 export type EventDetail = ScoredEvent;
 
 // 사용자 행동 로그 타입
-export type ActionType = 'view' | 'save' | 'unsave' | 'share' | 'click';
+// impression은 미래 확장용 (현재 프론트에서는 미사용)
+export type ActionType = 'view' | 'save' | 'unsave' | 'share' | 'click' | 'impression';
 
 export interface UserEventLog {
   userId: string;
   eventId: string;
   actionType: ActionType;
-  metadata?: Record<string, any>;
+  sectionSlug?: string;   // 어느 섹션에서 발생했는지 (today_pick, trending 등)
+  rankPosition?: number;  // 섹션 내 노출 순서 (1-based)
+  sessionId?: string;     // 세션 단위 추적
+  metadata?: Record<string, any>; // click_source / algorithm_version 등 추천 컨텍스트
 }
 
 export interface UserEventResponse {

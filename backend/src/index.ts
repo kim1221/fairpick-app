@@ -814,28 +814,38 @@ app.get('/api/events/:id', async (req, res) => {
  */
 app.post('/api/user-events', async (req, res) => {
   try {
-    const { userId, eventId, actionType, metadata } = req.body;
-    
+    const { userId, eventId, actionType, sectionSlug, rankPosition, sessionId, metadata } = req.body;
+
     if (!userId || !eventId || !actionType) {
       return res.status(400).json({
         success: false,
         error: 'userId, eventId, actionType이 필요합니다.',
       });
     }
-    
-    const validActions = ['view', 'save', 'unsave', 'share', 'click'];
+
+    // impression은 미래 확장용으로 validation만 열어둠
+    const validActions = ['view', 'save', 'unsave', 'share', 'click', 'impression'];
     if (!validActions.includes(actionType)) {
       return res.status(400).json({
         success: false,
         error: `actionType은 ${validActions.join(', ')} 중 하나여야 합니다.`,
       });
     }
-    
-    // 1. user_events 기록 (기존)
+
+    // 1. user_events 기록 (추천 컨텍스트 포함)
     await pool.query(
-      `INSERT INTO user_events (user_id, event_id, action_type, metadata)
-       VALUES ($1, $2, $3, $4)`,
-      [userId, eventId, actionType, JSON.stringify(metadata || {})]
+      `INSERT INTO user_events
+         (user_id, event_id, action_type, section_slug, rank_position, session_id, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+      [
+        userId,
+        eventId,
+        actionType,
+        sectionSlug ?? null,
+        rankPosition ?? null,
+        sessionId ?? null,
+        JSON.stringify(metadata || {}),
+      ]
     );
 
     // 2. event_views / event_actions 동시 기록 (buzz_score 계산에 활용)

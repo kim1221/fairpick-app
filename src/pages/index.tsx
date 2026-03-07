@@ -251,9 +251,16 @@ function HomePage() {
     setSections(response.success ? response.sections : []);
   };
 
-  const handleEventPress = async (eventId: string) => {
+  const handleEventPress = async (eventId: string, sectionSlug?: string, rankPosition?: number) => {
     try {
-      await userEventService.logEventClick(eventId, 'home_card');
+      await userEventService.logEventClick(eventId, {
+        sectionSlug,
+        rankPosition,
+        metadata: {
+          click_source: 'home_card',
+          ...(sectionSlug === 'today_pick' && { algorithm_version: 'v2' }),
+        },
+      });
     } catch {}
     navigation.navigate('/events/:id', { id: eventId });
   };
@@ -288,7 +295,11 @@ function HomePage() {
             {subtitle ? <Text style={styles.sectionSubtitle}>{subtitle}</Text> : null}
           </View>
           <View style={{ paddingHorizontal: 20 }}>
-            <EventCard event={events[0]!} onPress={handleEventPress} variant="large" />
+            <EventCard
+              event={events[0]!}
+              onPress={(id) => handleEventPress(id, 'today_pick', 1)}
+              variant="large"
+            />
           </View>
         </View>
       );
@@ -306,8 +317,13 @@ function HomePage() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.horizontalList}
         >
-          {events.map((event) => (
-            <EventCard key={event.id} event={event} onPress={handleEventPress} variant="small" />
+          {events.map((event, idx) => (
+            <EventCard
+              key={event.id}
+              event={event}
+              onPress={(id) => handleEventPress(id, slug, idx + 1)}
+              variant="small"
+            />
           ))}
         </ScrollView>
       </View>
