@@ -7378,6 +7378,87 @@ interface SectionsCache {
 const sectionsCacheMap = new Map<string, SectionsCache>();
 const SECTIONS_CACHE_TTL_MS = 5 * 60 * 1000; // 5분
 
+// ─── 유저 클릭 이력 캐시 (1분 TTL) ──────────────────────────────────────────
+// 기존 3쿼리(직렬) → 1쿼리 병합 + 인메모리 분류로 대체
+// [카테고리 count 주의] 기존 쿼리3은 user_events 행 수 기준 COUNT,
+// 병합 쿼리는 GROUP BY (event_id, section_slug) 기준 COUNT → 동일 이벤트의
+// 반복 클릭이 1로 집계됨. 절대값 아닌 상대적 선호도 용도이므로 허용 가능한 trade-off.
+interface UserClickHistory {
+  clickedIds: Set<string>;          // 14일 전체 클릭
+  recentClickedIds: Set<string>;    // 최근 3일 클릭
+  todayPickClickedIds: Set<string>; // today_pick, 전날 이전 14일
+  todayPickRecentIds: Set<string>;  // today_pick, 전날 이전 3일
+  categoryClickCounts: Map<string, number>; // 카테고리별 (event,section) 단위 집계
+  cachedAt: number;
+}
+const userClickCacheMap = new Map<string, UserClickHistory>();
+const USER_CLICK_CACHE_TTL_MS = 60 * 1000; // 1분
+
+async function getUserClickHistory(userId: string): Promise<UserClickHistory> {
+  const now = Date.now();
+  const cached = userClickCacheMap.get(userId);
+  if (cached && now - cached.cachedAt < USER_CLICK_CACHE_TTL_MS) {
+    return cached;
+  }
+
+  // 1쿼리: 14일 이내 모든 클릭 → 인메모리에서 4가지 Set + 카테고리 Map 추출
+  const result = await pool.query(
+    `SELECT
+       ue.event_id,
+       ue.section_slug,
+       MAX(ue.created_at) AS last_clicked,
+       ce.main_category
+     FROM user_events ue
+     LEFT JOIN canonical_events ce ON ue.event_id = ce.id
+     WHERE ue.user_id = $1
+       AND ue.action_type = 'click'
+       AND ue.created_at > NOW() - INTERVAL '14 days'
+     GROUP BY ue.event_id, ue.section_slug, ce.main_category`,
+    [userId],
+  );
+
+  const threeDaysAgo = now - 3 * 24 * 60 * 60 * 1000;
+  const todayMidnight = new Date();
+  todayMidnight.setHours(0, 0, 0, 0);
+  const todayMs = todayMidnight.getTime();
+
+  const clickedIds = new Set<string>();
+  const recentClickedIds = new Set<string>();
+  const todayPickClickedIds = new Set<string>();
+  const todayPickRecentIds = new Set<string>();
+  const categoryClickCounts = new Map<string, number>();
+
+  result.rows.forEach((r: any) => {
+    const lastClicked = new Date(r.last_clicked).getTime();
+    const isRecent = lastClicked > threeDaysAgo;
+    const isBeforeToday = lastClicked < todayMs;
+
+    clickedIds.add(r.event_id);
+    if (isRecent) recentClickedIds.add(r.event_id);
+
+    if (r.section_slug === 'today_pick' && isBeforeToday) {
+      todayPickClickedIds.add(r.event_id);
+      if (isRecent) todayPickRecentIds.add(r.event_id);
+    }
+
+    if (r.main_category) {
+      categoryClickCounts.set(r.main_category, (categoryClickCounts.get(r.main_category) ?? 0) + 1);
+    }
+  });
+
+  const history: UserClickHistory = {
+    clickedIds,
+    recentClickedIds,
+    todayPickClickedIds,
+    todayPickRecentIds,
+    categoryClickCounts,
+    cachedAt: now,
+  };
+  userClickCacheMap.set(userId, history);
+  return history;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function getSectionsCacheKey(location?: { lat: number; lng: number }): string {
   if (!location) return 'no-location';
   // 소수점 1자리 버킷 (약 11km 격자) — 같은 도시면 동일 캐시 사용
@@ -7449,86 +7530,36 @@ app.get('/api/home/sections', async (req, res) => {
       ? { lat: parseFloat(lat as string), lng: parseFloat(lng as string) }
       : undefined;
 
-    // 1. 사용자 클릭 이력 조회 (최근 14일) — 요청마다 실행 (사용자별 고유)
-    const clickedIds = new Set<string>();
-    const recentClickedIds = new Set<string>(); // 최근 3일
+    // 1. 유저 클릭 이력 조회 — 1쿼리 병합 + 1분 캐시 (기존 3쿼리 직렬 대체)
+    let clickedIds = new Set<string>();
+    let recentClickedIds = new Set<string>();
+    let todayPickClickedIds = new Set<string>();
+    let todayPickRecentIds = new Set<string>();
+    let categoryClickCounts = new Map<string, number>();
     if (userId) {
       try {
-        const clickResult = await pool.query(
-          `SELECT event_id, MAX(created_at) as last_clicked
-           FROM user_events
-           WHERE user_id = $1 AND action_type = 'click'
-             AND created_at > NOW() - INTERVAL '14 days'
-           GROUP BY event_id`,
-          [userId as string],
-        );
-        const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
-        clickResult.rows.forEach((r: any) => {
-          clickedIds.add(r.event_id);
-          if (new Date(r.last_clicked).getTime() > threeDaysAgo) {
-            recentClickedIds.add(r.event_id);
-          }
-        });
-      } catch {
-        // 클릭 이력 조회 실패해도 섹션 로딩 계속
-      }
-    }
+        const history = await getUserClickHistory(userId as string);
+        clickedIds = history.clickedIds;
+        recentClickedIds = history.recentClickedIds;
+        todayPickClickedIds = history.todayPickClickedIds;
+        todayPickRecentIds = history.todayPickRecentIds;
+        categoryClickCounts = history.categoryClickCounts;
 
-    // 1-b. today_pick 전용 클릭 제외 이력 (same-day stickiness)
-    //   - 당일 클릭은 제외하지 않음 → 같은 날 새로고침해도 base candidate 유지
-    //   - 이전 날 today_pick 클릭만 제외 → next-day exclusion
-    const todayPickRecentIds = new Set<string>(); // 이전 날 기준 3일
-    const todayPickClickedIds = new Set<string>(); // 이전 날 기준 14일
-    if (userId && USE_TODAY_PICK_V2) {
-      try {
-        const tpResult = await pool.query(
-          `SELECT event_id, MAX(created_at) AS last_clicked
-           FROM user_events
-           WHERE user_id = $1
-             AND action_type = 'click'
-             AND section_slug = 'today_pick'
-             AND created_at < CURRENT_DATE
-             AND created_at > NOW() - INTERVAL '14 days'
-           GROUP BY event_id`,
-          [userId as string],
-        );
-        const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
-        tpResult.rows.forEach((r: any) => {
-          todayPickClickedIds.add(r.event_id);
-          if (new Date(r.last_clicked).getTime() > threeDaysAgo) {
-            todayPickRecentIds.add(r.event_id);
-          }
-        });
-      } catch {
-        // 실패해도 무시 (제외 없이 진행)
-      }
-    }
-
-    // 1-c. today_pick 개인화용: 최근 14일 카테고리 클릭 집계
-    const categoryClickCounts = new Map<string, number>();
-    if (userId && USE_TODAY_PICK_V2) {
-      try {
-        const catResult = await pool.query(
-          `SELECT ce.main_category, COUNT(*)::int AS click_count
-           FROM user_events ue
-           JOIN canonical_events ce ON ue.event_id = ce.id
-           WHERE ue.user_id = $1
-             AND ue.action_type = 'click'
-             AND ue.created_at > NOW() - INTERVAL '14 days'
-             AND ce.main_category IS NOT NULL
-           GROUP BY ce.main_category`,
-          [userId as string],
-        );
-        catResult.rows.forEach((r: any) => {
-          categoryClickCounts.set(r.main_category, r.click_count);
-        });
+        // [DEBUG] 카테고리 집계 로그
+        // 기존 3쿼리 방식(행 단위 COUNT)과 비교하려면 이 로그의 값과
+        // 구 쿼리3 결과를 대조. 상대적 선호 순위가 동일하면 정상.
         if (categoryClickCounts.size > 0) {
+          const cacheHit = (Date.now() - history.cachedAt) < USER_CLICK_CACHE_TTL_MS - 1000;
           console.log(
-            `[today_pick_v2] personalization: ${[...categoryClickCounts.entries()].map(([k, v]) => `${k}(${v})`).join(', ')}`,
+            `[today_pick_v2] personalization (merged-query, cache=${cacheHit ? 'HIT' : 'MISS'}): ` +
+            [...categoryClickCounts.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .map(([k, v]) => `${k}(${v})`)
+              .join(', '),
           );
         }
       } catch {
-        // 실패해도 개인화 없이 진행
+        // 클릭 이력 조회 실패해도 섹션 로딩 계속
       }
     }
 
