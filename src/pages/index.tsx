@@ -214,30 +214,15 @@ function HomePage() {
 
       const locPromise = requestLocation();
 
-      // 최대 2초 위치 대기 → 단일 API 호출 (깜빡임 방지)
+      // 최대 3초 위치 대기 → API 1회 호출
+      // timeout 후에도 locPromise는 백그라운드 실행 →
+      // 완료 시 setLocation/setCurrentAddress 업데이트 (API 재호출 없음)
       const loc = await Promise.race([
         locPromise,
-        new Promise<undefined>(resolve => setTimeout(resolve, 2000)),
+        new Promise<undefined>(resolve => setTimeout(resolve, 3000)),
       ]);
 
       await loadSections(loc, uid);
-
-      // 위치가 2초 내 안 왔다면: 나중에 조용히 갱신 (skeleton 없이)
-      if (!loc) {
-        const actualLoc = await locPromise;
-        if (actualLoc) {
-          const response = await recommendationService.getSections(actualLoc, uid);
-          if (response.success) {
-            setSections(response.sections);
-            _homeCache = {
-              sections: response.sections,
-              location: actualLoc,
-              userId: uid,
-              expiresAt: Date.now() + HOME_CACHE_TTL_MS,
-            };
-          }
-        }
-      }
     } catch (error) {
       console.error('[Home] init error:', error);
       await loadSections();
