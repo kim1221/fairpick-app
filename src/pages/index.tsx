@@ -26,6 +26,16 @@ export const Route = createRoute('/', {
   component: HomePage,
 });
 
+// 모듈 레벨 캐시: 컴포넌트가 언마운트돼도 데이터 유지 (탭 전환 복귀 대응)
+interface HomeCache {
+  sections: HomeSection[];
+  location: Location | undefined;
+  userId: string;
+  expiresAt: number;
+}
+let _homeCache: HomeCache | null = null;
+const HOME_CACHE_TTL_MS = 5 * 60 * 1000; // 5분
+
 // ─────────────────────────────────────────────────────────────
 // 타입
 // ─────────────────────────────────────────────────────────────
@@ -166,9 +176,11 @@ function HomePage() {
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   // null = 로딩 중, [] = 실패/빈 상태, [...] = 로드 완료
-  const [sections, setSections] = useState<HomeSection[] | null>(null);
-  const [userId, setUserId] = useState('');
-  const [location, setLocation] = useState<Location | undefined>(undefined);
+  const now = Date.now();
+  const validCache = _homeCache && now < _homeCache.expiresAt ? _homeCache : null;
+  const [sections, setSections] = useState<HomeSection[] | null>(validCache?.sections ?? null);
+  const [userId, setUserId] = useState(validCache?.userId ?? '');
+  const [location, setLocation] = useState<Location | undefined>(validCache?.location);
   const [currentAddress, setCurrentAddress] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [showAiNotice, setShowAiNotice] = useState(false);
@@ -193,20 +205,38 @@ function HomePage() {
   };
 
   const initializeUser = async () => {
+    // 캐시 유효: 재로딩 완전 스킵
+    if (_homeCache && Date.now() < _homeCache.expiresAt) return;
+
     try {
       const uid = await getCurrentUserId();
       setUserId(uid);
 
-      // 위치 요청과 섹션 로드를 병렬 실행
-      // - 위치 없이 즉시 섹션 표시 → 체감 속도 개선
-      // - 위치 확보되면 스켈레톤 없이 조용히 갱신
       const locPromise = requestLocation();
-      await loadSections(undefined, uid);
 
-      const loc = await locPromise;
-      if (loc) {
-        const response = await recommendationService.getSections(loc, uid);
-        if (response.success) setSections(response.sections);
+      // 최대 2초 위치 대기 → 단일 API 호출 (깜빡임 방지)
+      const loc = await Promise.race([
+        locPromise,
+        new Promise<undefined>(resolve => setTimeout(resolve, 2000)),
+      ]);
+
+      await loadSections(loc, uid);
+
+      // 위치가 2초 내 안 왔다면: 나중에 조용히 갱신 (skeleton 없이)
+      if (!loc) {
+        const actualLoc = await locPromise;
+        if (actualLoc) {
+          const response = await recommendationService.getSections(actualLoc, uid);
+          if (response.success) {
+            setSections(response.sections);
+            _homeCache = {
+              sections: response.sections,
+              location: actualLoc,
+              userId: uid,
+              expiresAt: Date.now() + HOME_CACHE_TTL_MS,
+            };
+          }
+        }
       }
     } catch (error) {
       console.error('[Home] init error:', error);
@@ -247,26 +277,35 @@ function HomePage() {
       return;
     }
     setIsOffline(false);
-    const response = await recommendationService.getSections(loc, uid);
-    setSections(response.success ? response.sections : []);
+    const currentUid = uid ?? userId;
+    const response = await recommendationService.getSections(loc, currentUid);
+    const data = response.success ? response.sections : [];
+    setSections(data);
+    if (response.success) {
+      _homeCache = {
+        sections: data,
+        location: loc,
+        userId: currentUid,
+        expiresAt: Date.now() + HOME_CACHE_TTL_MS,
+      };
+    }
   };
 
-  const handleEventPress = async (eventId: string, sectionSlug?: string, rankPosition?: number) => {
-    try {
-      await userEventService.logEventClick(eventId, {
-        sectionSlug,
-        rankPosition,
-        metadata: {
-          click_source: 'home_card',
-          ...(sectionSlug === 'today_pick' && { algorithm_version: 'v2' }),
-        },
-      });
-    } catch {}
+  const handleEventPress = (eventId: string, sectionSlug?: string, rankPosition?: number) => {
+    userEventService.logEventClick(eventId, {
+      sectionSlug,
+      rankPosition,
+      metadata: {
+        click_source: 'home_card',
+        ...(sectionSlug === 'today_pick' && { algorithm_version: 'v2' }),
+      },
+    }).catch(() => {});
     navigation.navigate('/events/:id', { id: eventId });
   };
 
   const handleRefresh = async () => {
     setRefreshing(true);
+    _homeCache = null; // 수동 새로고침: 캐시 무효화
     try {
       excludedIds.current.clear();
       const loc = await requestLocation();

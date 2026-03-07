@@ -62,6 +62,7 @@ export const BottomTabBar: React.FC<BottomTabBarProps> = ({ currentTab }) => {
   ];
 
   const handleTabPress = (tab: typeof tabs[number]) => {
+    if (tab.key === currentTab) return; // 현재 탭 재클릭 → 무시
     navigation.navigate(tab.route);
   };
 
