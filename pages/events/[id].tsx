@@ -219,7 +219,18 @@ function EventDetailPage() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [activeSheet, setActiveSheet] = useState<'price' | 'hours' | 'overview' | null>(null);
   const [adRendered, setAdRendered] = useState(false);
-  const { isLiked, toggle: toggleLikeWithSync } = useLike({ eventId: params?.id });
+  // event 로드 후 snapshot 추출 → useLike에 전달 (찜 시 로컬 snapshot 저장)
+  const eventSnapshot = React.useMemo(() => event ? {
+    title: event.title,
+    venue: event.venue,
+    imageUrl: event.thumbnailUrl,
+    region: event.region as string,
+    mainCategory: event.mainCategory,
+    subCategory: event.subCategory,
+    startAt: event.startAt,
+    endAt: event.endAt,
+  } : undefined, [event]);
+  const { isLiked, toggle: toggleLikeWithSync } = useLike({ eventId: params?.id, snapshot: eventSnapshot });
   const { isLoggedIn } = useAuth();
   const dialog = useDialog();
 
@@ -250,8 +261,18 @@ function EventDetailPage() {
           }
 
           // 최근 본 이벤트에 추가 (로컬 + 서버 fire-and-forget)
+          // snapshot 저장 → MyPage에서 API 없이 표시 가능
           try {
-            await pushRecent(data.id);
+            await pushRecent(data.id, {
+              title: data.title,
+              venue: data.venue,
+              imageUrl: data.thumbnailUrl,
+              region: data.region as string,
+              mainCategory: data.mainCategory,
+              subCategory: data.subCategory,
+              startAt: data.startAt,
+              endAt: data.endAt,
+            });
             if (isLoggedIn) {
               http.post('/users/me/recent/batch', {
                 items: [{ eventId: data.id, viewedAt: new Date().toISOString() }],

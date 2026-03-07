@@ -11,6 +11,7 @@ import {
   getRecentV2,
   __debugStorageSmokeTest,
   subscribeStorageChange,
+  StoredEventItemV2,
 } from '../utils/storage';
 import eventService from '../services/eventService';
 import http from '../lib/http';
@@ -59,6 +60,32 @@ function ThumbnailListItem({
       <Text style={styles.listChevron}>›</Text>
     </TouchableOpacity>
   );
+}
+
+// snapshot이 충분하면 EventCardData 직접 생성 → API 스킵
+// MyPage 미리보기는 title·thumbnailUrl·venue·region만 사용하므로 snapshot으로 충분
+function snapshotToEventCard(id: string, snap: StoredEventItemV2['snapshot']): EventCardData | null {
+  if (!snap?.title || !snap?.imageUrl) return null;
+  return {
+    id,
+    title: snap.title,
+    venue: snap.venue ?? '',
+    region: (snap.region as EventCardData['region']) ?? '기타',
+    category: (snap.mainCategory as EventCardData['category']) ?? '행사',
+    mainCategory: snap.mainCategory,
+    subCategory: snap.subCategory,
+    thumbnailUrl: snap.imageUrl,
+    detailImageUrl: snap.imageUrl,
+    startAt: snap.startAt ?? '',
+    endAt: snap.endAt ?? '',
+    periodText: snap.startAt && snap.endAt
+      ? `${snap.startAt.slice(0, 10)} ~ ${snap.endAt.slice(0, 10)}`
+      : '',
+    description: snap.subCategory ?? snap.mainCategory ?? '',
+    overview: '',
+    tags: snap.subCategory ? [snap.subCategory] : [],
+    detailLink: '',
+  } as EventCardData;
 }
 
 function MyPage() {
@@ -131,28 +158,22 @@ function MyPage() {
       if (likesData.items.length > 0) {
         const previewItems = likesData.items.slice(0, 3);
         const results = await Promise.allSettled(
-          previewItems.map((item) => eventService.getEventById(item.id))
+          previewItems.map((item) => {
+            // snapshot 충분 → API 스킵 (eventDetailCache 미스여도 네트워크 불필요)
+            const fromSnapshot = snapshotToEventCard(item.id, item.snapshot);
+            if (fromSnapshot) {
+              if (__DEV__) console.log(`[MyPage][likes] snapshot hit (id=${item.id})`);
+              return Promise.resolve(fromSnapshot);
+            }
+            return eventService.getEventById(item.id);
+          })
         );
         const likes = previewItems
           .map((item, i) => {
             const result = results[i]!;
             if (result.status === 'fulfilled' && result.value != null) return result.value;
-            // API 실패 → snapshot 폴백
-            const snap = item.snapshot;
-            if (!snap) return null;
-            return {
-              id: item.id,
-              title: snap.title || '(제목 없음)',
-              venue: snap.venue || '',
-              venueName: snap.venue || '',
-              region: (snap.region as any) || '기타',
-              category: (snap.mainCategory as any) || '기타',
-              thumbnailUrl: snap.imageUrl || undefined,
-              startAt: snap.startAt || '',
-              endAt: snap.endAt || '',
-              periodText: snap.startAt && snap.endAt ? `${snap.startAt} ~ ${snap.endAt}` : '',
-              description: '', overview: '', tags: [], detailImageUrl: '', detailLink: '',
-            } as EventCardData;
+            // API 실패 + snapshot 없음
+            return null;
           })
           .filter((e): e is EventCardData => e !== null);
         setLikeEvents(likes);
@@ -178,28 +199,22 @@ function MyPage() {
       if (recentData.items.length > 0) {
         const previewItems = recentData.items.slice(0, 3);
         const results = await Promise.allSettled(
-          previewItems.map((item) => eventService.getEventById(item.id))
+          previewItems.map((item) => {
+            // snapshot 충분 → API 스킵
+            const fromSnapshot = snapshotToEventCard(item.id, item.snapshot);
+            if (fromSnapshot) {
+              if (__DEV__) console.log(`[MyPage][recent] snapshot hit (id=${item.id})`);
+              return Promise.resolve(fromSnapshot);
+            }
+            return eventService.getEventById(item.id);
+          })
         );
         const recents = previewItems
           .map((item, i) => {
             const result = results[i]!;
             if (result.status === 'fulfilled' && result.value != null) return result.value;
-            // API 실패 → snapshot 폴백
-            const snap = item.snapshot;
-            if (!snap) return null;
-            return {
-              id: item.id,
-              title: snap.title || '(제목 없음)',
-              venue: snap.venue || '',
-              venueName: snap.venue || '',
-              region: (snap.region as any) || '기타',
-              category: (snap.mainCategory as any) || '기타',
-              thumbnailUrl: snap.imageUrl || undefined,
-              startAt: snap.startAt || '',
-              endAt: snap.endAt || '',
-              periodText: snap.startAt && snap.endAt ? `${snap.startAt} ~ ${snap.endAt}` : '',
-              description: '', overview: '', tags: [], detailImageUrl: '', detailLink: '',
-            } as EventCardData;
+            // API 실패 + snapshot 없음
+            return null;
           })
           .filter((e): e is EventCardData => e !== null);
         setRecentEvents(recents);

@@ -9,12 +9,13 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { generateHapticFeedback } from '@apps-in-toss/framework';
-import { getLikesV2, toggleLike } from '../utils/storage';
+import { getLikesV2, toggleLike, StoredEventItemV2 } from '../utils/storage';
 import { useAuth } from './useAuth';
 import http from '../lib/http';
 
 interface UseLikeOptions {
   eventId: string | undefined;
+  snapshot?: StoredEventItemV2['snapshot'];
 }
 
 interface UseLikeResult {
@@ -22,7 +23,7 @@ interface UseLikeResult {
   toggle: () => Promise<{ liked: boolean }>;
 }
 
-export function useLike({ eventId }: UseLikeOptions): UseLikeResult {
+export function useLike({ eventId, snapshot }: UseLikeOptions): UseLikeResult {
   const { isLoggedIn } = useAuth();
   const [isLiked, setIsLiked] = useState(false);
 
@@ -37,7 +38,7 @@ export function useLike({ eventId }: UseLikeOptions): UseLikeResult {
   const toggle = useCallback(async (): Promise<{ liked: boolean }> => {
     if (!eventId) return { liked: false };
 
-    const result = await toggleLike(eventId);
+    const result = await toggleLike(eventId, snapshot);
     setIsLiked(result.liked);
     generateHapticFeedback({ type: 'tickWeak' }).catch(() => {});
 
@@ -51,7 +52,7 @@ export function useLike({ eventId }: UseLikeOptions): UseLikeResult {
     }
 
     return { liked: result.liked };
-  }, [eventId, isLoggedIn]);
+  }, [eventId, isLoggedIn, snapshot]);
 
   return { isLiked, toggle };
 }
