@@ -421,10 +421,26 @@ export function pickTodayPickCandidateV2(
     return Math.abs(diff) < 0.01 ? a.event.id.localeCompare(b.event.id) : diff;
   });
 
+  // top-3 일별 로테이션: 매일 다른 base candidate 사용
+  // → 클릭 이력 없는 신규 사용자도 매일 다른 이벤트 노출
+  const rotationPool = sorted.slice(0, Math.min(3, sorted.length));
+  const todayIdx = todaySeed() % rotationPool.length;
+  const rotated = [
+    ...rotationPool.slice(todayIdx),
+    ...rotationPool.slice(0, todayIdx),
+    ...sorted.slice(3), // 나머지 후보는 click exclusion 폴백용
+  ];
+
+  console.log(
+    `[today_pick_v2] rotation pool=${rotationPool.length}` +
+    ` todayIdx=${todayIdx}` +
+    ` base="${rotationPool[todayIdx]!.event.title}"`,
+  );
+
   const picked =
-    sorted.find(c => !recentClickedIds.has(c.event.id)) ??
-    sorted.find(c => !clickedIds.has(c.event.id)) ??
-    sorted[0]!;
+    rotated.find(c => !recentClickedIds.has(c.event.id)) ??
+    rotated.find(c => !clickedIds.has(c.event.id)) ??
+    rotated[0]!;
 
   console.log(
     `[today_pick_v2] picked="${picked.event.title}"` +
