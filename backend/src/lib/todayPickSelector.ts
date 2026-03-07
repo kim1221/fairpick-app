@@ -183,11 +183,12 @@ export function pickTodayPickCandidate(
 // ─────────────────────────────────────────────────────────────
 
 export interface TodayPickScoreBreakdown {
-  buzz: number;       // 0-100
-  distance: number;   // 0-100
-  urgency: number;    // 0-100 (7일 이내 마감만)
-  freshness: number;  // 0-100
-  featuredBoost: number; // 0 or FEATURED_BOOST
+  buzz: number;          // 0-100
+  distance: number;      // 0-100
+  urgency: number;       // 0-100 (7일 이내 마감만)
+  freshness: number;     // 0-100
+  featuredBoost: number; // 0 or FEATURED_BOOST (+12)
+  personalBoost: number; // 카테고리 친화도 가점 (0, +2, +3 / 최대 +5)
   total: number;
 }
 
@@ -292,7 +293,7 @@ function scoreCandidate(
   return {
     event,
     stage,
-    breakdown: { buzz, distance, urgency, freshness, featuredBoost, total: base + featuredBoost },
+    breakdown: { buzz, distance, urgency, freshness, featuredBoost, personalBoost: 0, total: base + featuredBoost },
   };
 }
 
@@ -308,12 +309,13 @@ function logV2(candidates: ScoredTodayPickCandidate[], stage: string): void {
   console.log(`[today_pick_v2] stage=${stage} pool=${candidates.length}`);
   top3.forEach((c, i) => {
     const b = c.breakdown;
+    const personalStr = b.personalBoost > 0 ? ` personal=+${b.personalBoost}` : '';
     console.log(
       `[today_pick_v2]  #${i + 1} "${c.event.title}"` +
       ` total=${b.total.toFixed(1)}` +
       ` (buzz=${b.buzz.toFixed(1)} dist=${b.distance.toFixed(1)}` +
       ` urgency=${b.urgency.toFixed(1)} fresh=${b.freshness.toFixed(1)}` +
-      ` feat=${b.featuredBoost})`,
+      ` feat=${b.featuredBoost}${personalStr})`,
     );
   });
 }
@@ -431,4 +433,52 @@ export function pickTodayPickCandidateV2(
   );
 
   return picked;
+}
+
+// ─────────────────────────────────────────────────────────────
+// V2: 개인화 보정 (카테고리 친화도 기반 소폭 가점)
+//
+// 설계 원칙:
+//   - 강한 개인화 아님 — 알고리즘 점수가 주, 개인화는 보조
+//   - 최근 14일 클릭 카테고리 기준으로 +2~+3 가점
+//   - 총합 최대 +5 제한 (전체 today_pick_score 대비 ~5% 수준)
+//   - 캐시된 풀에 요청마다 메모리에서 적용 (SQL 없음)
+//
+// 미래 확장 (impression 기반 패널티):
+//   - 최근 7일 today_pick 노출 event_id → -5~-10 패널티 예정
+//   - 전제: impression 로그가 충분히 쌓인 후 (현재 미수집)
+//   - 구현 위치: 이 함수에 penaltyIds: Set<string> 파라미터 추가
+// ─────────────────────────────────────────────────────────────
+
+const PERSONAL_BOOST_CAP = 5;
+
+/**
+ * V2 후보 풀에 카테고리 친화도 기반 개인화 가점 적용
+ *
+ * @param candidates  buildTodayPickPoolV2 결과
+ * @param categoryClickCounts  최근 14일 카테고리별 클릭 횟수 (category → count)
+ */
+export function applyPersonalizationV2(
+  candidates: ScoredTodayPickCandidate[],
+  categoryClickCounts: Map<string, number>,
+): ScoredTodayPickCandidate[] {
+  if (categoryClickCounts.size === 0) return candidates;
+
+  return candidates.map((c) => {
+    const clickCount = categoryClickCounts.get(c.event.main_category ?? '') ?? 0;
+    // ≥3회 클릭한 카테고리: +3 / ≥1회: +2 / 없음: 0
+    const rawBoost = clickCount >= 3 ? 3 : clickCount >= 1 ? 2 : 0;
+    const personalBoost = Math.min(rawBoost, PERSONAL_BOOST_CAP);
+
+    if (personalBoost === 0) return c;
+
+    return {
+      ...c,
+      breakdown: {
+        ...c.breakdown,
+        personalBoost,
+        total: c.breakdown.total + personalBoost,
+      },
+    };
+  });
 }

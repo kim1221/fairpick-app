@@ -35,7 +35,7 @@ import * as recommender from './lib/recommender';
 import { calculateConsensusLight, calculateStructuralScore } from './lib/hotScoreCalculator';
 import { calculateDataCompleteness, DataCompletenessScore } from './lib/dataQuality';
 import { embedQuery, toVectorLiteral } from './lib/embeddingService';
-import { buildTodayPickPool, pickTodayPickCandidate, buildTodayPickPoolV2, pickTodayPickCandidateV2, USE_TODAY_PICK_V2, type ScoredTodayPickCandidate } from './lib/todayPickSelector';
+import { buildTodayPickPool, pickTodayPickCandidate, buildTodayPickPoolV2, pickTodayPickCandidateV2, applyPersonalizationV2, USE_TODAY_PICK_V2, type ScoredTodayPickCandidate } from './lib/todayPickSelector';
 
 /**
  * 카테고리별 기본 운영시간 반환
@@ -7471,6 +7471,34 @@ app.get('/api/home/sections', async (req, res) => {
       }
     }
 
+    // 1-b. today_pick 개인화용: 최근 14일 카테고리 클릭 집계
+    const categoryClickCounts = new Map<string, number>();
+    if (userId && USE_TODAY_PICK_V2) {
+      try {
+        const catResult = await pool.query(
+          `SELECT ce.main_category, COUNT(*)::int AS click_count
+           FROM user_events ue
+           JOIN canonical_events ce ON ue.event_id = ce.id
+           WHERE ue.user_id = $1
+             AND ue.action_type = 'click'
+             AND ue.created_at > NOW() - INTERVAL '14 days'
+             AND ce.main_category IS NOT NULL
+           GROUP BY ce.main_category`,
+          [userId as string],
+        );
+        catResult.rows.forEach((r: any) => {
+          categoryClickCounts.set(r.main_category, r.click_count);
+        });
+        if (categoryClickCounts.size > 0) {
+          console.log(
+            `[today_pick_v2] personalization: ${[...categoryClickCounts.entries()].map(([k, v]) => `${k}(${v})`).join(', ')}`,
+          );
+        }
+      } catch {
+        // 실패해도 개인화 없이 진행
+      }
+    }
+
     // 2. 이벤트 풀 캐시 확인 (5분 TTL)
     const cacheKey = getSectionsCacheKey(location);
     const now = Date.now();
@@ -7494,11 +7522,9 @@ app.get('/api/home/sections', async (req, res) => {
       if (pool_.slug === 'today_pick') {
         let pickedEvent: any;
         if (USE_TODAY_PICK_V2) {
-          const picked = pickTodayPickCandidateV2(
-            pool_.rawEvents as ScoredTodayPickCandidate[],
-            recentClickedIds,
-            clickedIds,
-          );
+          const rawCandidates = pool_.rawEvents as ScoredTodayPickCandidate[];
+          const personalized = applyPersonalizationV2(rawCandidates, categoryClickCounts);
+          const picked = pickTodayPickCandidateV2(personalized, recentClickedIds, clickedIds);
           pickedEvent = picked?.event ?? null;
         } else {
           pickedEvent = pickTodayPickCandidate(pool_.rawEvents, recentClickedIds, clickedIds);
