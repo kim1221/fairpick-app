@@ -877,47 +877,47 @@ app.post('/api/user-events', async (req, res) => {
 
     // 3. user_preferences 카테고리 점수 자동 업데이트 (개인화 추천용)
     //    view: +5점 / save: +20점 / unsave: -10점 (최소 0, 최대 100)
+    //    기존 3쿼리 직렬(users 조회 + canonical_events 조회 + UPSERT) →
+    //    CTE 1쿼리로 병합: cat이 빈 결과면 INSERT 실행 안 됨 →
+    //    익명 유저(users 미존재) / category null 두 조건을 SQL 레벨에서 처리
     const scoreDelta =
       actionType === 'save'   ?  20 :
       actionType === 'view'   ?   5 :
       actionType === 'unsave' ? -10 : 0;
 
     if (scoreDelta !== 0) {
-      // users 테이블에 존재하는 사용자만 업데이트 (익명 사용자 FK 에러 방지)
-      const userExists = await pool.query(
-        `SELECT 1 FROM users WHERE id = $1`,
-        [userId]
-      );
-      if (userExists.rows.length > 0) {
-        const eventRow = await pool.query(
-          `SELECT main_category FROM canonical_events WHERE id = $1`,
-          [eventId]
-        );
-        const category: string | undefined = eventRow.rows[0]?.main_category;
-
-        if (category) {
-          await pool.query(
-            `INSERT INTO user_preferences (user_id, category_scores, preferred_tags, last_updated)
-             VALUES ($1, $2::jsonb, ARRAY[]::text[], NOW())
-             ON CONFLICT (user_id) DO UPDATE
-               SET category_scores = (
+      await pool.query(
+        `WITH cat AS (
+           SELECT ce.main_category
+           FROM canonical_events ce
+           WHERE ce.id = $2
+             AND ce.main_category IS NOT NULL
+             AND EXISTS (SELECT 1 FROM users WHERE id = $1)
+         )
+         INSERT INTO user_preferences (user_id, category_scores, preferred_tags, last_updated)
+         SELECT
+           $1,
+           jsonb_build_object((SELECT main_category FROM cat), GREATEST(0, $3::int)),
+           ARRAY[]::text[],
+           NOW()
+         FROM cat
+         ON CONFLICT (user_id) DO UPDATE
+           SET category_scores = (
                  SELECT jsonb_object_agg(
                    key,
                    GREATEST(0, LEAST(100,
                      COALESCE((user_preferences.category_scores->>key)::int, 0)
-                     + CASE WHEN key = $3 THEN $4 ELSE 0 END
+                     + CASE WHEN key = (SELECT main_category FROM cat) THEN $3::int ELSE 0 END
                    ))
                  )
                  FROM jsonb_object_keys(
                    COALESCE(user_preferences.category_scores, '{}'::jsonb)
-                   || jsonb_build_object($3, 0)
+                   || jsonb_build_object((SELECT main_category FROM cat), 0)
                  ) AS key
                ),
                last_updated = NOW()`,
-            [userId, JSON.stringify({ [category]: Math.max(0, scoreDelta) }), category, scoreDelta]
-          );
-        }
-      }
+        [userId, eventId, scoreDelta]
+      );
     }
     
     res.json({
