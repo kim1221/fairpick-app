@@ -40,11 +40,27 @@ import { runAutoFeaturedScore } from './jobs/autoFeaturedScore';
 
 const runningJobs = new Set<string>();
 
+// 네트워크 일시 장애(DNS 실패, 연결 거부 등) 여부 판단
+function isTransientNetworkError(error: any): boolean {
+  const code = error?.code;
+  const message = error?.message || '';
+  return (
+    code === 'ENOTFOUND' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNREFUSED' ||
+    code === 'ECONNRESET' ||
+    code === 'EAI_AGAIN' ||
+    message.includes('getaddrinfo') ||
+    message.includes('connect ETIMEDOUT')
+  );
+}
+
 async function runJobSafely<T = void>(
   jobName: string,
   jobFn: () => Promise<T>,
-  options: { allowConcurrent?: boolean } = {}
+  options: { allowConcurrent?: boolean; retries?: number; retryDelayMs?: number } = {}
 ): Promise<T | undefined> {
+  const { retries = 2, retryDelayMs = 30_000 } = options;
   const jobId = `${jobName}_${Date.now()}`;
   const startTime = Date.now();
   const startISO = new Date().toISOString();
@@ -59,29 +75,42 @@ async function runJobSafely<T = void>(
 
   console.log(`[Scheduler][${jobName}][${jobId}] START (timestamp=${startISO})`);
 
-  try {
-    const result = await jobFn();
-    const durationMs = Date.now() - startTime;
-    const durationSec = (durationMs / 1000).toFixed(1);
-    
-    // 반환값이 숫자면 로깅에 포함 (예: cleaned count)
-    const resultLog = typeof result === 'number' ? ` (result=${result})` : '';
-    console.log(`[Scheduler][${jobName}][${jobId}] SUCCESS (duration=${durationSec}s)${resultLog}`);
-    
-    return result;
-  } catch (error: any) {
-    const durationMs = Date.now() - startTime;
-    const durationSec = (durationMs / 1000).toFixed(1);
-    console.error(`[Scheduler][${jobName}][${jobId}] FAILED (duration=${durationSec}s)`);
-    console.error(`[Scheduler][${jobName}][${jobId}] Error:`, error?.message || String(error));
-    // 에러를 던지지 않고 로깅만 (스케줄러 계속 동작)
-    return undefined;
-  } finally {
-    runningJobs.delete(jobName);
-    const totalDurationMs = Date.now() - startTime;
-    const totalDurationSec = (totalDurationMs / 1000).toFixed(1);
-    console.log(`[Scheduler][${jobName}][${jobId}] END (total_duration=${totalDurationSec}s)`);
+  let lastError: any;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const result = await jobFn();
+      const durationMs = Date.now() - startTime;
+      const durationSec = (durationMs / 1000).toFixed(1);
+      const attemptLog = attempt > 0 ? ` (attempt=${attempt + 1})` : '';
+      const resultLog = typeof result === 'number' ? ` (result=${result})` : '';
+      console.log(`[Scheduler][${jobName}][${jobId}] SUCCESS (duration=${durationSec}s)${attemptLog}${resultLog}`);
+      runningJobs.delete(jobName);
+      return result;
+    } catch (error: any) {
+      lastError = error;
+      const isTransient = isTransientNetworkError(error);
+      if (isTransient && attempt < retries) {
+        console.warn(
+          `[Scheduler][${jobName}][${jobId}] TRANSIENT ERROR (attempt=${attempt + 1}/${retries + 1}), retrying in ${retryDelayMs / 1000}s: ${error?.message}`
+        );
+        await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+        continue;
+      }
+      break;
+    }
   }
+
+  const durationMs = Date.now() - startTime;
+  const durationSec = (durationMs / 1000).toFixed(1);
+  console.error(`[Scheduler][${jobName}][${jobId}] FAILED (duration=${durationSec}s, retries=${retries})`);
+  console.error(`[Scheduler][${jobName}][${jobId}] Error:`, lastError?.message || String(lastError));
+  // 에러를 던지지 않고 로깅만 (스케줄러 계속 동작)
+
+  runningJobs.delete(jobName);
+  const totalDurationMs = Date.now() - startTime;
+  const totalDurationSec = (totalDurationMs / 1000).toFixed(1);
+  console.log(`[Scheduler][${jobName}][${jobId}] END (total_duration=${totalDurationSec}s)`);
+  return undefined;
 }
 
 // ============================================================
