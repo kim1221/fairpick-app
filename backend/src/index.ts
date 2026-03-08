@@ -7491,6 +7491,11 @@ async function buildSectionPools(
           events = await recommender.getBudgetPick(pool, location, limit);
         } else if (theme.slug === 'date_pick') {
           events = await recommender.getDatePick(pool, location, limit);
+        } else if (theme.slug === 'walkable') {
+          // 위치 없으면 빈 배열 → 프런트에서 섹션 자동 숨김
+          events = location
+            ? await recommender.getWalkable(pool, location, limit)
+            : [];
         } else if (config.preset) {
           switch (config.preset as string) {
             case 'ending_soon':
@@ -7620,7 +7625,7 @@ app.get('/api/home/sections', async (req, res) => {
         }
         events = pickedEvent ? [mapEventForFrontend(pickedEvent)].filter(Boolean) : [];
 
-      } else if (pool_.slug === 'this_weekend' || pool_.slug === 'date_pick') {
+      } else if (pool_.slug === 'this_weekend' || pool_.slug === 'date_pick' || pool_.slug === 'walkable') {
         // 상위 섹션 중복 제거 (shownIds 기반)
         const deduped = pool_.rawEvents.filter((e: any) => !shownIds.has(e.id));
 
@@ -7647,7 +7652,7 @@ app.get('/api/home/sections', async (req, res) => {
       }
 
       // 노출 ID 수집 → 이후 섹션(date_pick 등) 중복 제거에 사용
-      if (['today_pick', 'ending_soon', 'trending', 'this_weekend', 'budget_pick'].includes(pool_.slug)) {
+      if (['today_pick', 'ending_soon', 'trending', 'this_weekend', 'budget_pick', 'date_pick', 'walkable'].includes(pool_.slug)) {
         events.forEach((e: any) => { if (e?.id) shownIds.add(e.id); });
       }
 

@@ -864,6 +864,60 @@ export async function getDatePick(
 }
 
 /**
+ * "걸어서 다녀오기 좋은 곳" — 도보권 추천 (walkable)
+ *
+ * 반경 1.5km 고정, 폴백 없음.
+ * - 결과 0개 → 빈 배열 반환 → 프런트에서 섹션 자동 숨김
+ * - 위치 없으면 호출하지 않음 (buildSectionPools에서 스킵)
+ *
+ * 정렬: distance_km ASC 우선 + buzz_score 보조
+ * - "진짜 가까운 순" 이 핵심 가치이므로 거리를 1순위
+ * - buzz_score는 동일 거리대 내 품질 보조 정렬
+ *
+ * 차별성: 기존 getNearby(5→10→20km 폴백)와 완전히 다름
+ * - 의미: "걸어서 갈 수 있는" vs "내 주변"
+ */
+export async function getWalkable(
+  pool: Pool,
+  location: Location,
+  limit: number = 10,
+): Promise<ScoredEvent[]> {
+  const RADIUS_KM = 1.5;
+  const fetchLimit = Math.min(limit * 3, 50);
+
+  const query = `
+    SELECT *,
+      (6371 * acos(LEAST(1.0,
+        cos(radians($1)) * cos(radians(lat)) * cos(radians(lng) - radians($2)) +
+        sin(radians($1)) * sin(radians(lat))
+      ))) AS distance_km
+    FROM canonical_events
+    WHERE is_deleted = false
+      AND status != 'cancelled'
+      AND end_at >= NOW()
+      AND image_url IS NOT NULL
+      AND image_url != ''
+      AND image_url NOT LIKE '%placeholder%'
+      AND image_url NOT LIKE '%/defaults/%'
+      ${buildDistanceFilter(location.lat, location.lng, RADIUS_KM, 1)}
+    ORDER BY
+      is_featured DESC NULLS LAST,
+      distance_km ASC NULLS LAST,
+      buzz_score DESC NULLS LAST,
+      id ASC
+    LIMIT $3
+  `;
+
+  const rows = (await pool.query(query, [location.lat, location.lng, fetchLimit])).rows;
+
+  return rows.map(row => ({
+    ...row,
+    score: row.buzz_score ?? 0,
+    reason: ['도보권 추천'],
+  }));
+}
+
+/**
  * "근처 이벤트" - 거리 기반 (단계적 반경 확장)
  *
  * 반경을 5 → 10 → 20km 순으로 확장하며 최소 MIN_NEARBY개를 확보.
