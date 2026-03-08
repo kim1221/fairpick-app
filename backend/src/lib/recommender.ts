@@ -783,9 +783,13 @@ export async function getBudgetPick(
  * - 단, "가족" 태그 자체는 제외하지 않음
  *   (난타, 센과 치히로 등 성인 커플도 충분히 즐기는 공연 포함)
  *
- * 키즈 시그널 제외: 아이와함께 / 어린이공연 / 어린이뮤지컬 / 어린이
- * - "가족" 태그보다 명확한 키즈 전용 시그널만 SQL 단계에서 제외
- * - 해당 이벤트는 어린이 공연 위주 (~17개, 1.6%)
+ * 키즈 시그널 제외 (2단계):
+ * 1. 태그: 아이와함께 / 어린이공연 / 어린이뮤지컬 / 어린이
+ * 2. 제목: 인어공주 / 신데렐라 / 라푼젤 / 백설공주 / 피터팬 / 피노키오 / 동화 / 알라딘과 요술램프
+ *    - 지역 소극장 순회 어린이 뮤지컬이 태그 없이 통과하는 것을 차단 (~53개)
+ *    - '알라딘' 단독은 제외하지 않음 (성인 대상 뮤지컬 존재)
+ *    - 버블쇼/서커스/매직쇼 계열은 경계 모호 → 2차 검토 보류
+ * - "가족" 태그 단독은 제외하지 않음 (난타, 센과 치히로 등 성인 커플도 충분히 즐기는 공연 보존)
  *
  * 정렬: buzz_score 중심 (인기 있는 데이트 장소 우선)
  * - serve-time click downranking 여유분을 위해 fetchLimit = limit × 3
@@ -823,6 +827,17 @@ export async function getDatePick(
         OR derived_tags @> '["어린이뮤지컬"]'
         OR derived_tags @> '["어린이"]'
       )
+      -- 동화/캐릭터 기반 어린이 뮤지컬 제목 제외 (~53개)
+      -- '알라딘' 단독은 제외하지 않음 (성인 대상 뮤지컬 존재)
+      -- 버블쇼/서커스/매직쇼 계열은 경계 모호 → 2차 검토 보류
+      AND title NOT ILIKE '%인어공주%'
+      AND title NOT ILIKE '%신데렐라%'
+      AND title NOT ILIKE '%라푼젤%'
+      AND title NOT ILIKE '%백설공주%'
+      AND title NOT ILIKE '%피터팬%'
+      AND title NOT ILIKE '%피노키오%'
+      AND title NOT ILIKE '%동화%'
+      AND title NOT ILIKE '%알라딘과 요술램프%'
       AND image_url IS NOT NULL
       AND image_url != ''
       AND image_url NOT LIKE '%placeholder%'
