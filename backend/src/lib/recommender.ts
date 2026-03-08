@@ -770,6 +770,73 @@ export async function getBudgetPick(
 }
 
 /**
+ * "둘이 가기 좋은 곳" — 데이트 추천 (date_pick)
+ *
+ * 후보 풀: derived_tags @> '["데이트"]'
+ * - 1,160개 후보 확인 (2026-03-08 기준)
+ *
+ * 위치 정책: 권역(도시권) 우선 → 결과 부족 시 전국 폴백
+ * - trending / budget_pick과 동일한 getCityZone + buildCityZoneFilter 인프라 사용
+ *
+ * 카테고리 정책: 전시 / 공연 / 팝업 모두 허용
+ * - 데이트 섹션은 비용이 아닌 경험 기준이므로 팝업도 포함
+ *
+ * 정렬: buzz_score 중심 (인기 있는 데이트 장소 우선)
+ * - serve-time click downranking 여유분을 위해 fetchLimit = limit × 3
+ */
+export async function getDatePick(
+  pool: Pool,
+  location?: Location,
+  limit: number = 10,
+): Promise<ScoredEvent[]> {
+  const fetchLimit = Math.min(limit * 3, 50);
+
+  let cityZoneFilter = '';
+  if (location) {
+    try {
+      const address = await reverseGeocode(location.lat, location.lng);
+      const cityZone = getCityZone(address);
+      if (cityZone.length > 0) {
+        cityZoneFilter = buildCityZoneFilter(cityZone);
+      }
+    } catch (error: any) {
+      console.error('[getDatePick] city zone error:', error.message);
+    }
+  }
+
+  const buildQuery = (zoneFilter: string) => `
+    SELECT *
+    FROM canonical_events
+    WHERE is_deleted = false
+      AND status != 'cancelled'
+      AND end_at >= NOW()
+      AND derived_tags @> '["데이트"]'
+      AND image_url IS NOT NULL
+      AND image_url != ''
+      AND image_url NOT LIKE '%placeholder%'
+      AND image_url NOT LIKE '%/defaults/%'
+      ${zoneFilter}
+    ORDER BY is_featured DESC NULLS LAST,
+      buzz_score DESC NULLS LAST,
+      created_at DESC
+    LIMIT $1
+  `;
+
+  let rows = (await pool.query(buildQuery(cityZoneFilter), [fetchLimit])).rows;
+
+  if (cityZoneFilter && rows.length < limit) {
+    console.log(`[getDatePick] 권역 결과 ${rows.length}개 < ${limit} → 전국 폴백`);
+    rows = (await pool.query(buildQuery(''), [fetchLimit])).rows;
+  }
+
+  return rows.map(row => ({
+    ...row,
+    score: row.buzz_score ?? 0,
+    reason: ['데이트 추천'],
+  }));
+}
+
+/**
  * "근처 이벤트" - 거리 기반 (단계적 반경 확장)
  *
  * 반경을 5 → 10 → 20km 순으로 확장하며 최소 MIN_NEARBY개를 확보.

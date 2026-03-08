@@ -7489,6 +7489,8 @@ async function buildSectionPools(
             : await buildTodayPickPool(pool, location);
         } else if (theme.slug === 'budget_pick') {
           events = await recommender.getBudgetPick(pool, location, limit);
+        } else if (theme.slug === 'date_pick') {
+          events = await recommender.getDatePick(pool, location, limit);
         } else if (config.preset) {
           switch (config.preset as string) {
             case 'ending_soon':
@@ -7618,8 +7620,8 @@ app.get('/api/home/sections', async (req, res) => {
         }
         events = pickedEvent ? [mapEventForFrontend(pickedEvent)].filter(Boolean) : [];
 
-      } else if (pool_.slug === 'this_weekend') {
-        // 상위 섹션(today_pick, ending_soon) 중복 제거
+      } else if (pool_.slug === 'this_weekend' || pool_.slug === 'date_pick') {
+        // 상위 섹션 중복 제거 (shownIds 기반)
         const deduped = pool_.rawEvents.filter((e: any) => !shownIds.has(e.id));
 
         // 카테고리 친화도 소폭 가점 (+2~3, 최대 +5)
@@ -7644,8 +7646,8 @@ app.get('/api/home/sections', async (req, res) => {
           .filter(Boolean);
       }
 
-      // today_pick / ending_soon / trending 노출 ID 수집 → 이후 섹션 중복 제거에 사용
-      if (pool_.slug === 'today_pick' || pool_.slug === 'ending_soon' || pool_.slug === 'trending') {
+      // 노출 ID 수집 → 이후 섹션(date_pick 등) 중복 제거에 사용
+      if (['today_pick', 'ending_soon', 'trending', 'this_weekend', 'budget_pick'].includes(pool_.slug)) {
         events.forEach((e: any) => { if (e?.id) shownIds.add(e.id); });
       }
 
