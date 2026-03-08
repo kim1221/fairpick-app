@@ -441,7 +441,7 @@ function HomePage() {
                       rendered.push(
                         <View key="feed-ad" style={{ width: '100%', marginVertical: feedAdRendered ? 8 : 0 }}>
                           <InlineAd
-                            adGroupId="ait-ad-test-native-image-id"
+                            adGroupId="ait.v2.live.b3363cb4c82643e9"
                             impressFallbackOnMount={true}
                             onAdRendered={() => setFeedAdRendered(true)}
                             onAdFailedToRender={() => setFeedAdRendered(false)}

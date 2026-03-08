@@ -407,7 +407,7 @@ function EventDetailPage() {
       <View style={styles.bottomArea}>
         <View style={styles.adBannerContainer}>
           <InlineAd
-            adGroupId="ait-ad-test-banner-id"
+            adGroupId="ait.v2.live.6526c6e693454a28"
             impressFallbackOnMount={true}
           />
         </View>

@@ -721,7 +721,7 @@ function EventDetailPage() {
           {/* 광고가 실제로 로드됐을 때만 96px 공간 차지 */}
           <View style={[styles.adBannerContainer, { height: adRendered ? 96 : 0 }]}>
             <InlineAd
-              adGroupId="ait-ad-test-banner-id"
+              adGroupId="ait.v2.live.6526c6e693454a28"
               impressFallbackOnMount={true}
               onAdRendered={() => setAdRendered(true)}
             />
