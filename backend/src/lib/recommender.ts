@@ -54,24 +54,24 @@ export interface ScoreWeights {
 // ==================== 슬롯 캡 (카테고리 다양성) ====================
 
 /**
- * 카테고리별 최대 노출 수 제한
- * 공연이 93% 물량이라 슬롯 없으면 전 섹션이 공연으로 채워짐
+ * 카테고리별 최대 노출 수 제한 (soft cap — 후보 없으면 해당 슬롯 공백, 2-pass로 보충)
+ * 공연이 90%+ 물량이라 cap 없으면 전 섹션이 공연으로 채워짐
  */
 const TRENDING_SLOT_CAP: Record<string, number> = {
-  '공연': 6,
-  '전시': 2,
+  '공연': 4,
+  '전시': 3,
   '팝업': 1,
 };
 
 const WEEKEND_SLOT_CAP: Record<string, number> = {
-  '공연': 6,
-  '전시': 2,
+  '공연': 4,
+  '전시': 3,
   '팝업': 1,
 };
 
 const ENDING_SOON_SLOT_CAP: Record<string, number> = {
-  '공연': 5,
-  '전시': 3,
+  '공연': 4,
+  '전시': 4,
   '팝업': 1,
 };
 
@@ -80,6 +80,25 @@ const FREE_SLOT_CAP: Record<string, number> = {
   '전시': 3,
   '팝업': 1,
   '기타': 2,
+};
+
+const BUDGET_PICK_SLOT_CAP: Record<string, number> = {
+  '공연': 4,
+  '전시': 4,
+  // 팝업은 SQL에서 이미 제외 (budget_pick 정책)
+  '기타': 2,
+};
+
+const DATE_PICK_SLOT_CAP: Record<string, number> = {
+  '공연': 4,
+  '전시': 3,
+  '팝업': 2,
+};
+
+const WALKABLE_SLOT_CAP: Record<string, number> = {
+  '공연': 4,
+  '전시': 3,
+  '팝업': 2,
 };
 
 const SLOT_CAP_DEFAULT = 1; // 축제, 행사 등 정의되지 않은 카테고리 기본 최대치
@@ -762,11 +781,12 @@ export async function getBudgetPick(
     rows = (await pool.query(buildQuery(''), [MAX_PRICE, fetchLimit])).rows;
   }
 
-  return rows.map(row => ({
+  const scored = rows.map(row => ({
     ...row,
     score: row.decayed_buzz ?? 0,
     reason: ['가성비 추천'],
   }));
+  return applySlotCap(scored, BUDGET_PICK_SLOT_CAP, limit);
 }
 
 /**
@@ -856,11 +876,12 @@ export async function getDatePick(
     rows = (await pool.query(buildQuery(''), [fetchLimit])).rows;
   }
 
-  return rows.map(row => ({
+  const scored = rows.map(row => ({
     ...row,
     score: row.buzz_score ?? 0,
     reason: ['데이트 추천'],
   }));
+  return applySlotCap(scored, DATE_PICK_SLOT_CAP, limit);
 }
 
 /**
@@ -916,11 +937,12 @@ export async function getWalkable(
 
   const rows = (await pool.query(query, [location.lat, location.lng, fetchLimit])).rows;
 
-  return rows.map(row => ({
+  const scored = rows.map(row => ({
     ...row,
     score: row.buzz_score ?? 0,
     reason: ['도보권 추천'],
   }));
+  return applySlotCap(scored, WALKABLE_SLOT_CAP, limit);
 }
 
 /**
