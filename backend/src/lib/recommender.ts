@@ -101,6 +101,13 @@ const WALKABLE_SLOT_CAP: Record<string, number> = {
   '팝업': 2,
 };
 
+const DISCOVERY_SLOT_CAP: Record<string, number> = {
+  '공연': 3,
+  '전시': 4,
+  '팝업': 2,
+  '축제': 1,
+};
+
 const SLOT_CAP_DEFAULT = 1; // 축제, 행사 등 정의되지 않은 카테고리 기본 최대치
 
 /**
@@ -943,6 +950,81 @@ export async function getWalkable(
     reason: ['도보권 추천'],
   }));
   return applySlotCap(scored, WALKABLE_SLOT_CAP, limit);
+}
+
+/**
+ * "먼저 발견하는 곳" — 최근 14일 이내 발견 가치 있는 이벤트 (discovery)
+ *
+ * 컨셉: trending(이미 뜬 것)과 달리 "아직 덜 알려졌지만 먼저 볼 만한 최근 이벤트"
+ *
+ * 점수 공식:
+ *   discover_score = freshness(0~60) + buzz_boost(0~?)
+ *   - freshness = GREATEST(0, 14 - days_since_created) / 14 × 60
+ *     → 오늘 등록(D+0): 60점, 7일 전(D+7): 30점, 14일 전(D+14): 0점
+ *   - buzz_boost = buzz_score × 0.4 (보조 역할만)
+ *
+ * 위치 정책: city zone 권역 우선 → 전국 폴백 (trending/budget_pick 동일 인프라)
+ *
+ * 품질 게이트: 이미지 있음 + 진행/예정 중 + 최근 14일 이내 등록
+ *   - overview 필터 미적용 (최근 14일 중 22개만 → 후보 풀 과소)
+ *
+ * slot cap: 공연 3, 전시 4, 팝업 2, 축제 1 (trending보다 전시/팝업 우대)
+ */
+export async function getDiscovery(
+  pool: Pool,
+  location?: Location,
+  limit: number = 10,
+): Promise<ScoredEvent[]> {
+  const WINDOW_DAYS = 14;
+  const fetchLimit = Math.min(limit * 3, 50);
+
+  let cityZoneFilter = '';
+  if (location) {
+    try {
+      const address = await reverseGeocode(location.lat, location.lng);
+      const cityZone = getCityZone(address);
+      if (cityZone.length > 0) {
+        cityZoneFilter = buildCityZoneFilter(cityZone);
+      }
+    } catch (error: any) {
+      console.error('[getDiscovery] city zone error:', error.message);
+    }
+  }
+
+  const buildQuery = (zoneFilter: string) => `
+    SELECT *,
+      GREATEST(0, ${WINDOW_DAYS} - EXTRACT(DAY FROM NOW() - created_at)::int)
+        / ${WINDOW_DAYS}.0 * 60
+      + COALESCE(buzz_score, 0) * 0.4
+      AS discover_score
+    FROM canonical_events
+    WHERE is_deleted = false
+      AND status != 'cancelled'
+      AND end_at >= NOW()
+      AND created_at >= NOW() - INTERVAL '${WINDOW_DAYS} days'
+      AND image_url IS NOT NULL
+      AND image_url != ''
+      AND image_url NOT LIKE '%placeholder%'
+      AND image_url NOT LIKE '%/defaults/%'
+      ${zoneFilter}
+    ORDER BY discover_score DESC NULLS LAST,
+      created_at DESC
+    LIMIT $1
+  `;
+
+  let rows = (await pool.query(buildQuery(cityZoneFilter), [fetchLimit])).rows;
+
+  if (cityZoneFilter && rows.length < limit) {
+    console.log(`[getDiscovery] 권역 결과 ${rows.length}개 < ${limit} → 전국 폴백`);
+    rows = (await pool.query(buildQuery(''), [fetchLimit])).rows;
+  }
+
+  const scored = rows.map(row => ({
+    ...row,
+    score: row.discover_score ?? 0,
+    reason: ['먼저 발견'],
+  }));
+  return applySlotCap(scored, DISCOVERY_SLOT_CAP, limit);
 }
 
 /**

@@ -7496,6 +7496,8 @@ async function buildSectionPools(
           events = location
             ? await recommender.getWalkable(pool, location, limit)
             : [];
+        } else if (theme.slug === 'discovery') {
+          events = await recommender.getDiscovery(pool, location, fetchLimit);
         } else if (config.preset) {
           switch (config.preset as string) {
             case 'ending_soon':
@@ -7625,6 +7627,14 @@ app.get('/api/home/sections', async (req, res) => {
         }
         events = pickedEvent ? [mapEventForFrontend(pickedEvent)].filter(Boolean) : [];
 
+      } else if (pool_.slug === 'discovery') {
+        // 상위 섹션 중복 제거 (shownIds 기반) — 이미 본 이벤트가 나오면 발견 느낌 약해짐
+        const deduped = pool_.rawEvents.filter((e: any) => !shownIds.has(e.id));
+        // 최근 3일 클릭 다운랭킹 (카테고리 boost 미적용 — discovery 성격상 불필요)
+        events = sampleWithClickDownrank(deduped, pool_.limit, recentClickedIds)
+          .map(mapEventForFrontend)
+          .filter(Boolean);
+
       } else if (pool_.slug === 'this_weekend' || pool_.slug === 'date_pick' || pool_.slug === 'walkable') {
         // 상위 섹션 중복 제거 (shownIds 기반)
         const deduped = pool_.rawEvents.filter((e: any) => !shownIds.has(e.id));
@@ -7652,7 +7662,7 @@ app.get('/api/home/sections', async (req, res) => {
       }
 
       // 노출 ID 수집 → 이후 섹션(date_pick 등) 중복 제거에 사용
-      if (['today_pick', 'ending_soon', 'trending', 'this_weekend', 'budget_pick', 'date_pick', 'walkable'].includes(pool_.slug)) {
+      if (['today_pick', 'ending_soon', 'trending', 'this_weekend', 'budget_pick', 'date_pick', 'walkable', 'discovery'].includes(pool_.slug)) {
         events.forEach((e: any) => { if (e?.id) shownIds.add(e.id); });
       }
 
