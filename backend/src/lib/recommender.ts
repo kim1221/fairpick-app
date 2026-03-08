@@ -870,12 +870,16 @@ export async function getDatePick(
  * - 결과 0개 → 빈 배열 반환 → 프런트에서 섹션 자동 숨김
  * - 위치 없으면 호출하지 않음 (buildSectionPools에서 스킵)
  *
- * 정렬: distance_km ASC 우선 + buzz_score 보조
- * - "진짜 가까운 순" 이 핵심 가치이므로 거리를 1순위
- * - buzz_score는 동일 거리대 내 품질 보조 정렬
+ * 후보 범위: ongoing(현재 진행 중) + 7일 이내 시작 upcoming
+ * - start_at <= NOW() + 7 days로 먼 미래 이벤트 차단
+ * - 사용자 기대: "지금 걸어갈 수 있거나 곧 시작하는 곳"
+ *
+ * 정렬: ongoing 우선 → distance_km ASC → buzz_score 보조
+ * - ongoing(start_at <= NOW())을 항상 상단에, upcoming을 뒤쪽에
+ * - 동일 그룹 내에서는 가까운 순
  *
  * 차별성: 기존 getNearby(5→10→20km 폴백)와 완전히 다름
- * - 의미: "걸어서 갈 수 있는" vs "내 주변"
+ * - 의미: "지금/곧 걸어서 갈 수 있는" vs "내 주변 어딘가"
  */
 export async function getWalkable(
   pool: Pool,
@@ -895,6 +899,7 @@ export async function getWalkable(
     WHERE is_deleted = false
       AND status != 'cancelled'
       AND end_at >= NOW()
+      AND start_at <= NOW() + INTERVAL '7 days'
       AND image_url IS NOT NULL
       AND image_url != ''
       AND image_url NOT LIKE '%placeholder%'
@@ -902,6 +907,7 @@ export async function getWalkable(
       ${buildDistanceFilter(location.lat, location.lng, RADIUS_KM, 1)}
     ORDER BY
       is_featured DESC NULLS LAST,
+      CASE WHEN start_at <= NOW() THEN 0 ELSE 1 END ASC,
       distance_km ASC NULLS LAST,
       buzz_score DESC NULLS LAST,
       id ASC
