@@ -773,13 +773,19 @@ export async function getBudgetPick(
  * "둘이 가기 좋은 곳" — 데이트 추천 (date_pick)
  *
  * 후보 풀: derived_tags @> '["데이트"]'
- * - 1,160개 후보 확인 (2026-03-08 기준)
+ * - 1,037개 후보 (2026-03-08 기준, 키즈 제외 후 ~1,020개)
  *
  * 위치 정책: 권역(도시권) 우선 → 결과 부족 시 전국 폴백
  * - trending / budget_pick과 동일한 getCityZone + buildCityZoneFilter 인프라 사용
  *
  * 카테고리 정책: 전시 / 공연 / 팝업 모두 허용
  * - 데이트 섹션은 비용이 아닌 경험 기준이므로 팝업도 포함
+ * - 단, "가족" 태그 자체는 제외하지 않음
+ *   (난타, 센과 치히로 등 성인 커플도 충분히 즐기는 공연 포함)
+ *
+ * 키즈 시그널 제외: 아이와함께 / 어린이공연 / 어린이뮤지컬 / 어린이
+ * - "가족" 태그보다 명확한 키즈 전용 시그널만 SQL 단계에서 제외
+ * - 해당 이벤트는 어린이 공연 위주 (~17개, 1.6%)
  *
  * 정렬: buzz_score 중심 (인기 있는 데이트 장소 우선)
  * - serve-time click downranking 여유분을 위해 fetchLimit = limit × 3
@@ -811,6 +817,12 @@ export async function getDatePick(
       AND status != 'cancelled'
       AND end_at >= NOW()
       AND derived_tags @> '["데이트"]'
+      AND NOT (
+        derived_tags @> '["아이와함께"]'
+        OR derived_tags @> '["어린이공연"]'
+        OR derived_tags @> '["어린이뮤지컬"]'
+        OR derived_tags @> '["어린이"]'
+      )
       AND image_url IS NOT NULL
       AND image_url != ''
       AND image_url NOT LIKE '%placeholder%'
