@@ -3254,6 +3254,7 @@ app.get('/events', async (req, res) => {
               COALESCE(popularity_score, 0)    AS popularity_score,
               COALESCE(is_ending_soon, false)  AS is_ending_soon,
               COALESCE(is_free, false)         AS is_free,
+              COALESCE(derived_tags, '[]'::jsonb) AS derived_tags,
               embedding
             FROM canonical_events
             ${where}
@@ -3274,6 +3275,7 @@ app.get('/events', async (req, res) => {
               popularity_score AS "popularityScore",
               is_ending_soon   AS "isEndingSoon",
               is_free          AS "isFree",
+              derived_tags     AS "derivedTags",
               embedding::halfvec(3072) <=> $${embeddingIdx}::halfvec(3072) AS vector_dist,
               COUNT(*) OVER () AS total_count
             FROM candidates
@@ -3283,6 +3285,7 @@ app.get('/events', async (req, res) => {
             "startAt", "endAt", region, "mainCategory", "subCategory",
             "imageUrl", "sourcePriorityWinner", address, lat, lng,
             "buzzScore", "popularityScore", "isEndingSoon", "isFree",
+            "derivedTags",
             total_count
           FROM scored
           ORDER BY vector_dist ASC, "buzzScore" DESC
@@ -3327,6 +3330,7 @@ app.get('/events', async (req, res) => {
                 COALESCE(popularity_score, 0)   AS popularity_score,
                 COALESCE(is_ending_soon, false)  AS is_ending_soon,
                 COALESCE(is_free, false)         AS is_free,
+                COALESCE(derived_tags, '[]'::jsonb) AS derived_tags,
                 embedding::halfvec(3072) <=> $${pvEmbIdx}::halfvec(3072) AS vector_dist,
                 ROW_NUMBER() OVER (
                   PARTITION BY COALESCE(content_key, canonical_key, id::text)
@@ -3349,6 +3353,7 @@ app.get('/events', async (req, res) => {
                 popularity_score AS "popularityScore",
                 is_ending_soon   AS "isEndingSoon",
                 is_free          AS "isFree",
+                derived_tags     AS "derivedTags",
                 vector_dist,
                 COUNT(*) OVER () AS total_count
               FROM ranked
@@ -3359,6 +3364,7 @@ app.get('/events', async (req, res) => {
               region, "mainCategory", "subCategory", "imageUrl", "sourcePriorityWinner",
               address, lat, lng,
               "buzzScore", "popularityScore", "isEndingSoon", "isFree",
+              "derivedTags",
               total_count
             FROM deduped
             ORDER BY vector_dist ASC
@@ -3402,6 +3408,7 @@ app.get('/events', async (req, res) => {
             COALESCE(popularity_score, 0)  AS popularity_score,
             COALESCE(is_ending_soon, false) AS is_ending_soon,
             COALESCE(is_free, false)        AS is_free,
+            COALESCE(derived_tags, '[]'::jsonb) AS derived_tags,
             ROW_NUMBER() OVER (
               PARTITION BY COALESCE(content_key, canonical_key, id::text)
               ORDER BY
@@ -3420,7 +3427,8 @@ app.get('/events', async (req, res) => {
           created_at AS "createdAt",
           popularity_score AS "popularityScore",
           is_ending_soon AS "isEndingSoon",
-          is_free AS "isFree"
+          is_free AS "isFree",
+          derived_tags AS "derivedTags"
         FROM ranked
         WHERE rn = 1
         ORDER BY ${sortField} ${sortOrder}, id ASC
