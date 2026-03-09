@@ -4788,6 +4788,7 @@ app.get('/geo/reverse', async (req, res) => {
       headers: {
         Authorization: `KakaoAK ${config.kakaoRestApiKey}`,
       },
+      timeout: 5000,
     });
 
     console.log('[GeoReverse] kakao status', response.status);
