@@ -1082,13 +1082,19 @@ export async function getBeginner(
       AND NOT (
         derived_tags @> '["클래식"]' OR derived_tags @> '["오케스트라"]' OR
         derived_tags @> '["국악"]'    OR derived_tags @> '["리사이틀"]'  OR
-        derived_tags @> '["실내악"]'  OR derived_tags @> '["음악제"]'
+        derived_tags @> '["실내악"]'  OR derived_tags @> '["음악제"]'   OR
+        derived_tags @> '["공포"]'
       )
       AND NOT (
         derived_tags @> '["아이와함께"]'  OR
         derived_tags @> '["어린이공연"]'  OR
         derived_tags @> '["어린이뮤지컬"]'
       )
+      -- 태그 없이 제목으로만 판별되는 클래식 독주회 계열 차단
+      -- (AI가 클래식/리사이틀 태그 대신 전통적인/조용한으로 분류한 경우)
+      AND title NOT ILIKE '%독주회%'
+      AND title NOT ILIKE '%독창회%'
+      AND title NOT ILIKE '%리사이틀%'
       AND image_url IS NOT NULL
       AND image_url != ''
       AND image_url NOT LIKE '%placeholder%'
