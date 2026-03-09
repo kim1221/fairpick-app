@@ -657,7 +657,7 @@ function ExplorePage() {
 
   // ─── API URL 빌더 ───────────────────────────────
   const buildApiUrl = () => {
-    let endpoint = '/events';
+    const endpoint = '/events';
     const params = new URLSearchParams();
     let sortBy = 'created_at';
     let order = 'desc';
@@ -667,8 +667,6 @@ function ExplorePage() {
       if (preset) {
         sortBy = preset.preset.sort;
         order = preset.preset.order;
-        if (preset.id === 'free') endpoint = '/events/free';
-        else if (preset.id === 'ending_soon') endpoint = '/events/ending';
         Object.entries(preset.preset.filters).forEach(([key, value]) => {
           if (value !== undefined && value !== null) params.append(key, String(value));
         });
