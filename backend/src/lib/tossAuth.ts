@@ -83,7 +83,7 @@ export async function generateTossToken(
   const { data } = await axios.post<TossResponse<TossTokens>>(
     `${BASE}/api-partner/v1/apps-in-toss/user/oauth2/generate-token`,
     { authorizationCode, referrer },
-    { headers: { 'Content-Type': 'application/json' }, httpsAgent: mtlsAgent }
+    { headers: { 'Content-Type': 'application/json' }, httpsAgent: mtlsAgent, timeout: 10000 }
   );
   return unwrap(data, 'generateTossToken');
 }
@@ -99,7 +99,7 @@ export async function refreshTossToken(refreshToken: string): Promise<TossTokens
   const { data } = await axios.post<TossResponse<TossTokens>>(
     `${BASE}/api-partner/v1/apps-in-toss/user/oauth2/refresh-token`,
     { refreshToken },
-    { headers: { 'Content-Type': 'application/json' }, httpsAgent: mtlsAgent }
+    { headers: { 'Content-Type': 'application/json' }, httpsAgent: mtlsAgent, timeout: 10000 }
   );
   return unwrap(data, 'refreshTossToken');
 }
@@ -117,6 +117,7 @@ export async function getTossUser(accessToken: string): Promise<TossUserInfo> {
     {
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       httpsAgent: mtlsAgent,
+      timeout: 10000,
     }
   );
   const raw = unwrap(data, 'getTossUser');
@@ -140,6 +141,7 @@ export async function revokeTossToken(accessToken: string): Promise<void> {
     {
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       httpsAgent: mtlsAgent,
+      timeout: 10000,
     }
   );
   // 연결 해제는 SUCCESS가 아니어도 무시 (이미 해제된 경우 등)

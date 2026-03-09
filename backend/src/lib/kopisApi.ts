@@ -66,6 +66,7 @@ export async function getKopisBoxOfficeList(
         date: date,
         catecode: genre,
       },
+      timeout: 10000,
     });
 
     // XML → JSON 변환
@@ -182,6 +183,7 @@ export async function getKopisPerformanceDetail(kopisId: string): Promise<any> {
       params: {
         service: serviceKey,
       },
+      timeout: 10000,
     });
 
     const parser = new xml2js.Parser({ explicitArray: false });

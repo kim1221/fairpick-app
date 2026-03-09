@@ -107,6 +107,7 @@ export async function searchNaverBlog(
           'X-Naver-Client-Id': clientId,
           'X-Naver-Client-Secret': clientSecret,
         },
+        timeout: 5000,
       }
     );
 
@@ -154,6 +155,7 @@ export async function searchNaverWeb(
           'X-Naver-Client-Id': clientId,
           'X-Naver-Client-Secret': clientSecret,
         },
+        timeout: 5000,
       }
     );
 
@@ -201,6 +203,7 @@ export async function searchNaverPlace(
           'X-Naver-Client-Id': clientId,
           'X-Naver-Client-Secret': clientSecret,
         },
+        timeout: 5000,
       }
     );
 
@@ -249,6 +252,7 @@ export async function searchNaverCafe(
           'X-Naver-Client-Id': clientId,
           'X-Naver-Client-Secret': clientSecret,
         },
+        timeout: 5000,
       }
     );
 

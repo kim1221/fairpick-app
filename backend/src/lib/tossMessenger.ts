@@ -84,6 +84,7 @@ export async function sendMessage(
         'X-Toss-User-Key': String(tossUserKey),
       },
       httpsAgent: tossHttpAgent,
+      timeout: 10000,
     }
   );
 
@@ -121,6 +122,7 @@ export async function sendTestMessage(
         'X-Toss-User-Key': String(tossUserKey),
       },
       httpsAgent: tossHttpAgent,
+      timeout: 10000,
     }
   );
 
