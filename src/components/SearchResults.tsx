@@ -374,7 +374,7 @@ export default function SearchResults({
           <View style={styles.resultCountGroup}>
             <Txt typography="t6" style={styles.resultCount}>
               {isVectorSearch
-                ? `연관 추천 ${totalCount.toLocaleString()}개`
+                ? `비슷한 결과 포함 ${totalCount.toLocaleString()}개`
                 : `총 ${totalCount.toLocaleString()}개`}
             </Txt>
             {isVectorSearch && (
