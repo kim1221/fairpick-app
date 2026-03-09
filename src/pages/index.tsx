@@ -316,14 +316,6 @@ function HomePage() {
       }
       return undefined;
     }
-    if (slug === 'discovery') {
-      const createdAt = (event as any).created_at as string | undefined;
-      if (!createdAt) return undefined;
-      const days = Math.floor((Date.now() - new Date(createdAt).getTime()) / 86400000);
-      if (days === 0) return { label: '오늘 등록', color: '#6B7280' };
-      if (days === 1) return { label: '어제 등록', color: '#6B7280' };
-      return { label: `${days}일 전 등록`, color: '#6B7280' };
-    }
     if (slug === 'ending_soon') {
       if (!event.end_date) return undefined;
       const days = Math.ceil((new Date(event.end_date).getTime() - Date.now()) / 86400000);
