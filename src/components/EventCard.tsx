@@ -8,8 +8,10 @@ import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, ViewStyle } from 'react-native';
 import type { ScoredEvent } from '../types/recommendation';
 import { useAdaptive } from '@toss/tds-react-native/private';
+import { IconButton } from '@toss/tds-react-native';
 import { formatEventPeriodHuman, getDateUrgency, type DateUrgency } from '../lib/dateUtils';
 import { Analytics } from '@apps-in-toss/framework';
+import { useLike } from '../hooks/useLike';
 
 // ==================== 타입 정의 ====================
 
@@ -17,6 +19,8 @@ interface EventCardProps {
   event: ScoredEvent;
   onPress: (eventId: string) => void;
   variant?: 'default' | 'large' | 'small' | 'horizontal';
+  contextLabel?: string;       // 섹션별 핵심 신호 (예: "무료", "D-3", "5일 전 등록")
+  contextLabelColor?: string;  // 신호 텍스트 색상
 }
 
 // ==================== 헬퍼 함수 ====================
@@ -146,6 +150,17 @@ const staticStyles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
+  },
+  smallLikeButton: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    borderRadius: 14,
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   contentLarge: {
     padding: 16,
@@ -284,13 +299,21 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     color: a.grey500,
     marginTop: 4,
   },
+
+  // 섹션별 신호 라벨 (budget_pick 가격, discovery 등록일, ending_soon D-N)
+  contextLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
 });
 
 // ==================== 메인 컴포넌트 ====================
 
-export const EventCard: React.FC<EventCardProps> = ({ event, onPress, variant = 'default' }) => {
+export const EventCard: React.FC<EventCardProps> = ({ event, onPress, variant = 'default', contextLabel, contextLabelColor }) => {
   const adaptive = useAdaptive();
   const styles = useMemo(() => createStyles(adaptive), [adaptive]);
+  const { isLiked, toggle } = useLike({ eventId: event.id });
 
   const dateUrgency = useMemo(
     () => getDateUrgency(event.start_date, event.end_date),
@@ -334,6 +357,19 @@ export const EventCard: React.FC<EventCardProps> = ({ event, onPress, variant = 
           <Text style={styles.regionBadgeText}>{event.region}</Text>
         </View>
       )}
+
+      {/* small 카드 전용 찜 버튼 */}
+      {variant === 'small' && (
+        <IconButton
+          name="icon-heart-mono"
+          variant="clear"
+          iconSize={13}
+          color={isLiked ? adaptive.red500 : adaptive.grey300}
+          style={staticStyles.smallLikeButton}
+          onPress={toggle}
+          hitSlop={8}
+        />
+      )}
     </View>
   );
 
@@ -344,8 +380,12 @@ export const EventCard: React.FC<EventCardProps> = ({ event, onPress, variant = 
         {event.title}
       </Text>
 
-      {/* 태그/이유 */}
-      {event.reason && event.reason.length > 0 && (
+      {/* 섹션별 핵심 신호 (budget_pick 가격, discovery 등록일, ending_soon D-N) */}
+      {contextLabel ? (
+        <Text style={[styles.contextLabel, { color: contextLabelColor ?? adaptive.grey500 }]}>
+          {contextLabel}
+        </Text>
+      ) : event.reason && event.reason.length > 0 ? (
         <View style={staticStyles.tagsContainer}>
           {event.reason.slice(0, 3).map((tag, idx) => (
             <View key={idx} style={styles.tag}>
@@ -353,7 +393,7 @@ export const EventCard: React.FC<EventCardProps> = ({ event, onPress, variant = 
             </View>
           ))}
         </View>
-      )}
+      ) : null}
 
       {/* 날짜 — 긴박도에 따라 색상·굵기 변화 */}
       <Text style={[styles.metaText, { color: dateColor, fontWeight: dateFontWeight }]}>

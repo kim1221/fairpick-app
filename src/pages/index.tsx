@@ -301,6 +301,41 @@ function HomePage() {
   };
 
   // ─────────────────────────────────────────────────────────────
+  // 섹션별 핵심 신호 계산
+  // budget_pick: 가격  /  discovery: 등록일  /  ending_soon: D-N
+  // ─────────────────────────────────────────────────────────────
+
+  const getSectionSignal = (slug: string, event: ScoredEvent): { label: string; color: string } | undefined => {
+    if (slug === 'budget_pick') {
+      if ((event as any).is_free) return { label: '무료', color: '#22C55E' };
+      const priceMin = (event as any).price_min as number | null;
+      if (priceMin != null) {
+        if (priceMin <= 10000) return { label: '1만원 이하', color: '#22C55E' };
+        const manWon = Math.round(priceMin / 10000);
+        return { label: `${manWon}만원대`, color: '#6B7280' };
+      }
+      return undefined;
+    }
+    if (slug === 'discovery') {
+      const createdAt = (event as any).created_at as string | undefined;
+      if (!createdAt) return undefined;
+      const days = Math.floor((Date.now() - new Date(createdAt).getTime()) / 86400000);
+      if (days === 0) return { label: '오늘 등록', color: '#6B7280' };
+      if (days === 1) return { label: '어제 등록', color: '#6B7280' };
+      return { label: `${days}일 전 등록`, color: '#6B7280' };
+    }
+    if (slug === 'ending_soon') {
+      if (!event.end_date) return undefined;
+      const days = Math.ceil((new Date(event.end_date).getTime() - Date.now()) / 86400000);
+      if (days <= 0) return { label: '오늘 마감', color: '#FF3B30' };
+      if (days <= 3) return { label: `D-${days}`, color: '#FF3B30' };
+      if (days <= 7) return { label: `D-${days}`, color: '#FF9500' };
+      return { label: `D-${days}`, color: '#6B7280' };
+    }
+    return undefined;
+  };
+
+  // ─────────────────────────────────────────────────────────────
   // 섹션 렌더링 (slug에 따라 레이아웃 결정)
   // ─────────────────────────────────────────────────────────────
 
@@ -341,14 +376,19 @@ function HomePage() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.horizontalList}
         >
-          {events.map((event, idx) => (
-            <EventCard
-              key={event.id}
-              event={event}
-              onPress={(id) => handleEventPress(id, slug, idx + 1)}
-              variant="small"
-            />
-          ))}
+          {events.map((event, idx) => {
+            const signal = getSectionSignal(slug, event);
+            return (
+              <EventCard
+                key={event.id}
+                event={event}
+                onPress={(id) => handleEventPress(id, slug, idx + 1)}
+                variant="small"
+                contextLabel={signal?.label}
+                contextLabelColor={signal?.color}
+              />
+            );
+          })}
         </ScrollView>
       </View>
     );
