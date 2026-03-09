@@ -58,7 +58,28 @@ export const Route = createRoute('/explore', {
 // ─────────────────────────────────────────────────
 // 퀵 필터 프리셋
 // ─────────────────────────────────────────────────
-const QUICK_FILTERS = [
+type QuickFilterId = 'ending_soon' | 'new' | 'free' | 'hot';
+type QuickFilterSort = 'end_at' | 'created_at' | 'buzz_score';
+
+// /events 엔드포인트가 실제 수용하는 파라미터와 1:1 대응
+interface QuickFilterPresetFilters {
+  is_ending_soon?: true;
+  is_free?: true;
+  created_after?: '7d' | '3d';
+  buzz_min?: number;
+}
+
+interface QuickFilter {
+  id: QuickFilterId;
+  label: string;
+  preset: {
+    sort: QuickFilterSort;
+    order: 'asc' | 'desc';
+    filters: QuickFilterPresetFilters;
+  };
+}
+
+const QUICK_FILTERS: QuickFilter[] = [
   {
     id: 'ending_soon',
     label: '마감임박',
@@ -79,7 +100,7 @@ const QUICK_FILTERS = [
     label: '인기',
     preset: { sort: 'buzz_score', order: 'desc', filters: { buzz_min: 30 } },
   },
-] as const;
+];
 
 // ─────────────────────────────────────────────────
 // 카테고리: 전체가 맨 앞
