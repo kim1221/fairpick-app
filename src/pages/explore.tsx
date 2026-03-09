@@ -42,6 +42,7 @@ interface EventsApiResponse {
     buzzScore?: number;
     isEndingSoon?: boolean;
     isFree?: boolean;
+    derivedTags?: string[];
   }>;
   pageInfo: {
     page: number;
@@ -274,6 +275,13 @@ function createStyles(a: Adaptive) {
     },
     cardInfo: {
       padding: 8,
+      minHeight: 80,
+    },
+    reasonLabel: {
+      fontSize: 11,
+      color: a.blue500,
+      fontWeight: '500' as const,
+      marginTop: 4,
     },
     likeButton: {
       position: 'absolute',
@@ -480,6 +488,45 @@ function buildExploreCacheKey(filters: ActiveFilters): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────
+// reason label: isFree → isEndingSoon → derivedTags 순 우선순위
+// ─────────────────────────────────────────────────
+const TAG_LABEL_MAP: Record<string, string> = {
+  '데이트':    '데이트 추천',
+  '이색데이트': '데이트 추천',
+  '가족':      '가족과 보기 좋아요',
+  '아이와함께': '아이와 보기 좋아요',
+  '혼자':      '혼자 가기 좋아요',
+  '주말추천':  '주말에 딱 좋아요',
+  '사진맛집':  '사진 찍기 좋아요',
+  '힐링':      '힐링하기 좋아요',
+};
+
+function getReasonLabel(item: EventCardData): string | null {
+  // 1순위: 무료
+  if (item.isFree) return '무료 관람 가능';
+
+  // 2순위: 마감임박 (00:00 기준 D-N)
+  if (item.isEndingSoon && item.endAt) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const end = new Date(item.endAt);
+    end.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays <= 0) return '오늘 종료';
+    return `D-${diffDays} 마감`;
+  }
+
+  // 3순위: derivedTags 매핑 (배열 순서대로 첫 매칭)
+  if (item.derivedTags) {
+    for (const tag of item.derivedTags) {
+      if (TAG_LABEL_MAP[tag]) return TAG_LABEL_MAP[tag];
+    }
+  }
+
+  return null;
+}
+
+// ─────────────────────────────────────────────────
 // 그리드 카드 — useLike 훅 사용을 위해 별도 컴포넌트
 // ─────────────────────────────────────────────────
 function GridCard({ item, onPress }: { item: EventCardData; onPress: (id: string) => void }) {
@@ -492,6 +539,8 @@ function GridCard({ item, onPress }: { item: EventCardData; onPress: (id: string
   if (item.isEndingSoon) badges.push({ text: '마감임박' });
   if ((item.buzzScore ?? 0) >= 70 && badges.length === 0) badges.push({ text: '인기' });
   const visibleBadges = badges.slice(0, 2);
+
+  const reasonLabel = getReasonLabel(item);
 
   return (
     <Pressable style={styles.gridCard} onPress={() => onPress(item.id)}>
@@ -527,6 +576,9 @@ function GridCard({ item, onPress }: { item: EventCardData; onPress: (id: string
           <Icon name="icon-calendar-check-mono" size={11} color={adaptive.grey500} />
           <Text style={[styles.cardMeta, { flex: 1 }]} numberOfLines={1}>{item.periodText}</Text>
         </View>
+        {reasonLabel && (
+          <Text style={styles.reasonLabel} numberOfLines={1}>{reasonLabel}</Text>
+        )}
       </View>
     </Pressable>
   );
@@ -673,6 +725,7 @@ function ExplorePage() {
       buzzScore: item.buzzScore,
       isEndingSoon: item.isEndingSoon,
       isFree: item.isFree,
+      derivedTags: item.derivedTags,
     };
   };
 

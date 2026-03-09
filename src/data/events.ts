@@ -101,6 +101,7 @@ export interface EventCardData {
   registrationDeadline?: string;  // 등록 마감일 [Tier 1]
   targetAudience?: string;        // 참가 대상 [Tier 2]
   eventCapacity?: string;         // 정원 [Tier 2]
+  derivedTags?: string[];         // AI 분석 태그 (reason label 용)
 }
 
 export const EVENT_CATEGORIES: EventCategory[] = ['전체', '축제', '공연', '행사', '전시'];
