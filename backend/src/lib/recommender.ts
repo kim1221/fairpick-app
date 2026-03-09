@@ -109,8 +109,8 @@ const DISCOVERY_SLOT_CAP: Record<string, number> = {
 };
 
 const BEGINNER_SLOT_CAP: Record<string, number> = {
-  '공연': 3,
-  '전시': 5,
+  '공연': 4,
+  '전시': 3,
   '팝업': 1,
   '축제': 1,
 };
