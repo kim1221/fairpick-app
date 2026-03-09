@@ -93,27 +93,35 @@ const CATEGORIES = [
 ] as const;
 
 // ─────────────────────────────────────────────────
-// 지역 목록 (DB 기준 활성 이벤트 수, 인기순 정렬)
+// 지역 목록 (실데이터: /events/region-counts, TTL 30분)
 // ─────────────────────────────────────────────────
-const REGION_LIST = [
-  { value: '서울', count: 854 },
-  { value: '경기', count: 381 },
-  { value: '부산', count: 129 },
-  { value: '대구', count: 108 },
-  { value: '인천', count: 107 },
-  { value: '대전', count: 91 },
-  { value: '경남', count: 89 },
-  { value: '충남', count: 83 },
-  { value: '경북', count: 65 },
-  { value: '강원', count: 61 },
-  { value: '광주', count: 60 },
-  { value: '전북', count: 50 },
-  { value: '울산', count: 46 },
-  { value: '전남', count: 32 },
-  { value: '충북', count: 32 },
-  { value: '제주', count: 23 },
-  { value: '세종', count: 20 },
+interface RegionItem {
+  value: string;
+  count: number;
+}
+
+const REGION_LIST_FALLBACK: RegionItem[] = [
+  { value: '서울', count: 0 },
+  { value: '경기', count: 0 },
+  { value: '부산', count: 0 },
+  { value: '대구', count: 0 },
+  { value: '인천', count: 0 },
+  { value: '대전', count: 0 },
+  { value: '경남', count: 0 },
+  { value: '충남', count: 0 },
+  { value: '경북', count: 0 },
+  { value: '강원', count: 0 },
+  { value: '광주', count: 0 },
+  { value: '전북', count: 0 },
+  { value: '울산', count: 0 },
+  { value: '전남', count: 0 },
+  { value: '충북', count: 0 },
+  { value: '제주', count: 0 },
+  { value: '세종', count: 0 },
 ];
+
+const REGION_COUNTS_CACHE_TTL_MS = 30 * 60 * 1000;
+let _regionCountsCache: { data: RegionItem[]; expiresAt: number } | null = null;
 
 interface ActiveFilters {
   quickFilter: string | null;
@@ -541,6 +549,11 @@ function ExplorePage() {
   const [hasMore, setHasMore] = useState(true);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [showRegionSheet, setShowRegionSheet] = useState(false);
+  const [regionList, setRegionList] = useState<RegionItem[]>(
+    _regionCountsCache && Date.now() < _regionCountsCache.expiresAt
+      ? _regionCountsCache.data
+      : REGION_LIST_FALLBACK
+  );
 
   // ── 스크롤 반응형 헤더 (translateY + useNativeDriver) ──────────────
   const filterTranslateY = useRef(new Animated.Value(0)).current;
@@ -755,6 +768,20 @@ function ExplorePage() {
     if (page > 0) loadEvents(page, false);
   }, [page]);
 
+  // ─── 지역 이벤트 수 실데이터 fetch (30분 TTL) ──
+  useEffect(() => {
+    if (_regionCountsCache && Date.now() < _regionCountsCache.expiresAt) return;
+    fetch(`${API_BASE_URL}/events/region-counts`)
+      .then(r => r.json())
+      .then((res: { regions: RegionItem[] }) => {
+        _regionCountsCache = { data: res.regions, expiresAt: Date.now() + REGION_COUNTS_CACHE_TTL_MS };
+        setRegionList(res.regions);
+      })
+      .catch(() => {
+        // 실패 시 fallback(count: 0) 유지
+      });
+  }, []);
+
   const handleLoadMore = () => {
     if (!loading && hasMore) setPage(prev => prev + 1);
   };
@@ -933,7 +960,7 @@ function ExplorePage() {
             {!activeFilters.region && <Icon name="icon-check-mono" size={16} color={adaptive.blue500} />}
           </Pressable>
 
-          {REGION_LIST.map(({ value, count }) => (
+          {regionList.map(({ value, count }) => (
             <Pressable
               key={value}
               style={styles.regionSheetItem}
@@ -943,7 +970,9 @@ function ExplorePage() {
                 {value}
               </Text>
               <View style={styles.regionSheetRight}>
-                <Text style={styles.regionCountText}>{count.toLocaleString()}개</Text>
+                {count > 0 && (
+                  <Text style={styles.regionCountText}>{count.toLocaleString()}개</Text>
+                )}
                 {activeFilters.region === value && (
                   <Icon name="icon-check-mono" size={16} color={adaptive.blue500} />
                 )}

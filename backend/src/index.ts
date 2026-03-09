@@ -3064,6 +3064,32 @@ app.get('/categories', (_, res) => {
   res.json(categories);
 });
 
+// ── 지역별 활성 이벤트 수 ──────────────────────────────────────────────────
+let _regionCountsCache: { data: { value: string; count: number }[]; expiresAt: number } | null = null;
+const REGION_COUNTS_TTL_MS = 30 * 60 * 1000;
+
+app.get('/events/region-counts', async (_req, res) => {
+  try {
+    if (_regionCountsCache && Date.now() < _regionCountsCache.expiresAt) {
+      return res.json({ regions: _regionCountsCache.data });
+    }
+    const result = await pool.query<{ value: string; count: number }>(`
+      SELECT region AS value, COUNT(*)::int AS count
+      FROM canonical_events
+      WHERE is_deleted = false
+        AND end_at >= CURRENT_DATE
+        AND region IS NOT NULL AND region != ''
+      GROUP BY region
+      ORDER BY count DESC
+    `);
+    _regionCountsCache = { data: result.rows, expiresAt: Date.now() + REGION_COUNTS_TTL_MS };
+    return res.json({ regions: result.rows });
+  } catch (error) {
+    console.error('[API] /events/region-counts failed', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.get('/events', async (req, res) => {
   const startTime = startTimer();
   const requestTs = nowIso();
