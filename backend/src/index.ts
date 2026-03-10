@@ -1172,22 +1172,47 @@ app.post(
 // Admin: 대시보드 통계
 app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
   try {
-    const statsResult = await pool.query(`
-      SELECT
-        (SELECT COUNT(*) FROM canonical_events WHERE is_deleted = false) AS "totalEvents",
-        (SELECT COUNT(*) FROM canonical_events WHERE is_featured = true AND is_deleted = false) AS "featuredCount",
-        (SELECT COUNT(*) FROM canonical_events WHERE updated_at >= NOW() - INTERVAL '24 hours' AND is_deleted = false) AS "recentUpdatedCount",
-        (SELECT COUNT(*) FROM canonical_events WHERE created_at >= NOW() - INTERVAL '24 hours' AND is_deleted = false) AS "recentNewCount"
-    `);
-    
-    const logsResult = await pool.query(`
-      SELECT id, scheduler_job_name, source, type, status, started_at, completed_at,
-             items_count, success_count, failed_count, skipped_count, error_message
-      FROM collection_logs
-      ORDER BY started_at DESC
-      LIMIT 100
-    `);
-    
+    const [statsResult, logsResult, qualityResult] = await Promise.all([
+      pool.query(`
+        SELECT
+          (SELECT COUNT(*) FROM canonical_events WHERE is_deleted = false) AS "totalEvents",
+          (SELECT COUNT(*) FROM canonical_events WHERE is_featured = true AND is_deleted = false) AS "featuredCount",
+          (SELECT COUNT(*) FROM canonical_events WHERE updated_at >= NOW() - INTERVAL '24 hours' AND is_deleted = false) AS "recentUpdatedCount",
+          (SELECT COUNT(*) FROM canonical_events WHERE created_at >= NOW() - INTERVAL '24 hours' AND is_deleted = false) AS "recentNewCount"
+      `),
+      pool.query(`
+        SELECT id, scheduler_job_name, source, type, status, started_at, completed_at,
+               items_count, success_count, failed_count, skipped_count, error_message
+        FROM collection_logs
+        ORDER BY started_at DESC
+        LIMIT 100
+      `),
+      pool.query(`
+        SELECT
+          (SELECT COUNT(*) FROM canonical_events
+           WHERE is_deleted = false
+             AND (image_url IS NULL OR image_url = '' OR image_url LIKE '%placeholder%'))
+           AS "missingImages",
+          (SELECT COUNT(*) FROM canonical_events
+           WHERE is_deleted = false AND (lat IS NULL OR lng IS NULL))
+           AS "missingCoords",
+          (SELECT COUNT(*) FROM canonical_events
+           WHERE is_deleted = false AND (overview IS NULL OR overview = ''))
+           AS "incompleteEvents",
+          (SELECT COUNT(*) FROM collection_logs
+           WHERE status = 'success' AND started_at::date = CURRENT_DATE)
+           AS "collectedToday",
+          (SELECT COUNT(DISTINCT COALESCE(scheduler_job_name, type)) FROM collection_logs
+           WHERE status = 'failed' AND started_at >= NOW() - INTERVAL '24 hours')
+           AS "failedJobsRecent",
+          (SELECT row_to_json(t) FROM (
+            SELECT source, type, status, started_at, completed_at
+            FROM collection_logs ORDER BY started_at DESC LIMIT 1
+          ) t) AS "lastCollection"
+      `),
+    ]);
+
+    const q = qualityResult.rows[0];
     res.json({
       totalEvents: parseInt(statsResult.rows[0].totalEvents),
       featuredCount: parseInt(statsResult.rows[0].featuredCount),
@@ -1195,6 +1220,13 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
       recentNewCount: parseInt(statsResult.rows[0].recentNewCount),
       recentLogs: logsResult.rows,
       currentlyRunning: Array.from(runningJobs),
+      // 데이터 품질 메트릭
+      missingImages: parseInt(q.missingImages ?? '0'),
+      missingCoords: parseInt(q.missingCoords ?? '0'),
+      incompleteEvents: parseInt(q.incompleteEvents ?? '0'),
+      collectedToday: parseInt(q.collectedToday ?? '0'),
+      failedJobsRecent: parseInt(q.failedJobsRecent ?? '0'),
+      lastCollection: q.lastCollection ?? null,
     });
   } catch (error) {
     console.error('[Admin] Dashboard failed:', error);
@@ -8245,21 +8277,243 @@ app.post('/admin/ops/executions/:id/retry', requireAdminAuth, async (req, res) =
   res.status(501).json({ message: 'Retry not yet implemented' });
 });
 
+/**
+ * GET /admin/health
+ * 운영자용 서버 상세 상태 (Railway /health 엔드포인트와 별개)
+ * - DB ping, 메모리, 업타임, EventLoop lag, pool 통계
+ */
+app.get('/admin/health', requireAdminAuth, async (_, res) => {
+  const uptimeSec = Math.floor(process.uptime());
+  const memoryRssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
+
+  // DB 경량 체크
+  let dbOk = false;
+  try {
+    await pool.query('SELECT 1');
+    dbOk = true;
+  } catch {
+    dbOk = false;
+  }
+
+  // pg.Pool 통계 (node-postgres v8+ 공개 속성)
+  const poolStats = {
+    totalCount: (pool as any).totalCount ?? null,
+    idleCount: (pool as any).idleCount ?? null,
+    waitingCount: (pool as any).waitingCount ?? null,
+  };
+
+  let status: 'ok' | 'warning' | 'error' = 'ok';
+  if (!dbOk) status = 'error';
+  else if (eventLoopLagState.lagDetected) status = 'warning';
+
+  res.json({
+    status,
+    uptimeSec,
+    memoryRssMb,
+    nodeEnv: process.env.NODE_ENV ?? 'unknown',
+    db: { ok: dbOk },
+    currentlyRunning: Array.from(runningJobs),
+    eventLoop: {
+      lagDetected: eventLoopLagState.lagDetected,
+      lastLagMs: eventLoopLagState.lastLagMs,
+      lastCheckedAt: eventLoopLagState.lastCheckedAt,
+    },
+    pool: poolStats,
+  });
+});
+
+// ============================================================
+// 외부 API 상태 캐시 (5분 TTL)
+// ============================================================
+
+interface ApiServiceStatus {
+  name: string;
+  status: 'ok' | 'fail' | 'not_configured';
+  checkedAt: string;
+  latencyMs: number | null;
+  message: string | null;
+}
+
+interface ApiHealthCache {
+  services: ApiServiceStatus[];
+  refreshedAt: string;
+}
+
+let apiHealthCache: ApiHealthCache | null = null;
+let apiHealthRefreshing = false;
+const API_HEALTH_TTL_MS = 5 * 60 * 1000; // 5분
+
+async function pingApiService(
+  name: string,
+  checkFn: () => Promise<void>
+): Promise<ApiServiceStatus> {
+  const t0 = Date.now();
+  try {
+    await checkFn();
+    return { name, status: 'ok', checkedAt: new Date().toISOString(), latencyMs: Date.now() - t0, message: null };
+  } catch (err: unknown) {
+    const msg = (err instanceof Error ? err.message : String(err)).slice(0, 120);
+    return { name, status: 'fail', checkedAt: new Date().toISOString(), latencyMs: Date.now() - t0, message: msg };
+  }
+}
+
+function notConfigured(name: string, note: string): ApiServiceStatus {
+  return { name, status: 'not_configured', checkedAt: new Date().toISOString(), latencyMs: null, message: note };
+}
+
+async function refreshApiHealthCache(): Promise<void> {
+  if (apiHealthRefreshing) return;
+  apiHealthRefreshing = true;
+  try {
+    const PING_TIMEOUT = 5000;
+    const pFetch = (url: string, opts: RequestInit = {}) => {
+      const ctrl = new AbortController();
+      const id = setTimeout(() => ctrl.abort(), PING_TIMEOUT);
+      return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(id));
+    };
+
+    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const fromStr = todayStr.slice(0, 6) + '01';
+
+    const checks: Promise<ApiServiceStatus>[] = [];
+
+    // KOPIS
+    const kopisKey = process.env.KOPIS_API_KEY;
+    checks.push(
+      kopisKey
+        ? pingApiService('KOPIS', async () => {
+            const r = await pFetch(
+              `http://www.kopis.or.kr/openApi/restful/pblprfr?service=${kopisKey}&stdate=${todayStr}&eddate=${todayStr}&rows=1`
+            );
+            if (r.status >= 500) throw new Error(`HTTP ${r.status}`);
+          })
+        : Promise.resolve(notConfigured('KOPIS', 'KOPIS_API_KEY 미설정'))
+    );
+
+    // CulturePortal (TOUR_API_KEY 공유)
+    const tourKey = process.env.TOUR_API_KEY;
+    checks.push(
+      tourKey
+        ? pingApiService('CulturePortal', async () => {
+            const r = await pFetch(
+              `https://apis.data.go.kr/B553457/cultureinfo/period2?serviceKey=${encodeURIComponent(tourKey)}&from=${fromStr}&to=${todayStr}&numOfrows=1`
+            );
+            if (r.status >= 500) throw new Error(`HTTP ${r.status}`);
+          })
+        : Promise.resolve(notConfigured('CulturePortal', 'TOUR_API_KEY 미설정'))
+    );
+
+    // TourAPI
+    checks.push(
+      tourKey
+        ? pingApiService('TourAPI', async () => {
+            const r = await pFetch(
+              `https://apis.data.go.kr/B551011/KorService2/areaCode2?serviceKey=${encodeURIComponent(tourKey)}&numOfRows=1&pageNo=1&MobileOS=ETC&MobileApp=FairPick`
+            );
+            if (r.status >= 500) throw new Error(`HTTP ${r.status}`);
+          })
+        : Promise.resolve(notConfigured('TourAPI', 'TOUR_API_KEY 미설정'))
+    );
+
+    // Naver
+    const naverId = process.env.NAVER_CLIENT_ID;
+    const naverSecret = process.env.NAVER_CLIENT_SECRET;
+    checks.push(
+      naverId && naverSecret
+        ? pingApiService('Naver', async () => {
+            const r = await pFetch('https://openapi.naver.com/v1/search/blog?query=test&display=1', {
+              headers: { 'X-Naver-Client-Id': naverId, 'X-Naver-Client-Secret': naverSecret },
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          })
+        : Promise.resolve(notConfigured('Naver', 'NAVER_CLIENT_ID/SECRET 미설정'))
+    );
+
+    // Gemini
+    const geminiKey = process.env.GEMINI_API_KEY;
+    checks.push(
+      geminiKey
+        ? pingApiService('Gemini', async () => {
+            const r = await pFetch(
+              `https://generativelanguage.googleapis.com/v1/models?key=${geminiKey}&pageSize=1`
+            );
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          })
+        : Promise.resolve(notConfigured('Gemini', 'GEMINI_API_KEY 미설정'))
+    );
+
+    const services = await Promise.all(checks);
+    apiHealthCache = { services, refreshedAt: new Date().toISOString() };
+  } finally {
+    apiHealthRefreshing = false;
+  }
+}
+
+/**
+ * GET /admin/api-health
+ * 외부 API 상태 확인 (5분 캐시, 페이지 로딩 블로킹 금지)
+ */
+app.get('/admin/api-health', requireAdminAuth, async (_, res) => {
+  const now = Date.now();
+  const cacheAge = apiHealthCache
+    ? now - new Date(apiHealthCache.refreshedAt).getTime()
+    : Infinity;
+  const needsRefresh = cacheAge > API_HEALTH_TTL_MS;
+
+  if (needsRefresh) {
+    if (!apiHealthCache) {
+      // 첫 호출: 최대 8초 대기
+      refreshApiHealthCache().catch(() => {});
+      for (let i = 0; i < 16; i++) {
+        if (apiHealthCache) break;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    } else {
+      // 캐시 있으면 백그라운드 갱신
+      setImmediate(() => refreshApiHealthCache().catch(() => {}));
+    }
+  }
+
+  if (!apiHealthCache) {
+    return res.json({ services: [], cached: false, refreshedAt: null });
+  }
+
+  res.json({
+    services: apiHealthCache.services,
+    cached: true,
+    refreshedAt: apiHealthCache.refreshedAt,
+  });
+});
+
 // ============================================================
 // Event Loop Lag Monitoring
 // ============================================================
 
 let lastCheckTime = Date.now();
 
+// /admin/health 가 읽는 공유 lag 상태
+const eventLoopLagState: {
+  lagDetected: boolean;
+  lastLagMs: number | null;
+  lastCheckedAt: string | null;
+} = { lagDetected: false, lastLagMs: null, lastCheckedAt: null };
+
 setInterval(() => {
   const now = Date.now();
   const lag = now - lastCheckTime - 10000; // 10초 기준
   lastCheckTime = now;
+  eventLoopLagState.lastCheckedAt = new Date().toISOString();
 
   if (lag > 5000) {
-    // 5초 이상 지연 시 경고
     const mem = Math.round(process.memoryUsage().rss / 1024 / 1024);
-    console.warn(`[INSTRUMENT][EVENTLOOP] LAG ts=${new Date().toISOString()} lag=${lag}ms mem=${mem}MB (expected=10000ms, threshold=5000ms)`);
+    console.warn(`[INSTRUMENT][EVENTLOOP] LAG ts=${eventLoopLagState.lastCheckedAt} lag=${lag}ms mem=${mem}MB (expected=10000ms, threshold=5000ms)`);
+    eventLoopLagState.lagDetected = true;
+    eventLoopLagState.lastLagMs = lag;
+  } else {
+    // 정상 복귀 시 초기화
+    if (eventLoopLagState.lagDetected) {
+      eventLoopLagState.lagDetected = false;
+    }
   }
 }, 10000); // 매 10초마다 체크
 

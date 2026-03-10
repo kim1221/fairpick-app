@@ -183,6 +183,54 @@ export interface DashboardStats {
   recentNewCount: number;
   recentLogs: CollectionLog[];
   currentlyRunning?: string[];
+  // 데이터 품질 메트릭 (v1)
+  missingImages?: number;
+  missingCoords?: number;
+  incompleteEvents?: number;
+  collectedToday?: number;
+  failedJobsRecent?: number;
+  lastCollection?: {
+    source: string;
+    type: string;
+    status: string;
+    started_at: string;
+    completed_at: string | null;
+  } | null;
+}
+
+// 서버 헬스
+export interface AdminHealth {
+  status: 'ok' | 'warning' | 'error';
+  uptimeSec: number;
+  memoryRssMb: number;
+  nodeEnv: string;
+  db: { ok: boolean };
+  currentlyRunning: string[];
+  eventLoop: {
+    lagDetected: boolean;
+    lastLagMs: number | null;
+    lastCheckedAt: string | null;
+  };
+  pool: {
+    totalCount: number | null;
+    idleCount: number | null;
+    waitingCount: number | null;
+  };
+}
+
+// 외부 API 상태
+export interface ApiServiceStatus {
+  name: string;
+  status: 'ok' | 'fail' | 'not_configured';
+  checkedAt: string;
+  latencyMs: number | null;
+  message: string | null;
+}
+
+export interface ApiHealth {
+  services: ApiServiceStatus[];
+  cached: boolean;
+  refreshedAt: string | null;
 }
 
 // Collection Log

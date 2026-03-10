@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import type { JobExecution, SchedulerJob } from '../types/ops';
 import { useJobStatus } from '../hooks/useJobStatus';
+import { useAdminHealth, useApiHealth } from '../hooks/useAdminHealth';
 import { runJobNow } from '../services/opsApi';
 import SystemStatusBanner from '../components/ops/SystemStatusBanner';
 import JobCard from '../components/ops/JobCard';
 import ExecutionLogTable from '../components/ops/ExecutionLogTable';
 import JobDetailPanel from '../components/ops/JobDetailPanel';
+import OverviewSection from '../components/ops/OverviewSection';
 
 type Tab = 'schedule' | 'history';
 
@@ -24,8 +26,11 @@ export default function OpsPage() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [runFeedback, setRunFeedback] = useState<RunFeedback | null>(null);
 
-  const { jobs, logs, systemStatus, isLoading, dataUpdatedAt, refetch, isFetching } =
+  const { jobs, logs, systemStatus, isLoading, dataUpdatedAt, refetch, isFetching, data: dashboardData } =
     useJobStatus();
+
+  const { data: health, isLoading: healthLoading } = useAdminHealth();
+  const { data: apiHealthData, isLoading: apiLoading } = useApiHealth();
 
   // ── Panel handlers ──────────────────────────────────────────
 
@@ -129,6 +134,16 @@ export default function OpsPage() {
             </button>
           </div>
         </div>
+
+        {/* 운영 개요: 서버 헬스 + 데이터 품질 + 외부 API 상태 */}
+        <OverviewSection
+          stats={dashboardData}
+          health={health}
+          healthLoading={healthLoading}
+          apiServices={apiHealthData?.services}
+          apiRefreshedAt={apiHealthData?.refreshedAt}
+          apiLoading={apiLoading}
+        />
 
         {/* System status */}
         <SystemStatusBanner status={systemStatus} />

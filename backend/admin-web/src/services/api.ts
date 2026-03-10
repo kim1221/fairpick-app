@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Event, DashboardStats, PaginatedResponse, PopupFormData, UploadImageResponse, DeleteEventResult } from '../types';
+import type { Event, DashboardStats, PaginatedResponse, PopupFormData, UploadImageResponse, DeleteEventResult, AdminHealth, ApiHealth } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 const isDev = import.meta.env.DEV;
@@ -86,6 +86,18 @@ export const adminApi = {
   // 대시보드 통계
   getDashboard: async (): Promise<DashboardStats> => {
     const { data } = await api.get('/admin/dashboard');
+    return data;
+  },
+
+  // 서버 헬스 (운영자용 상세)
+  getAdminHealth: async (): Promise<AdminHealth> => {
+    const { data } = await api.get('/admin/health');
+    return data;
+  },
+
+  // 외부 API 상태 (5분 캐시)
+  getApiHealth: async (): Promise<ApiHealth> => {
+    const { data } = await api.get('/admin/api-health');
     return data;
   },
 
