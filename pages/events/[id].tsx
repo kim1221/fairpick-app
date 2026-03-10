@@ -734,7 +734,8 @@ function EventDetailPage() {
         </View>
 
         {/* Bottom Spacer — 광고 로드 여부에 따라 동적 높이 */}
-        <View style={{ height: primaryCTALink ? (adRendered ? 186 : 90) : 20 }} />
+        {/* ticket 링크일 때 힌트 텍스트만큼 추가 여백 */}
+        <View style={{ height: primaryCTALink ? (adRendered ? 186 : 90) + (primaryCTALink.label === '티켓 예매하기' ? 22 : 0) : 20 }} />
       </ScrollView>
 
       {/* 하단 영역: 배너 광고 + Sticky Action Bar */}
@@ -748,7 +749,16 @@ function EventDetailPage() {
               onAdRendered={() => setAdRendered(true)}
             />
           </View>
-          <View style={[styles.stickyBar, { backgroundColor: adaptive.background }]}>
+          <View style={[
+            styles.stickyBar,
+            { backgroundColor: adaptive.background },
+            primaryCTALink.label === '티켓 예매하기' && { paddingTop: 6 },
+          ]}>
+            {primaryCTALink.label === '티켓 예매하기' && (
+              <Text style={styles.ctaHint}>
+                {getTicketSiteName(primaryCTALink.url)}에서 예매할 수 있어요
+              </Text>
+            )}
             <Button
               type="primary"
               size="big"
@@ -978,6 +988,19 @@ function renderCategoryMeta(event: EventCardData, styles: EventStyles): React.Re
   );
 }
 
+// 상세 페이지에서 제거할 태그
+// - 카테고리 중복: badge row에서 이미 mainCategory로 표시
+// - 별도 UI 표시: 무료(hero badge + 가격카드), 주차/교통(섹션별도)
+// - 추천 알고리즘용: 상세 페이지 맥락과 맞지 않음
+// - 계절 추천: 시간적 컨텍스트 의존, 지나면 의미 없음
+const DETAIL_TAG_BLACKLIST = new Set([
+  '공연', '전시',
+  '무료',
+  '주차가능', '지하철근처',
+  '주말추천',
+  '연말맞이', '봄나들이', '여름휴가', '가을감성', '겨울감성',
+]);
+
 function getDisplayTagsForDetail(event: EventCardData): string[] {
   const isLikelyAddress = (value: string) =>
     value.length >= 12 ||
@@ -996,11 +1019,33 @@ function getDisplayTagsForDetail(event: EventCardData): string[] {
 
   const raw = event.tags ?? [];
   const filtered = raw
-    .filter((t) => t?.trim().length > 0 && t !== event.region)  // 빈 문자열·공백 방어
+    .filter((t) => t?.trim().length > 0 && t !== event.region)
     .filter((t) => !isLikelyAddress(t))
+    .filter((t) => !DETAIL_TAG_BLACKLIST.has(t))
     .slice(0, 6);
 
   return [...new Set(filtered)];
+}
+
+// ticket 링크 URL에서 사이트 이름 추출 (CTA 보조 문구용)
+function getTicketSiteName(url: string): string {
+  const TICKET_SITES: [string, string][] = [
+    ['ticketlink.co.kr', 'ticketlink'],
+    ['interpark.com', 'interpark'],
+    ['yes24.com', 'YES24'],
+    ['melon.com', 'melon ticket'],
+    ['nol.co.kr', 'NOL'],
+    ['auction.co.kr', 'auction ticket'],
+  ];
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, '');
+    for (const [domain, name] of TICKET_SITES) {
+      if (hostname.includes(domain)) return name;
+    }
+    return hostname;
+  } catch {
+    return '예매처';
+  }
 }
 
 const createStyles = (a: Adaptive) => StyleSheet.create({
@@ -1200,6 +1245,12 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   adBannerContainer: {
     width: '100%',
     overflow: 'hidden',
+  },
+  ctaHint: {
+    fontSize: 11,
+    color: a.grey500,
+    textAlign: 'center',
+    marginBottom: 6,
   },
   stickyBar: {
     paddingHorizontal: 20,
