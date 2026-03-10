@@ -3397,50 +3397,46 @@ export default function EventsPage() {
       {deleteResult && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-2xl">🗑️</span>
-              <h3 className="text-lg font-semibold text-gray-900">삭제 결과</h3>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-2xl">✅</span>
+              <h3 className="text-lg font-semibold text-gray-900">삭제 완료</h3>
             </div>
+            <p className="text-xs text-gray-500 mb-4">앱에서 즉시 숨김 처리됐습니다.</p>
 
             <div className="space-y-3">
-              {/* DB 삭제 */}
-              <div className="flex items-center justify-between py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-600">DB 삭제</span>
-                {deleteResult.dbDeleted ? (
-                  <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">완료</span>
-                ) : (
-                  <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full">실패</span>
-                )}
-              </div>
-
               {/* 삭제 방식 */}
-              <div className="flex items-center justify-between py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-600">삭제 방식</span>
-                <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full">
-                  Soft Delete
+              <div className="flex items-start justify-between py-2 border-b border-gray-100 gap-3">
+                <div>
+                  <span className="text-sm text-gray-600">처리 방식</span>
+                  <p className="text-xs text-gray-400 mt-0.5">데이터는 30일 보존 후 완전 삭제</p>
+                </div>
+                <span className="shrink-0 px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full">
+                  숨김 처리
                 </span>
               </div>
 
               {/* R2 이미지 상태 */}
               <div className="py-2 border-b border-gray-100">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm text-gray-600">R2 이미지</span>
+                <div className="flex items-start justify-between mb-1 gap-3">
+                  <div>
+                    <span className="text-sm text-gray-600">이미지 파일</span>
+                    {deleteResult.r2Action === 'preserved' && deleteResult.scheduledCleanupAfter && (
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {deleteResult.scheduledCleanupAfter} 자동 삭제 예정
+                      </p>
+                    )}
+                    {deleteResult.r2Action === 'not_applicable' && (
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {deleteResult.r2ActionReason === 'external_url' ? '외부 URL (R2 미사용)' : '이미지 없음'}
+                      </p>
+                    )}
+                  </div>
                   {deleteResult.r2Action === 'preserved' ? (
-                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">보존 중</span>
+                    <span className="shrink-0 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">30일 보존</span>
                   ) : (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs font-medium rounded-full">해당없음</span>
+                    <span className="shrink-0 px-2 py-0.5 bg-gray-100 text-gray-500 text-xs font-medium rounded-full">해당없음</span>
                   )}
                 </div>
-                {deleteResult.r2Action === 'preserved' && deleteResult.scheduledCleanupAfter && (
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {deleteResult.scheduledCleanupAfter} 이후 정리 예정 (30일 보존 정책)
-                  </p>
-                )}
-                {deleteResult.r2Action === 'not_applicable' && (
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {deleteResult.r2ActionReason === 'external_url' ? '외부 URL 이미지 (R2 미사용)' : '이미지 없음'}
-                  </p>
-                )}
               </div>
 
               {/* 이미지 Key */}

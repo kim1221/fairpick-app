@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { SchedulerJob } from '../../types/ops';
 import JobStatusBadge from './JobStatusBadge';
 import JobMetricRow from './JobMetricRow';
@@ -35,6 +36,7 @@ export default function JobDetailPanel({
   onRunNow,
 }: JobDetailPanelProps) {
   const execution = job?.lastExecution ?? null;
+  const [copied, setCopied] = useState(false);
 
   const handleCopyLog = () => {
     if (!execution || !job) return;
@@ -49,7 +51,10 @@ export default function JobDetailPanel({
       execution.summary ? `Summary: ${execution.summary}` : null,
       execution.errorMessage ? `Error: ${execution.errorMessage}` : null,
     ].filter(Boolean);
-    navigator.clipboard.writeText(lines.join('\n')).catch(() => {});
+    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {});
   };
 
   return (
@@ -221,9 +226,11 @@ export default function JobDetailPanel({
           <button
             onClick={handleCopyLog}
             disabled={!execution}
-            className="text-xs text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-30 flex items-center gap-1.5"
+            className={`text-xs transition-colors disabled:opacity-30 flex items-center gap-1.5 ${
+              copied ? 'text-green-600' : 'text-gray-500 hover:text-gray-700'
+            }`}
           >
-            📋 로그 복사
+            {copied ? '✓ 복사됨' : '📋 로그 복사'}
           </button>
           {job && onRunNow && (
             <RunNowButton

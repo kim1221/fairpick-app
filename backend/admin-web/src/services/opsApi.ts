@@ -242,7 +242,8 @@ function resolveEffectiveStatus(
 // Main: merge static job defs with live log data
 // ──────────────────────────────────────────────────────────────
 
-export function mergeJobsWithLogs(logs: CollectionLog[]): SchedulerJob[] {
+export function mergeJobsWithLogs(logs: CollectionLog[], currentlyRunning: string[] = []): SchedulerJob[] {
+  const runningSet = new Set(currentlyRunning);
   return STATIC_JOB_DEFS.map((def) => {
     const lastLog = findLatestLogForJob(def, logs);
     const lastExecution = lastLog ? mapLogToExecution(lastLog) : null;
@@ -250,6 +251,12 @@ export function mergeJobsWithLogs(logs: CollectionLog[]): SchedulerJob[] {
 
     if (lastExecution && effectiveStatus === 'stale') {
       lastExecution.status = 'stale';
+    }
+
+    // 서버 메모리(runningJobs Set) 기준 override — DB 반영 지연 보정
+    const isRunning = runningSet.has(def.name) || effectiveStatus === 'running';
+    if (isRunning && lastExecution && lastExecution.status !== 'running') {
+      lastExecution.status = 'running';
     }
 
     return {
@@ -262,7 +269,7 @@ export function mergeJobsWithLogs(logs: CollectionLog[]): SchedulerJob[] {
       scheduleDayOfWeek: def.scheduleDayOfWeek,
       expectedIntervalHours: def.expectedIntervalHours,
       lastExecution,
-      isRunning: effectiveStatus === 'running',
+      isRunning,
     };
   });
 }

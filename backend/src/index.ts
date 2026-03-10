@@ -1194,6 +1194,7 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
       recentUpdatedCount: parseInt(statsResult.rows[0].recentUpdatedCount),
       recentNewCount: parseInt(statsResult.rows[0].recentNewCount),
       recentLogs: logsResult.rows,
+      currentlyRunning: Array.from(runningJobs),
     });
   } catch (error) {
     console.error('[Admin] Dashboard failed:', error);

@@ -182,6 +182,7 @@ export interface DashboardStats {
   recentUpdatedCount: number;
   recentNewCount: number;
   recentLogs: CollectionLog[];
+  currentlyRunning?: string[];
 }
 
 // Collection Log

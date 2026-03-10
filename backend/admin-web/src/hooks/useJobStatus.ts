@@ -13,14 +13,16 @@ export function useJobStatus() {
     queryKey: OPS_QUERY_KEY,
     queryFn: adminApi.getDashboard,
     refetchInterval: (q) => {
-      const hasRunning =
-        (q.state.data?.recentLogs ?? []).some((l) => l.status === 'running');
-      return hasRunning ? 10_000 : 60_000;
+      const data = q.state.data;
+      const hasRunningLog = (data?.recentLogs ?? []).some((l) => l.status === 'running');
+      const hasRunningJob = (data?.currentlyRunning ?? []).length > 0;
+      return (hasRunningLog || hasRunningJob) ? 10_000 : 60_000;
     },
   });
 
   const logs = query.data?.recentLogs ?? [];
-  const jobs = mergeJobsWithLogs(logs);
+  const currentlyRunning = query.data?.currentlyRunning ?? [];
+  const jobs = mergeJobsWithLogs(logs, currentlyRunning);
   const systemStatus = deriveSystemStatus(jobs);
 
   return { ...query, logs, jobs, systemStatus };

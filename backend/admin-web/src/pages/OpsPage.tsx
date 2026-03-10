@@ -12,10 +12,17 @@ type Tab = 'schedule' | 'history';
 // 주의 필요 상태 판단
 const ALERT_STATUSES = new Set(['failed', 'stale', 'never_run']);
 
+interface RunFeedback {
+  jobName: string;
+  type: 'success' | 'error';
+  msg: string;
+}
+
 export default function OpsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('schedule');
   const [selectedJob, setSelectedJob] = useState<SchedulerJob | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [runFeedback, setRunFeedback] = useState<RunFeedback | null>(null);
 
   const { jobs, logs, systemStatus, isLoading, dataUpdatedAt, refetch, isFetching } =
     useJobStatus();
@@ -59,11 +66,18 @@ export default function OpsPage() {
 
   const handleRunNow = async (jobName: string) => {
     try {
-      await runJobNow(jobName);
+      const result = await runJobNow(jobName);
+      setRunFeedback({ jobName, type: 'success', msg: result.message ?? '실행 요청 완료' });
       void refetch();
+      setTimeout(() => setRunFeedback(null), 4000);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      alert(msg);
+      const res = (err as { response?: { status?: number; data?: { message?: string } } }).response;
+      let msg = '실행 요청 실패';
+      if (res?.status === 409) msg = '이미 실행 중입니다';
+      else if (res?.status === 404) msg = '알 수 없는 잡 이름';
+      else if (err instanceof Error) msg = err.message;
+      setRunFeedback({ jobName, type: 'error', msg });
+      setTimeout(() => setRunFeedback(null), 5000);
     }
   };
 
@@ -118,6 +132,26 @@ export default function OpsPage() {
 
         {/* System status */}
         <SystemStatusBanner status={systemStatus} />
+
+        {/* Run now 피드백 */}
+        {runFeedback && (
+          <div
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium ${
+              runFeedback.type === 'success'
+                ? 'bg-green-50 border border-green-200 text-green-800'
+                : 'bg-red-50 border border-red-200 text-red-800'
+            }`}
+          >
+            <span>{runFeedback.type === 'success' ? '✓' : '✕'}</span>
+            <span className="font-mono text-xs text-current opacity-60">[{runFeedback.jobName}]</span>
+            <span>{runFeedback.msg}</span>
+            <button
+              onClick={() => setRunFeedback(null)}
+              className="ml-auto text-current opacity-40 hover:opacity-70"
+              aria-label="닫기"
+            >×</button>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="border-b border-gray-200">
