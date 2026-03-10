@@ -30,7 +30,8 @@ const COLLECTION_STEPS: CollectionStep[] = [
   { name: 'Normalize', modulePath: '../normalizeCategories', functionName: 'normalizeCategories' },
 ];
 
-export async function runCollectionJob(): Promise<void> {
+export async function runCollectionJob(options?: { schedulerJobName?: string }): Promise<void> {
+  const schedulerJobName = options?.schedulerJobName ?? 'geo-refresh-03';
   const logId = crypto.randomUUID();
   const startTime = new Date();
 
@@ -40,9 +41,9 @@ export async function runCollectionJob(): Promise<void> {
   // collection_logs 시작 기록
   try {
     await pool.query(`
-      INSERT INTO collection_logs (id, source, type, status, started_at, items_count, success_count, failed_count)
-      VALUES ($1, 'system', 'collect', 'running', $2, 0, 0, 0)
-    `, [logId, startTime]);
+      INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, items_count, success_count, failed_count)
+      VALUES ($1, $2, 'system', 'collect', 'running', $3, 0, 0, 0)
+    `, [logId, schedulerJobName, startTime]);
   } catch (error) {
     console.error('[CollectJob] Failed to create collection log:', error);
     // 로그 실패해도 job은 계속 진행

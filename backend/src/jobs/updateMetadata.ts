@@ -89,8 +89,8 @@ export async function updateMetadata(): Promise<void> {
 
     // 4. collection_logs에 기록
     await pool.query(`
-      INSERT INTO collection_logs (id, source, type, status, started_at, completed_at, items_count, success_count, failed_count)
-      VALUES ($1, 'system', 'metadata_update', 'success', $2, NOW(), $3, $3, 0)
+      INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, completed_at, items_count, success_count, failed_count)
+      VALUES ($1, 'metadata', 'system', 'metadata_update', 'success', $2, NOW(), $3, $3, 0)
     `, [logId, startTime, popularityResult.rowCount]);
 
     console.log('[UpdateMetadata] ✓ Metadata update completed successfully');
@@ -101,8 +101,8 @@ export async function updateMetadata(): Promise<void> {
     // 실패 로그 기록
     try {
       await pool.query(`
-        INSERT INTO collection_logs (id, source, type, status, started_at, completed_at, items_count, success_count, failed_count, error_message)
-        VALUES ($1, 'system', 'metadata_update', 'failed', $2, NOW(), 0, 0, 1, $3)
+        INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, completed_at, items_count, success_count, failed_count, error_message)
+        VALUES ($1, 'metadata', 'system', 'metadata_update', 'failed', $2, NOW(), 0, 0, 1, $3)
       `, [logId, startTime, error.message]);
     } catch (logError) {
       console.error('[UpdateMetadata] Failed to log error:', logError);

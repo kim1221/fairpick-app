@@ -7,6 +7,7 @@ import EventsPage from './pages/EventsPage';
 import CreateEventPage from './pages/CreateEventPage';
 import HotSuggestionsPage from './pages/HotSuggestionsPage';
 import CurationThemesPage from './pages/CurationThemesPage';
+import OpsPage from './pages/OpsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -85,6 +86,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <CurationThemesPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/ops"
+            element={
+              <ProtectedRoute>
+                <OpsPage />
               </ProtectedRoute>
             }
           />

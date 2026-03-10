@@ -44,8 +44,8 @@ export async function sendEndSoonNotifications(): Promise<void> {
   const logId = crypto.randomUUID();
   const startTime = new Date();
   await pool.query(
-    `INSERT INTO collection_logs (id, source, type, status, started_at, items_count, success_count, failed_count)
-     VALUES ($1, 'system', 'end_soon_notifications', 'running', $2, 0, 0, 0)`,
+    `INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, items_count, success_count, failed_count)
+     VALUES ($1, 'end-soon-notifications', 'system', 'end_soon_notifications', 'running', $2, 0, 0, 0)`,
     [logId, startTime]
   ).catch((err) => console.error('[sendEndSoon] collection_logs 기록 실패:', err.message));
 
