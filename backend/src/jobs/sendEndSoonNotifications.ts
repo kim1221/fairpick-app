@@ -63,6 +63,12 @@ export async function sendEndSoonNotifications(): Promise<void> {
 
   if (rows.length === 0) {
     console.log('[sendEndSoon] 발송 대상 없음');
+    await pool.query(
+      `UPDATE collection_logs
+       SET status = 'success', completed_at = NOW(), items_count = 0, success_count = 0, failed_count = 0
+       WHERE id = $1`,
+      [logId]
+    ).catch(() => {});
     return;
   }
 
