@@ -1,4 +1,4 @@
-import { v5 as uuidv5 } from 'uuid';
+import { uuidv5 } from '../lib/uuidv5';
 import { parseStringPromise } from 'xml2js';
 import { pool, upsertEvent, upsertRawKopisEvent } from '../db';
 import http from '../lib/http';

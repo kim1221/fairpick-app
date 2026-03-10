@@ -1,4 +1,4 @@
-import { v5 as uuidv5 } from 'uuid';
+import { uuidv5 } from '../lib/uuidv5';
 
 export interface TourApiItem {
   contentid: string;
