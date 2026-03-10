@@ -187,6 +187,7 @@ export interface DashboardStats {
 // Collection Log
 export interface CollectionLog {
   id: string;
+  scheduler_job_name: string | null;
   source: string;
   type: string;
   status: string;
@@ -195,6 +196,8 @@ export interface CollectionLog {
   items_count: number;
   success_count: number;
   failed_count: number;
+  skipped_count: number;
+  error_message: string | null;
 }
 
 // API 응답 타입

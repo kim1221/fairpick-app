@@ -161,6 +161,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
 function deriveJobStatus(log: CollectionLog): JobStatus {
   if (log.status === 'running') return 'running';
   if (log.status === 'failed') return 'failed';
+  if (log.status === 'partial') return 'partial_success';  // collect/index.ts 호환
   if (log.status === 'success') {
     return (log.failed_count ?? 0) > 0 ? 'partial_success' : 'success';
   }
@@ -174,10 +175,12 @@ export function mapLogToExecution(log: CollectionLog): JobExecution {
       ? new Date(endedAt).getTime() - new Date(log.started_at).getTime()
       : null;
 
+  const jobName = log.scheduler_job_name ?? log.source ?? log.type ?? 'unknown';
+
   return {
     id: log.id,
-    jobName: log.source || log.type || 'unknown',
-    jobLabel: [log.source, log.type].filter(Boolean).join(' · '),
+    jobName,
+    jobLabel: log.scheduler_job_name ?? [log.source, log.type].filter(Boolean).join(' · '),
     status: deriveJobStatus(log),
     startedAt: log.started_at,
     endedAt,
@@ -185,9 +188,9 @@ export function mapLogToExecution(log: CollectionLog): JobExecution {
     totalCount: log.items_count ?? 0,
     successCount: log.success_count ?? 0,
     failedCount: log.failed_count ?? 0,
-    skippedCount: 0,
+    skippedCount: log.skipped_count ?? 0,
     summary: null,
-    errorMessage: null,
+    errorMessage: log.error_message ?? null,
     steps: [],
     failedItems: [],
   };
@@ -201,15 +204,20 @@ function findLatestLogForJob(
   jobDef: StaticJobDef,
   logs: CollectionLog[]
 ): CollectionLog | null {
+  const byTime = (a: CollectionLog, b: CollectionLog) =>
+    new Date(b.started_at).getTime() - new Date(a.started_at).getTime();
+
+  // 1순위: scheduler_job_name exact match (geo-refresh-03/collect-15 충돌 방지)
+  const byName = logs.filter((log) => log.scheduler_job_name === jobDef.name);
+  if (byName.length > 0) return byName.sort(byTime)[0];
+
+  // 2순위: 레거시 로그 — source+type keyword match
   const keywords = jobDef.sourceKeywords.map((k) => k.toLowerCase());
-  const matched = logs.filter((log) => {
+  const byKeyword = logs.filter((log) => {
     const haystack = `${log.source ?? ''} ${log.type ?? ''}`.toLowerCase();
     return keywords.some((kw) => haystack.includes(kw));
   });
-  if (matched.length === 0) return null;
-  return matched.sort(
-    (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
-  )[0];
+  return byKeyword.sort(byTime)[0] ?? null;
 }
 
 // ──────────────────────────────────────────────────────────────
