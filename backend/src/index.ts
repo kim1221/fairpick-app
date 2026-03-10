@@ -38,6 +38,8 @@ import { embedQuery, toVectorLiteral } from './lib/embeddingService';
 import { buildTodayPickPool, pickTodayPickCandidate, buildTodayPickPoolV2, pickTodayPickCandidateV2, applyPersonalizationV2, USE_TODAY_PICK_V2, type ScoredTodayPickCandidate } from './lib/todayPickSelector';
 import { runningJobs } from './lib/jobState';
 import { runOpsJob, KNOWN_JOB_NAMES } from './lib/opsJobRunner';
+import { logAiUsage, logGeminiUsage } from './lib/aiUsageLogger';
+import { recordRequest, addErrorSampleMessage, getRuntimeMetrics } from './lib/runtimeMetrics';
 
 /**
  * 카테고리별 기본 운영시간 반환
@@ -252,6 +254,26 @@ app.use((req, res, next) => {
 
 app.use(cors());
 app.use(express.json());
+
+// ── 요청 계측 미들웨어 ─────────────────────────────────────────
+app.use((req, res, next) => {
+  const start = Date.now();
+  // /health 같은 헬스체크 경로는 제외
+  if (req.path === '/health') return next();
+
+  res.on('finish', () => {
+    // URL 파라미터를 :id 등으로 정규화
+    const path = req.path.replace(/\/[0-9a-f-]{8,}/gi, '/:id');
+    recordRequest({
+      ts:     Date.now(),
+      ms:     Date.now() - start,
+      status: res.statusCode,
+      method: req.method,
+      path,
+    });
+  });
+  next();
+});
 
 const PLACEHOLDER_IMAGE = 'https://static.toss.im/tds/icon/picture/default-01.png';
 
@@ -1172,7 +1194,7 @@ app.post(
 // Admin: 대시보드 통계
 app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
   try {
-    const [statsResult, logsResult, qualityResult] = await Promise.all([
+    const [statsResult, logsResult, qualityResult, aiUsageResult] = await Promise.all([
       pool.query(`
         SELECT
           (SELECT COUNT(*) FROM canonical_events WHERE is_deleted = false) AS "totalEvents",
@@ -1210,9 +1232,21 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
             FROM collection_logs ORDER BY started_at DESC LIMIT 1
           ) t) AS "lastCollection"
       `),
+      pool.query(`
+        SELECT
+          COALESCE(SUM(total_tokens), 0)          AS "todayTotalTokens",
+          COALESCE(SUM(estimated_cost_usd), 0)    AS "todayCostUsd",
+          COALESCE(SUM(CASE WHEN date_trunc('month', created_at) = date_trunc('month', NOW())
+            THEN estimated_cost_usd ELSE 0 END), 0) AS "monthCostUsd",
+          COUNT(*)::int                            AS "todayCalls",
+          COUNT(CASE WHEN success = false THEN 1 END)::int AS "todayErrors"
+        FROM ai_usage_logs
+        WHERE created_at >= CURRENT_DATE
+      `).catch(() => ({ rows: [{ todayTotalTokens: 0, todayCostUsd: 0, monthCostUsd: 0, todayCalls: 0, todayErrors: 0 }] })),
     ]);
 
     const q = qualityResult.rows[0];
+    const ai = aiUsageResult.rows[0];
     res.json({
       totalEvents: parseInt(statsResult.rows[0].totalEvents),
       featuredCount: parseInt(statsResult.rows[0].featuredCount),
@@ -1227,6 +1261,14 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
       collectedToday: parseInt(q.collectedToday ?? '0'),
       failedJobsRecent: parseInt(q.failedJobsRecent ?? '0'),
       lastCollection: q.lastCollection ?? null,
+      // AI 사용량 (오늘)
+      aiUsageToday: {
+        calls:        Number(ai.todayCalls     ?? 0),
+        errors:       Number(ai.todayErrors    ?? 0),
+        totalTokens:  Number(ai.todayTotalTokens ?? 0),
+        costUsd:      parseFloat(ai.todayCostUsd  ?? '0'),
+        monthCostUsd: parseFloat(ai.monthCostUsd  ?? '0'),
+      },
     });
   } catch (error) {
     console.error('[Admin] Dashboard failed:', error);
@@ -2002,9 +2044,9 @@ app.patch('/admin/events/:id', requireAdminAuth, async (req, res) => {
 
     // 지오코딩: 항상 좌표를 체크하여 NULL이면 수행
     try {
-      // 기존 데이터 조회 (lat, lng 포함)
+      // 기존 데이터 조회 (lat, lng, region 포함)
       const oldEvent = await pool.query(
-        'SELECT address, venue, lat, lng FROM canonical_events WHERE id = $1',
+        'SELECT address, venue, lat, lng, region FROM canonical_events WHERE id = $1',
         [req.params.id]
       );
 
@@ -2013,19 +2055,21 @@ app.patch('/admin/events/:id', requireAdminAuth, async (req, res) => {
         const oldVenue = oldEvent.rows[0].venue;
         const oldLat = oldEvent.rows[0].lat;
         const oldLng = oldEvent.rows[0].lng;
+        const oldRegion = oldEvent.rows[0].region;
         const newAddress = req.body.address !== undefined ? req.body.address : oldAddress;
         const newVenue = req.body.venue !== undefined ? req.body.venue : oldVenue;
 
         // 사용자가 직접 좌표를 보낸 경우 지오코딩 스킵
         const userProvidedCoords = req.body.lat !== undefined && req.body.lng !== undefined;
-        
-        // address/venue 변경 OR 좌표가 NULL이면 지오코딩 (단, 사용자가 직접 좌표를 보내지 않은 경우에만)
-        const shouldGeocode = 
+
+        // address/venue 변경 OR 좌표/region이 NULL이면 지오코딩 (단, 사용자가 직접 좌표를 보내지 않은 경우에만)
+        const shouldGeocode =
           !userProvidedCoords && (
-            newAddress !== oldAddress || 
+            newAddress !== oldAddress ||
             newVenue !== oldVenue ||
-            oldLat === null || 
-            oldLng === null
+            oldLat === null ||
+            oldLng === null ||
+            !oldRegion  // region이 null/empty면 재지오코딩 (extractRegion 버그 수정 후 재적용)
           );
 
         if (shouldGeocode) {
@@ -6494,6 +6538,16 @@ ${requestedFields}
     }
 
     const data = await response.json();
+    // 사용량 로깅 (fire-and-forget)
+    if (data.usageMetadata) {
+      logAiUsage({
+        model: 'gemini-2.5-flash',
+        usageType: 'grounding',
+        promptTokens:   data.usageMetadata.promptTokenCount   ?? 0,
+        responseTokens: data.usageMetadata.candidatesTokenCount ?? 0,
+        totalTokens:    data.usageMetadata.totalTokenCount    ?? undefined,
+      });
+    }
     const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!content) {
@@ -8035,8 +8089,10 @@ ${eventsText}
 
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-2.0-flash' });
+    const copyModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+    const model = genAI.getGenerativeModel({ model: copyModel });
     const result = await model.generateContent(prompt);
+    logGeminiUsage(result.response, copyModel, 'curation_copy');
     const text = result.response.text().trim();
 
     const jsonMatch = text.match(/\{[\s\S]*?\}/);
