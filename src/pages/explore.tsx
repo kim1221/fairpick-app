@@ -573,6 +573,67 @@ function getReasonLabel(item: EventCardData): string | null {
 }
 
 // ─────────────────────────────────────────────────
+// 카테고리 entry 카드 (발견탭 기본 상태 전용)
+// ─────────────────────────────────────────────────
+const CATEGORY_ENTRY_COLORS: Record<string, { bg: string; text: string }> = {
+  '팝업': { bg: '#FFF0E6', text: '#C04000' },
+  '전시': { bg: '#F0EAFF', text: '#5B2BBF' },
+  '공연': { bg: '#FFF0F0', text: '#B91C1C' },
+  '축제': { bg: '#E6FAF2', text: '#0D7A52' },
+  '행사': { bg: '#EAF2FF', text: '#1A56C7' },
+};
+
+const CATEGORY_ENTRIES = CATEGORIES.filter(c => c.value !== null) as Array<{
+  id: string;
+  label: string;
+  value: string;
+}>;
+
+interface CategoryEntryRowProps {
+  onPress: (value: string) => void;
+}
+
+const CategoryEntryRow = React.memo(function CategoryEntryRow({ onPress }: CategoryEntryRowProps) {
+  return (
+    <View style={categoryEntryStyles.row}>
+      {CATEGORY_ENTRIES.map((cat) => {
+        const color = CATEGORY_ENTRY_COLORS[cat.label] ?? { bg: '#F2F4F6', text: '#4E5968' };
+        return (
+          <Pressable
+            key={cat.id}
+            style={[categoryEntryStyles.card, { backgroundColor: color.bg }]}
+            onPress={() => onPress(cat.value)}
+          >
+            <Text style={[categoryEntryStyles.label, { color: color.text }]}>{cat.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+});
+
+const categoryEntryStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 4,
+    gap: 6,
+  },
+  card: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+});
+
+// ─────────────────────────────────────────────────
 // 그리드 카드 — useLike 훅 사용을 위해 별도 컴포넌트
 // ─────────────────────────────────────────────────
 function GridCard({ item, onPress }: { item: EventCardData; onPress: (id: string) => void }) {
@@ -918,10 +979,18 @@ function ExplorePage() {
     />
   );
 
-  // ─── FlatList 헤더: 결과 카운트만 ───────────────
-  const renderCountRow = () => (
-    <View style={styles.countRow}>
-      <Text style={styles.countText}>총 {totalCount.toLocaleString()}개</Text>
+  // ─── FlatList 헤더: 카테고리 entry(기본 상태) + 결과 카운트 ──
+  const isNoFilter =
+    activeFilters.category === null &&
+    activeFilters.region === null &&
+    activeFilters.quickFilter === null;
+
+  const renderListHeader = () => (
+    <View>
+      {isNoFilter && <CategoryEntryRow onPress={handleCategoryPress} />}
+      <View style={styles.countRow}>
+        <Text style={styles.countText}>총 {totalCount.toLocaleString()}개</Text>
+      </View>
     </View>
   );
 
@@ -1037,7 +1106,7 @@ function ExplorePage() {
             data={events}
             numColumns={2}
             keyExtractor={(item) => item.id}
-            ListHeaderComponent={renderCountRow}
+            ListHeaderComponent={renderListHeader}
             ListEmptyComponent={renderEmpty}
             renderItem={renderCard}
             onEndReached={handleLoadMore}
