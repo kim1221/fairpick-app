@@ -221,8 +221,7 @@ function createStyles(a: Adaptive) {
     regionPill: {
       paddingHorizontal: 12,
       paddingVertical: 7,
-      marginRight: 16,
-      marginLeft: 4,
+      marginRight: 8,
       backgroundColor: a.grey100,
       borderRadius: 16,
       flexDirection: 'row',
@@ -965,13 +964,12 @@ function ExplorePage() {
           ]}
           onLayout={handleFilterLayout}
         >
-          {/* 카테고리 언더라인 탭 + 지역 버튼 */}
+          {/* 카테고리 언더라인 탭 — 전폭 */}
           <View style={styles.categoryRow}>
             <Tab
               fluid
               value={activeFilters.category ?? 'all'}
               onChange={(val) => handleCategoryPress(val === 'all' ? null : val as string)}
-              style={{ flex: 1 }}
             >
               {CATEGORIES.map((cat) => (
                 <Tab.Item key={cat.id} value={cat.value ?? 'all'}>
@@ -979,22 +977,23 @@ function ExplorePage() {
                 </Tab.Item>
               ))}
             </Tab>
-
-            <Pressable style={styles.regionPill} onPress={() => setShowRegionSheet(true)}>
-              <Icon name="icon-pin-mono" size={12} color={adaptive.grey700} />
-              <Text style={styles.regionPillText}>
-                {activeFilters.region ?? '전국'} ▾
-              </Text>
-            </Pressable>
           </View>
 
-          {/* 퀵 필터 칩 */}
+          {/* 지역 pill + 퀵 필터 칩 — 가로 스크롤 */}
           <View style={styles.quickFiltersRow}>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.quickFiltersContent}
             >
+              {/* 지역 선택 — 맨 앞 */}
+              <Pressable style={styles.regionPill} onPress={() => setShowRegionSheet(true)}>
+                <Icon name="icon-pin-mono" size={12} color={adaptive.grey700} />
+                <Text style={styles.regionPillText}>
+                  {activeFilters.region ?? '전국'} ▾
+                </Text>
+              </Pressable>
+
               {QUICK_FILTERS.map((filter) => {
                 const isActive = activeFilters.quickFilter === filter.id;
                 return (
