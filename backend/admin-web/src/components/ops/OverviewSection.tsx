@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { DashboardStats, AdminHealth, ApiServiceStatus } from '../../types';
+import type { DashboardStats, AdminHealth, ApiServiceStatus, WindowMetrics } from '../../types';
 
 // ──────────────────────────────────────────────────────────────
 // 헬퍼
@@ -101,6 +101,63 @@ function ServerHealthRow({ health, isLoading }: { health?: AdminHealth; isLoadin
         sub={health.currentlyRunning.length > 0
           ? `실행 중 ${health.currentlyRunning.length}개 잡`
           : '대기 중'}
+      />
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// 요청 메트릭 섹션
+// ──────────────────────────────────────────────────────────────
+
+function fmtMs(ms: number | null): string {
+  if (ms == null) return '—';
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function RequestMetricsRow({ metrics }: { metrics?: AdminHealth['requestMetrics'] }) {
+  if (!metrics) return null;
+
+  const { window5m, window1h, lastErrorAt } = metrics;
+
+  const errAccent = (rate: number): 'none' | 'warn' | 'error' =>
+    rate >= 10 ? 'error' : rate >= 1 ? 'warn' : 'none';
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <MetricCard
+        label="요청수 (5분)"
+        value={window5m.totalRequests.toLocaleString()}
+        sub={`응답 ${fmtMs(window5m.avgResponseMs)} avg`}
+      />
+      <MetricCard
+        label="5xx 에러율 (5분)"
+        value={window5m.totalRequests === 0
+          ? <span className="text-gray-400">—</span>
+          : <span className={window5m.error5xxRate >= 1 ? 'text-red-600' : 'text-green-600'}>
+              {window5m.error5xxRate.toFixed(1)}%
+            </span>}
+        sub={`${window5m.errors5xx}건 / ${window5m.totalRequests}건`}
+        accent={errAccent(window5m.error5xxRate)}
+      />
+      <MetricCard
+        label="5xx 에러율 (1시간)"
+        value={window1h.totalRequests === 0
+          ? <span className="text-gray-400">—</span>
+          : <span className={window1h.error5xxRate >= 1 ? 'text-red-600' : 'text-green-600'}>
+              {window1h.error5xxRate.toFixed(1)}%
+            </span>}
+        sub={`${window1h.errors5xx}건 / ${window1h.totalRequests}건`}
+        accent={errAccent(window1h.error5xxRate)}
+      />
+      <MetricCard
+        label="마지막 5xx"
+        value={lastErrorAt
+          ? <span className="text-red-600">{fmtCheckedAt(lastErrorAt)}</span>
+          : <span className="text-green-600">없음</span>}
+        sub={lastErrorAt ? new Date(lastErrorAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '정상'}
+        accent={lastErrorAt ? 'warn' : 'none'}
       />
     </div>
   );
@@ -231,21 +288,72 @@ function ApiStatusRow({
 }
 
 // ──────────────────────────────────────────────────────────────
-// 비용 섹션 (v1: 미계측 항목 정직 표시)
+// 비용 섹션 (v2: Gemini 실측 + Railway 링크)
 // ──────────────────────────────────────────────────────────────
 
-function CostNotice() {
+interface AiUsageToday {
+  calls: number;
+  errors: number;
+  totalTokens: number;
+  costUsd: number;
+  monthCostUsd: number;
+}
+
+function fmtUsd(usd: number): string {
+  if (usd === 0) return '$0.00';
+  if (usd < 0.001) return `$${usd.toFixed(6)}`;
+  if (usd < 1)    return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(2)}`;
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function CostSection({ aiUsage }: { aiUsage?: AiUsageToday }) {
   return (
-    <div className="flex flex-wrap gap-3 text-[11px] text-gray-400">
-      <span className="px-2 py-1 bg-gray-50 rounded border border-gray-100">Gemini 비용 — 미계측 (v2 예정)</span>
-      <span className="px-2 py-1 bg-gray-50 rounded border border-gray-100">R2 저장량 — 미계측 (v2 예정)</span>
+    <div className="flex flex-wrap gap-3 text-[11px]">
+      {/* Gemini (실측) */}
+      <div className="px-3 py-2 bg-white rounded-lg border border-gray-100 space-y-0.5">
+        <p className="text-[10px] uppercase font-semibold text-gray-400">Gemini (오늘)</p>
+        {aiUsage ? (
+          <>
+            <p className="text-sm font-semibold text-gray-900">{fmtUsd(aiUsage.costUsd)}</p>
+            <p className="text-[10px] text-gray-400">
+              {fmtTokens(aiUsage.totalTokens)}토큰 · {aiUsage.calls}회
+              {aiUsage.errors > 0 && (
+                <span className="text-red-400"> · 실패 {aiUsage.errors}</span>
+              )}
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-gray-400">—</p>
+        )}
+      </div>
+      {/* Gemini 이번 달 */}
+      {aiUsage && (
+        <div className="px-3 py-2 bg-white rounded-lg border border-gray-100 space-y-0.5">
+          <p className="text-[10px] uppercase font-semibold text-gray-400">Gemini (이번달)</p>
+          <p className="text-sm font-semibold text-gray-900">{fmtUsd(aiUsage.monthCostUsd)}</p>
+          <p className="text-[10px] text-gray-400">예상 누적</p>
+        </div>
+      )}
+      {/* R2 */}
+      <div className="px-3 py-2 bg-gray-50 rounded-lg border border-gray-100 space-y-0.5">
+        <p className="text-[10px] uppercase font-semibold text-gray-400">R2 저장량</p>
+        <p className="text-sm text-gray-400">미계측</p>
+      </div>
+      {/* Railway */}
       <a
         href="https://railway.app"
         target="_blank"
         rel="noopener noreferrer"
-        className="px-2 py-1 bg-gray-50 rounded border border-gray-100 hover:text-gray-600 transition-colors"
+        className="px-3 py-2 bg-gray-50 rounded-lg border border-gray-100 hover:border-gray-200 transition-colors space-y-0.5 block"
       >
-        Railway 비용 → 대시보드에서 확인 ↗
+        <p className="text-[10px] uppercase font-semibold text-gray-400">Railway</p>
+        <p className="text-sm text-gray-600">대시보드 확인 ↗</p>
       </a>
     </div>
   );
@@ -280,6 +388,14 @@ export default function OverviewSection({
         <ServerHealthRow health={health} isLoading={healthLoading} />
       </div>
 
+      {/* 요청 메트릭 */}
+      {health?.requestMetrics && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">요청 메트릭</p>
+          <RequestMetricsRow metrics={health.requestMetrics} />
+        </div>
+      )}
+
       {/* 데이터 품질 */}
       {stats && (
         <div>
@@ -294,10 +410,10 @@ export default function OverviewSection({
         <ApiStatusRow services={apiServices} refreshedAt={apiRefreshedAt} isLoading={apiLoading} />
       </div>
 
-      {/* 비용 (미계측 고지) */}
+      {/* 비용 */}
       <div>
         <p className="text-xs font-semibold text-gray-500 uppercase mb-2">비용</p>
-        <CostNotice />
+        <CostSection aiUsage={stats?.aiUsageToday} />
       </div>
     </div>
   );

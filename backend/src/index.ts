@@ -6537,7 +6537,7 @@ ${requestedFields}
       return res.status(500).json({ error: 'Gemini API error', details: errorDetails });
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     // 사용량 로깅 (fire-and-forget)
     if (data.usageMetadata) {
       logAiUsage({
@@ -7329,6 +7329,22 @@ app.post('/admin/hot-suggestions/:id/approve-simple', requireAdminAuth, async (r
     console.error('[Admin] [HotSuggestions] [ApproveSimple] Error:', error);
     res.status(500).json({ error: error.message });
   }
+});
+
+// ── 글로벌 Express 에러 핸들러 ─────────────────────────────────
+// 반드시 app.listen 직전, 모든 라우트 등록 이후에 위치해야 함
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = err.status ?? err.statusCode ?? 500;
+  const message: string = err.message ?? 'Internal Server Error';
+
+  if (status >= 500) {
+    console.error(`[Express] 5xx ${req.method} ${req.path}:`, err);
+    // runtimeMetrics에 에러 메시지 추가
+    const path = req.path.replace(/\/[0-9a-f-]{8,}/gi, '/:id');
+    addErrorSampleMessage(path, message);
+  }
+
+  res.status(status).json({ error: message });
 });
 
 // PORT는 최상단에서 이미 선언됨
@@ -8362,6 +8378,8 @@ app.get('/admin/health', requireAdminAuth, async (_, res) => {
   if (!dbOk) status = 'error';
   else if (eventLoopLagState.lagDetected) status = 'warning';
 
+  const metrics = getRuntimeMetrics();
+
   res.json({
     status,
     uptimeSec,
@@ -8375,6 +8393,12 @@ app.get('/admin/health', requireAdminAuth, async (_, res) => {
       lastCheckedAt: eventLoopLagState.lastCheckedAt,
     },
     pool: poolStats,
+    requestMetrics: {
+      window5m: metrics.window5m,
+      window1h: metrics.window1h,
+      recentErrors: metrics.recentErrors,
+      lastErrorAt: metrics.lastErrorAt,
+    },
   });
 });
 

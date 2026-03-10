@@ -196,6 +196,31 @@ export interface DashboardStats {
     started_at: string;
     completed_at: string | null;
   } | null;
+  // AI 사용량 (오늘)
+  aiUsageToday?: {
+    calls: number;
+    errors: number;
+    totalTokens: number;
+    costUsd: number;
+    monthCostUsd: number;
+  };
+}
+
+// 요청 메트릭 (윈도우)
+export interface WindowMetrics {
+  totalRequests: number;
+  errors5xx: number;
+  error5xxRate: number;
+  avgResponseMs: number | null;
+  p95ResponseMs: number | null;
+}
+
+export interface ErrorSample {
+  ts: number;
+  status: number;
+  method: string;
+  path: string;
+  message?: string;
 }
 
 // 서버 헬스
@@ -215,6 +240,12 @@ export interface AdminHealth {
     totalCount: number | null;
     idleCount: number | null;
     waitingCount: number | null;
+  };
+  requestMetrics?: {
+    window5m: WindowMetrics;
+    window1h: WindowMetrics;
+    recentErrors: ErrorSample[];
+    lastErrorAt: string | null;
   };
 }
 

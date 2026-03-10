@@ -5,6 +5,7 @@
  */
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { logGeminiUsage } from './aiUsageLogger';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-pro'; // 안정적인 모델
@@ -2138,6 +2139,7 @@ export async function extractEventInfo(
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
+    logGeminiUsage(response, GEMINI_MODEL, 'extraction');
     const content = response.text();
 
     if (!content) {
@@ -2282,8 +2284,9 @@ export async function extractEventInfoEnhanced(
 
     const result = await currentModel.generateContent(prompt);
     const response = await result.response;
+    logGeminiUsage(response, 'gemini-2.5-flash', 'grounding');
     const content = response.text();
-    
+
     console.log('[AI] 🔍 Response length:', content.length, 'chars');
     console.log('[AI] 🔍 Full AI Response:', content); // 🆕 전체 응답 로깅
 
@@ -2877,6 +2880,7 @@ ${itemsText}
     console.log('[AI] [Seed] Extracting seeds from', items.length, 'items...');
     const result = await model.generateContent(prompt);
     const response = await result.response;
+    logGeminiUsage(response, GEMINI_MODEL, 'seed');
     const content = response.text();
 
     if (!content) return [];
@@ -2937,6 +2941,7 @@ ${seedsText}
     console.log('[AI] [Normalize] Normalizing', seeds.length, 'seeds...');
     const result = await model.generateContent(prompt);
     const response = await result.response;
+    logGeminiUsage(response, GEMINI_MODEL, 'normalize');
     const content = response.text();
 
     if (!content) return [...new Set(seeds)];
@@ -2997,6 +3002,7 @@ export async function extractDerivedTagsOnly(
   try {
     const result = await model.generateContent(prompt);
     const response = await result.response;
+    logGeminiUsage(response, GEMINI_MODEL, 'tags');
     const content = response.text();
 
     if (!content) return [];
@@ -3005,7 +3011,7 @@ export async function extractDerivedTagsOnly(
     if (!jsonMatch) {
       jsonMatch = content.match(/\[[\s\S]*?\]/);
     }
-    
+
     if (!jsonMatch) {
       console.warn('[AI] No JSON array found in tags response');
       return [];
@@ -3350,6 +3356,7 @@ ${captionText}
 }`;
 
   const result = await model.generateContent(prompt);
+  logGeminiUsage(result.response, GEMINI_MODEL, 'caption');
   const text = result.response.text().trim();
 
   // JSON 블록 추출

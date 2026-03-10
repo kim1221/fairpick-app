@@ -7,6 +7,7 @@
  */
 
 import { GoogleGenerativeAI, TaskType } from '@google/generative-ai';
+import { logAiUsage } from './aiUsageLogger';
 
 const MODEL = 'gemini-embedding-001';
 export const EMBEDDING_DIMENSIONS = 3072;
@@ -96,11 +97,14 @@ function getClient(): GoogleGenerativeAI {
  */
 export async function embedDocument(text: string): Promise<number[]> {
   const genAI = getClient();
-  const model = genAI.getGenerativeModel({ model: MODEL });
-  const result = await model.embedContent({
+  const embModel = genAI.getGenerativeModel({ model: MODEL });
+  const result = await embModel.embedContent({
     content: { parts: [{ text }], role: 'user' },
     taskType: TaskType.RETRIEVAL_DOCUMENT,
   });
+  // Embedding API는 usageMetadata가 없음 — 글자 수 기준 토큰 추정
+  const approxTokens = Math.ceil(text.length / 4);
+  logAiUsage({ model: MODEL, usageType: 'embedding', promptTokens: approxTokens, responseTokens: 0 });
   return result.embedding.values;
 }
 
@@ -118,11 +122,14 @@ export async function embedQuery(text: string): Promise<number[]> {
   }
 
   const genAI = getClient();
-  const model = genAI.getGenerativeModel({ model: MODEL });
-  const result = await model.embedContent({
+  const embModel = genAI.getGenerativeModel({ model: MODEL });
+  const result = await embModel.embedContent({
     content: { parts: [{ text }], role: 'user' },
     taskType: TaskType.RETRIEVAL_QUERY,
   });
+
+  const approxTokens = Math.ceil(text.length / 4);
+  logAiUsage({ model: MODEL, usageType: 'embedding', promptTokens: approxTokens, responseTokens: 0 });
 
   const embedding = result.embedding.values;
   cacheSet(key, embedding);
