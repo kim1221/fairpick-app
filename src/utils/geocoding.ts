@@ -9,6 +9,7 @@ export interface ReverseGeocodeResult {
   success: boolean;
   address?: string; // 행정동 (예: "성수2가1동")
   fullAddress?: string; // 전체 주소
+  sido?: string; // 시도 (예: "서울특별시", "경기도")
   error?: string;
 }
 
@@ -68,13 +69,14 @@ export async function reverseGeocode(
 
       const data = await response.json() as any;
 
-      // 백엔드 응답: { gu, dong, label }
-      // label = "송파구 삼전동" 형태
+      // 백엔드 응답: { gu, dong, label, sido }
+      // label = "송파구 삼전동", sido = "서울특별시" 형태
       if (data.label && data.label !== '위치 정보 없음') {
         const result: ReverseGeocodeResult = {
           success: true,
           address: data.dong || data.label, // dong이 있으면 dong, 없으면 label 사용
           fullAddress: data.label,
+          sido: data.sido || '',
         };
         // 성공만 캐시 (실패/일시 오류는 재시도 보장)
         _geocodeCache.set(key, { result, expiresAt: Date.now() + GEOCODE_CACHE_TTL_MS });

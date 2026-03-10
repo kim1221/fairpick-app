@@ -12,11 +12,13 @@ import {
 import { BottomSheet, Icon, IconButton, AnimateSkeleton, Tab } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 type Adaptive = ReturnType<typeof useAdaptive>;
+import { Accuracy, getCurrentLocation, GetCurrentLocationPermissionError } from '@apps-in-toss/framework';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { EventCardData } from '../data/events';
 import { EventImage } from '../components/EventImage';
 import { API_BASE_URL } from '../config/api';
 import { useLike } from '../hooks/useLike';
+import { reverseGeocode } from '../utils/geocoding';
 
 // ─────────────────────────────────────────────────
 // API 응답 타입
@@ -144,6 +146,29 @@ const REGION_LIST_FALLBACK: RegionItem[] = [
 
 const REGION_COUNTS_CACHE_TTL_MS = 30 * 60 * 1000;
 let _regionCountsCache: { data: RegionItem[]; expiresAt: number } | null = null;
+
+// 시도(Kakao region_1depth_name) → 앱 지역 코드 매핑
+const SIDO_TO_REGION: Record<string, string> = {
+  '서울특별시': '서울',
+  '경기도': '경기',
+  '부산광역시': '부산',
+  '인천광역시': '인천',
+  '대구광역시': '대구',
+  '대전광역시': '대전',
+  '광주광역시': '광주',
+  '울산광역시': '울산',
+  '세종특별자치시': '세종',
+  '강원도': '강원',
+  '강원특별자치도': '강원',
+  '충청북도': '충북',
+  '충청남도': '충남',
+  '전라북도': '전북',
+  '전북특별자치도': '전북',
+  '전라남도': '전남',
+  '경상북도': '경북',
+  '경상남도': '경남',
+  '제주특별자치도': '제주',
+};
 
 interface ActiveFilters {
   quickFilter: string | null;
@@ -622,6 +647,7 @@ function ExplorePage() {
   const [hasMore, setHasMore] = useState(true);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [showRegionSheet, setShowRegionSheet] = useState(false);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
   const [regionList, setRegionList] = useState<RegionItem[]>(
     _regionCountsCache && Date.now() < _regionCountsCache.expiresAt
       ? _regionCountsCache.data
@@ -826,6 +852,32 @@ function ExplorePage() {
     setShowRegionSheet(false);
   };
 
+  // "내 근처" — GPS 감지 후 지역 자동 선택
+  // 실패 시 시트를 닫지 않고 그대로 유지해 수동 선택 가능하게 함
+  const handleNearbyPress = async () => {
+    setIsDetectingLocation(true);
+    try {
+      const location = await getCurrentLocation({ accuracy: Accuracy.Balanced });
+      const { latitude, longitude } = location.coords;
+      const geo = await reverseGeocode(latitude, longitude);
+      const sido = geo.sido?.trim();
+      const region = sido ? SIDO_TO_REGION[sido] : undefined;
+      if (region) {
+        handleRegionSelect(region); // 시트 닫힘 + 필터 적용
+      }
+      // region 매핑 실패 시: 시트 그대로 유지
+    } catch (error) {
+      if (error instanceof GetCurrentLocationPermissionError) {
+        console.warn('[Explore] 위치 권한 거부');
+      } else {
+        console.error('[Explore] GPS 실패:', error);
+      }
+      // 실패 시: 시트 그대로 유지 → 수동 선택 가능
+    } finally {
+      setIsDetectingLocation(false);
+    }
+  };
+
   // ─── 사이드 이펙트 ──────────────────────────────
   useEffect(() => {
     // 필터 변경 시 헤더 상태 초기화
@@ -844,8 +896,8 @@ function ExplorePage() {
   useEffect(() => {
     if (_regionCountsCache && Date.now() < _regionCountsCache.expiresAt) return;
     fetch(`${API_BASE_URL}/events/region-counts`)
-      .then(r => r.json())
-      .then((res: { regions: RegionItem[] }) => {
+      .then(r => r.json() as Promise<{ regions: RegionItem[] }>)
+      .then((res) => {
         _regionCountsCache = { data: res.regions, expiresAt: Date.now() + REGION_COUNTS_CACHE_TTL_MS };
         setRegionList(res.regions);
       })
@@ -1022,6 +1074,21 @@ function ExplorePage() {
           contentContainerStyle={{ paddingBottom: 48 }}
           showsVerticalScrollIndicator={false}
         >
+          {/* 내 근처 — GPS 감지 */}
+          <Pressable
+            style={styles.regionSheetItem}
+            onPress={handleNearbyPress}
+            disabled={isDetectingLocation}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Icon name="icon-pin-mono" size={14} color={adaptive.blue500} />
+              <Text style={[styles.regionSheetText, { color: adaptive.blue500 }]}>
+                {isDetectingLocation ? '위치 감지 중...' : '내 근처'}
+              </Text>
+            </View>
+          </Pressable>
+
+          {/* 전국 전체 */}
           <Pressable
             style={styles.regionSheetItem}
             onPress={() => handleRegionSelect(null)}

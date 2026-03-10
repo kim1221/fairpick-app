@@ -4834,8 +4834,10 @@ app.get('/geo/reverse', async (req, res) => {
     if (response.data.documents && response.data.documents.length > 0) {
       const address = response.data.documents[0].address;
 
+      // region_1depth_name = 시도 (예: 서울특별시)
       // region_2depth_name = 구 (예: 성동구)
       // region_3depth_name = 법정동 (예: 성수동2가)
+      const sido = address?.region_1depth_name || '';
       const gu = address?.region_2depth_name || '';
       const dongLegal = address?.region_3depth_name || ''; // 법정동
       
@@ -5116,9 +5118,9 @@ app.get('/geo/reverse', async (req, res) => {
 
       console.log('[GeoReverse] label', label, { dongLegal, dongMapped: dong });
 
-      return res.json({ gu, dong, label });
+      return res.json({ gu, dong, label, sido });
     } else {
-      return res.json({ gu: '', dong: '', label: '위치 정보 없음' });
+      return res.json({ gu: '', dong: '', label: '위치 정보 없음', sido: '' });
     }
   } catch (error) {
     console.error('[geo/reverse] Error:', error);
