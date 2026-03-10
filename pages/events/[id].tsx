@@ -498,7 +498,14 @@ function EventDetailPage() {
           )}
 
           {/* Title */}
-          <Post.H2 paddingBottom={16}>{event.title}</Post.H2>
+          <Post.H2 paddingBottom={event.overview?.trim() ? 6 : 16}>{event.title}</Post.H2>
+
+          {/* Overview 인라인 — 제목 바로 아래 흥미 유도 */}
+          {event.overview?.trim() && (
+            <Text style={styles.inlineOverview} numberOfLines={2} ellipsizeMode="tail">
+              {event.overview.trim()}
+            </Text>
+          )}
 
           {/* Tier 1: 크리티컬 알림 (사전 등록, 대기, 마지막 입장) */}
           {renderTier1Alerts(event, styles)}
@@ -546,13 +553,36 @@ function EventDetailPage() {
               </Text>
             </View>
 
-            <View style={styles.keyInfoCard}>
-              <Icon name="icon-pin-mono" size={20} color={adaptive.grey600} />
-              <Text style={styles.keyInfoLabel}>장소</Text>
-              <Text style={styles.keyInfoValue} numberOfLines={2}>
-                {event.venue || event.region}
-              </Text>
-            </View>
+            {event.lat && event.lng ? (
+              <Pressable
+                style={styles.keyInfoCard}
+                onPress={async () => {
+                  const url = `https://map.kakao.com/link/map/${encodeURIComponent(event.venue || '')},${event.lat},${event.lng}`;
+                  try { await Linking.openURL(url); }
+                  catch { await dialog.openAlert({ title: '오류', description: '지도를 열 수 없어요.' }); }
+                }}
+              >
+                <Icon name="icon-pin-mono" size={20} color={adaptive.grey600} />
+                <View style={styles.keyInfoContent}>
+                  <Text style={styles.keyInfoLabel}>장소</Text>
+                  <Text style={styles.keyInfoValue} numberOfLines={2}>
+                    {event.venue || event.region}
+                  </Text>
+                </View>
+                <View style={styles.keyInfoAction}>
+                  <Text style={styles.actionLabel}>지도</Text>
+                  <Text style={styles.actionChevron}>›</Text>
+                </View>
+              </Pressable>
+            ) : (
+              <View style={styles.keyInfoCard}>
+                <Icon name="icon-pin-mono" size={20} color={adaptive.grey600} />
+                <Text style={styles.keyInfoLabel}>장소</Text>
+                <Text style={styles.keyInfoValue} numberOfLines={2}>
+                  {event.venue || event.region}
+                </Text>
+              </View>
+            )}
 
             {/* 가격 카드 — 데이터 있을 때만 노출 */}
             {hasPriceData && (
@@ -1028,6 +1058,12 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   badge: {
     marginRight: 8,
     marginBottom: 8,
+  },
+  inlineOverview: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: a.grey600,
+    marginBottom: 16,
   },
   keyInfoGrid: {
     flexDirection: 'row',
