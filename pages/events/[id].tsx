@@ -490,13 +490,6 @@ function EventDetailPage() {
             ))}
           </View>
 
-          {/* DEV: 파일 확인 */}
-          {__DEV__ && (
-            <Text style={{ fontSize: 10, color: '#999', marginBottom: 8 }}>
-              DETAIL FILE: pages/events/[id].tsx
-            </Text>
-          )}
-
           {/* Title */}
           <Post.H2 paddingBottom={event.overview?.trim() ? 6 : 16}>{event.title}</Post.H2>
 
@@ -642,9 +635,6 @@ function EventDetailPage() {
                     <Text style={styles.aiLabelText}>AI 요약</Text>
                   </View>
                 </View>
-                <Text style={styles.overviewCardValue} numberOfLines={3} ellipsizeMode="tail">
-                  {event.overview}
-                </Text>
               </View>
               <View style={styles.overviewCardAction}>
                 <Text style={styles.actionLabel}>자세히</Text>
