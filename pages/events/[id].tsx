@@ -630,7 +630,7 @@ function EventDetailPage() {
           {renderCategoryMeta(event, styles)}
 
           {/* 교통 / 주차 섹션 */}
-          {(event.publicTransportInfo || event.parkingAvailable !== undefined || event.parkingInfo) && (
+          {(event.publicTransportInfo || event.parkingAvailable != null || event.parkingInfo) && (
             <View style={styles.infoSection}>
               <Text style={styles.infoSectionTitle}>교통 · 주차</Text>
               {event.publicTransportInfo ? (
@@ -642,7 +642,7 @@ function EventDetailPage() {
                   </View>
                 </View>
               ) : null}
-              {event.parkingAvailable !== undefined && (
+              {event.parkingAvailable != null && (
                 <View style={styles.infoRow}>
                   <Icon name="icon-car-mono" size={16} color={adaptive.grey600} style={styles.infoRowIconStyle} />
                   <View style={styles.infoRowContent}>
