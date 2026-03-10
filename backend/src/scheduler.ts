@@ -12,6 +12,8 @@ import { runHotRating } from './scripts/ai-hot-rating';
 import { embedNewEvents } from './jobs/embedNewEvents';
 import { sendEndSoonNotifications } from './jobs/sendEndSoonNotifications';
 import { runAutoFeaturedScore } from './jobs/autoFeaturedScore';
+import { runningJobs } from './lib/jobState';
+import { withJobLog } from './lib/jobLogger';
 
 /**
  * ============================================================
@@ -37,8 +39,7 @@ import { runAutoFeaturedScore } from './jobs/autoFeaturedScore';
 // ============================================================
 // Job Execution Tracking (중복 실행 방지)
 // ============================================================
-
-const runningJobs = new Set<string>();
+// runningJobs is imported from './lib/jobState' — shared with ops API routes
 
 // 네트워크 일시 장애(DNS 실패, 연결 거부 등) 여부 판단
 function isTransientNetworkError(error: any): boolean {
@@ -135,19 +136,20 @@ export function initScheduler() {
   try {
     // 매일 03:00 KST - 전체 파이프라인 (중복 실행 방지)
     cron.schedule('0 3 * * *', async () => {
-      await runJobSafely('geo-refresh-03', runGeoRefreshPipeline, { allowConcurrent: false });
+      await runJobSafely('geo-refresh-03', () => runGeoRefreshPipeline({ schedulerJobName: 'geo-refresh-03' }), { allowConcurrent: false });
     }, {
       timezone: 'Asia/Seoul'
     });
     console.log('[Scheduler] registered: Geo refresh pipeline @ 03:00 KST');
 
-    // 매일 15:00 KST - 전체 파이프라인 (중복 실행 방지)
+    // 매일 15:00 KST - 경량 파이프라인 (수집 + 중복제거만, geo/AI 생략)
+    // heavy 후처리(geo backfill, AI enrichment)는 03:00 full pipeline에서 1회 처리
     cron.schedule('0 15 * * *', async () => {
-      await runJobSafely('geo-refresh-15', runGeoRefreshPipeline, { allowConcurrent: false });
+      await runJobSafely('collect-15', () => runGeoRefreshPipeline({ lightMode: true, schedulerJobName: 'collect-15' }), { allowConcurrent: false });
     }, {
       timezone: 'Asia/Seoul'
     });
-    console.log('[Scheduler] registered: Geo refresh pipeline @ 15:00 KST');
+    console.log('[Scheduler] registered: Light collect pipeline @ 15:00 KST (collect+dedupe only)');
 
     // 매일 01:00 KST - 정리 작업
     cron.schedule('0 1 * * *', async () => {
@@ -167,7 +169,7 @@ export function initScheduler() {
 
     // 매일 02:15 KST - featured_score 자동 계산
     cron.schedule('15 2 * * *', async () => {
-      await runJobSafely('auto-featured-score', runAutoFeaturedScore);
+      await runJobSafely('auto-featured-score', () => withJobLog('auto-featured-score', runAutoFeaturedScore));
     }, {
       timezone: 'Asia/Seoul'
     });
@@ -183,23 +185,13 @@ export function initScheduler() {
 
     // 매일 03:30 KST - Price Info 백필 (데이터 수집 후)
     cron.schedule('30 3 * * *', async () => {
-      await runJobSafely('price-info', async () => {
-        await runPriceInfoBackfill({ dryRun: false });
-      });
+      await runJobSafely('price-info', () => withJobLog('price-info', () => runPriceInfoBackfill({ dryRun: false })));
     }, {
       timezone: 'Asia/Seoul'
     });
     console.log('[Scheduler] registered: Price info backfill @ 03:30 KST');
 
-    // 매일 15:30 KST - Price Info 백필 (데이터 수집 후)
-    cron.schedule('30 15 * * *', async () => {
-      await runJobSafely('price-info-15', async () => {
-        await runPriceInfoBackfill({ dryRun: false });
-      });
-    }, {
-      timezone: 'Asia/Seoul'
-    });
-    console.log('[Scheduler] registered: Price info backfill @ 15:30 KST');
+    // 15:30 price info backfill 제거 — 03:30 1회로 충분 (delta only, 가격은 자주 안 바뀜)
 
     // 🤖 AI Enrichment는 이제 geoRefreshPipeline 내에서 자동 실행됩니다!
     // (데이터 수집 직후 바로 AI 분석)
@@ -223,7 +215,7 @@ export function initScheduler() {
 
     // 매일 04:15 KST - Phase 2: Internal Fields 생성 (AI enrichment 직후)
     cron.schedule('15 4 * * *', async () => {
-      await runJobSafely('phase2-internal-fields', enrichInternalFields);
+      await runJobSafely('phase2-internal-fields', () => withJobLog('phase2-internal-fields', enrichInternalFields));
     }, {
       timezone: 'Asia/Seoul'
     });
@@ -231,7 +223,7 @@ export function initScheduler() {
 
     // 매일 05:00 KST - 벡터 임베딩 (데이터 수집/AI 보완 완료 후 신규 이벤트 처리)
     cron.schedule('0 5 * * *', async () => {
-      await runJobSafely('embed-new-events', embedNewEvents);
+      await runJobSafely('embed-new-events', () => withJobLog('embed-new-events', embedNewEvents));
     }, {
       timezone: 'Asia/Seoul'
     });
@@ -239,7 +231,7 @@ export function initScheduler() {
 
     // 매일 08:00 KST - AI Popup Discovery (팝업 신규 발굴 + DB 중복 체크)
     cron.schedule('0 8 * * *', async () => {
-      await runJobSafely('ai-popup-discovery', runPopupDiscovery);
+      await runJobSafely('ai-popup-discovery', () => withJobLog('ai-popup-discovery', runPopupDiscovery));
     }, {
       timezone: 'Asia/Seoul'
     });
@@ -255,7 +247,7 @@ export function initScheduler() {
 
     // 매주 월요일 09:00 KST - AI Hot Rating (전시/공연/축제 핫함 평가)
     cron.schedule('0 9 * * 1', async () => {
-      await runJobSafely('ai-hot-rating', runHotRating);
+      await runJobSafely('ai-hot-rating', () => withJobLog('ai-hot-rating', runHotRating));
     }, {
       timezone: 'Asia/Seoul'
     });
@@ -286,8 +278,7 @@ export function initScheduler() {
     console.log('  - 08:00 KST: AI Popup Discovery (팝업 신규 발굴)');
     console.log('  - 09:00 KST: End-soon notifications (찜한 이벤트 D-3 알림)');
     console.log('  - 09:00 KST (Mon): AI Hot Rating (전시/공연/축제 핫함 평가)');
-    console.log('  - 15:00 KST: Geo refresh pipeline (collect + geoBackfill + venueBackfill + dedupe + AI enrichment)');
-    console.log('  - 15:30 KST: Price info backfill (extract from API payloads)');
+    console.log('  - 15:00 KST: Light collect pipeline (collect + dedupe only, geo/AI 생략)');
     console.log('');
     console.log('  📝 Note: AI enrichment now runs automatically within Geo refresh pipeline!');
   } catch (error) {

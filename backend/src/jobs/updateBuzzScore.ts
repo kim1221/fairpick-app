@@ -2,7 +2,7 @@ import { pool } from '../db';
 import crypto from 'crypto';
 import { getKopisBoxOfficeScore } from '../lib/kopisApi';
 import {
-  calculateConsensusScore,
+  calculateConsensusLight,
   calculateStructuralScore,
   calculateTimeBoost,
   calculatePopupCandidateScore,
@@ -47,6 +47,9 @@ const CONFIG = {
   },
   MIN_SCORE: 0,
   MAX_SCORE: 1000,
+  // Naver consensus 캐시 TTL (일 단위)
+  // 이벤트당 3일에 1회만 Naver API 호출 → 일일 호출량 ~89% 감소
+  CONSENSUS_CACHE_DAYS: 3,
 };
 
 // ============================================
@@ -75,6 +78,8 @@ interface EventBuzzData {
   external_links: Record<string, unknown> | null;
   is_featured: boolean | null;
   created_at: Date;
+  // consensus 캐시 확인용 — buzz_components의 기존 값 재사용
+  buzz_components: Record<string, any> | null;
 }
 
 interface BuzzComponents {
@@ -115,11 +120,30 @@ async function calculateKopisScore(event: EventBuzzData): Promise<number> {
 }
 
 /**
- * Consensus 점수 계산 (전시/축제/행사/공연)
+ * Consensus 점수 계산 - light 버전 (Q1만, Naver 2 call/이벤트)
+ *
+ * 전략: buzz_components에 consensus_updated_at을 캐싱해 3일에 1회만 Naver 호출
+ * - 캐시 유효 시: 저장된 consensus 재사용 (Naver 호출 없음)
+ * - 캐시 만료 시: calculateConsensusLight (Q1 only, 2 call) 호출 후 타임스탬프 갱신
+ *
+ * 기존 calculateConsensusScore (Q1+Q2+Q3, 6 call/이벤트) 대비 Naver 호출 ~89% 감소
  */
-async function calculateConsensus(event: EventBuzzData): Promise<number> {
+async function calculateConsensusWithCache(
+  event: EventBuzzData,
+): Promise<{ score: number; updatedAt: string; fromCache: boolean }> {
+  const cachedScore = event.buzz_components?.consensus as number | undefined;
+  const cachedAt = event.buzz_components?.consensus_updated_at as string | undefined;
+
+  if (typeof cachedScore === 'number' && cachedAt) {
+    const cacheAgeDays = (Date.now() - new Date(cachedAt).getTime()) / (1000 * 60 * 60 * 24);
+    if (cacheAgeDays < CONFIG.CONSENSUS_CACHE_DAYS) {
+      return { score: cachedScore, updatedAt: cachedAt, fromCache: true };
+    }
+  }
+
+  // 캐시 만료 or 최초 계산 → Naver API 호출 (light: Q1 only, 2 call)
   try {
-    const result = await calculateConsensusScore({
+    const score = await calculateConsensusLight({
       id: event.event_id,
       title: event.title,
       main_category: event.main_category,
@@ -129,11 +153,16 @@ async function calculateConsensus(event: EventBuzzData): Promise<number> {
       end_at: event.end_at,
       source: event.source || undefined,
     });
-    console.log(`[Consensus] ${event.title}: ${result.total}`);
-    return result.total;
+    console.log(`[Consensus] ${event.title}: ${score} (light, Naver called)`);
+    return { score, updatedAt: new Date().toISOString(), fromCache: false };
   } catch (error) {
     console.error(`[Consensus] Error for ${event.title}:`, error);
-    return 0;
+    // 실패 시 캐시 값 있으면 재사용, 없으면 0
+    return {
+      score: typeof cachedScore === 'number' ? cachedScore : 0,
+      updatedAt: cachedAt ?? new Date().toISOString(),
+      fromCache: true,
+    };
   }
 }
 
@@ -264,7 +293,8 @@ export async function updateBuzzScore(): Promise<void> {
         COALESCE(action_stats.shares_7d, 0)::INTEGER as shares_7d,
         COALESCE(action_stats.ticket_clicks_7d, 0)::INTEGER as ticket_clicks_7d,
         COALESCE(ce.popularity_score, 0)::INTEGER as popularity_score,
-        ce.created_at
+        ce.created_at,
+        ce.buzz_components  -- consensus 캐시 확인용
       FROM canonical_events ce
 
       -- 7일간 조회수 집계
@@ -304,6 +334,8 @@ export async function updateBuzzScore(): Promise<void> {
     let zeroScoreCount = 0;
     let maxBuzzScore = 0;
     let totalBuzzScore = 0;
+    let naverCallCount = 0;    // 실제 Naver API 호출 수
+    let consensusCacheHits = 0; // 캐시 재사용 수
 
     // 배치 UPDATE용 누적 배열 (루프 내 개별 쿼리 제거)
     const batchIds: string[] = [];
@@ -316,10 +348,18 @@ export async function updateBuzzScore(): Promise<void> {
 
       // 3-2. 외부 hot score 컴포넌트
       let consensusScore = 0;
+      let consensusUpdatedAt: string | null = null;
       const structuralScore = calculateStructural(event);
 
       if (['전시', '축제', '행사', '공연'].includes(event.main_category)) {
-        consensusScore = await calculateConsensus(event);
+        const result = await calculateConsensusWithCache(event);
+        consensusScore = result.score;
+        consensusUpdatedAt = result.updatedAt;
+        if (result.fromCache) {
+          consensusCacheHits++;
+        } else {
+          naverCallCount++; // light = 2 Naver calls, 로그용으로 이벤트 단위 카운트
+        }
       }
 
       // 3-3. 카테고리별 최종 점수 계산
@@ -327,6 +367,7 @@ export async function updateBuzzScore(): Promise<void> {
       const hotComponents: any = {
         ...internalComponents,
         consensus: consensusScore,
+        consensus_updated_at: consensusUpdatedAt, // 캐시 TTL 기준점
         structural: structuralScore,
         internal: internalBuzz,
       };
@@ -448,13 +489,20 @@ export async function updateBuzzScore(): Promise<void> {
     // 4. collection_logs에 기록
     await pool.query(
       `
-      INSERT INTO collection_logs (id, source, type, status, started_at, completed_at, items_count, success_count, failed_count)
-      VALUES ($1, 'system', 'buzz_score_update', 'success', $2, NOW(), $3, 1, 0)
+      INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, completed_at, items_count, success_count, failed_count)
+      VALUES ($1, 'buzz-score', 'system', 'buzz_score_update', 'success', $2, NOW(), $3, 1, 0)
       `,
       [logId, startTime, totalEventsProcessed]
     );
 
     // 5. 통계 출력
+    const consensusTotal = naverCallCount + consensusCacheHits;
+    const cacheHitRate = consensusTotal > 0
+      ? ((consensusCacheHits / consensusTotal) * 100).toFixed(1)
+      : 'N/A';
+    // light 모드는 이벤트당 2 Naver call (blog + web)
+    const estimatedNaverCalls = naverCallCount * 2;
+
     console.log('\n========================================');
     console.log('[UpdateBuzzScore] ✓ Buzz score update completed successfully');
     console.log('========================================');
@@ -463,6 +511,9 @@ export async function updateBuzzScore(): Promise<void> {
     console.log(`  max_buzz_score:           ${maxBuzzScore}`);
     console.log(`  zero_score_count:         ${zeroScoreCount} (${((zeroScoreCount / totalEventsProcessed) * 100).toFixed(1)}%)`);
     console.log(`  lookback_period:          ${CONFIG.LOOKBACK_DAYS} days`);
+    console.log(`  consensus_cache_ttl:      ${CONFIG.CONSENSUS_CACHE_DAYS} days`);
+    console.log(`  consensus_naver_calls:    ${naverCallCount} events × 2 = ~${estimatedNaverCalls} API calls`);
+    console.log(`  consensus_cache_hits:     ${consensusCacheHits} / ${consensusTotal} (${cacheHitRate}%)`);
     console.log('========================================\n');
 
   } catch (error: any) {
@@ -472,8 +523,8 @@ export async function updateBuzzScore(): Promise<void> {
     try {
       await pool.query(
         `
-        INSERT INTO collection_logs (id, source, type, status, started_at, completed_at, items_count, success_count, failed_count, error_message)
-        VALUES ($1, 'system', 'buzz_score_update', 'failed', $2, NOW(), 0, 0, 1, $3)
+        INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, completed_at, items_count, success_count, failed_count, error_message)
+        VALUES ($1, 'buzz-score', 'system', 'buzz_score_update', 'failed', $2, NOW(), 0, 0, 1, $3)
         `,
         [logId, startTime, error.message]
       );

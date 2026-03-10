@@ -412,6 +412,7 @@ export function pickTodayPickCandidateV2(
   candidates: ScoredTodayPickCandidate[],
   recentClickedIds: Set<string>,
   clickedIds: Set<string>,
+  impressionIds: Set<string> = new Set(),
 ): ScoredTodayPickCandidate | null {
   if (candidates.length === 0) return null;
 
@@ -428,7 +429,7 @@ export function pickTodayPickCandidateV2(
   const rotated = [
     ...rotationPool.slice(todayIdx),
     ...rotationPool.slice(0, todayIdx),
-    ...sorted.slice(3), // 나머지 후보는 click exclusion 폴백용
+    ...sorted.slice(3), // 나머지 후보는 click/impression exclusion 폴백용
   ];
 
   console.log(
@@ -438,8 +439,13 @@ export function pickTodayPickCandidateV2(
   );
 
   const picked =
-    rotated.find(c => !recentClickedIds.has(c.event.id)) ??
+    // 1순위: 최근 3일 클릭도 없고 노출도 없는 이벤트 (최선)
+    rotated.find(c => !recentClickedIds.has(c.event.id) && !impressionIds.has(c.event.id)) ??
+    // 2순위: 최근 3일 노출 없는 이벤트 (클릭은 있어도 ok)
+    rotated.find(c => !impressionIds.has(c.event.id)) ??
+    // 3순위: 14일 클릭 없는 이벤트
     rotated.find(c => !clickedIds.has(c.event.id)) ??
+    // 폴백: 모든 후보가 3일 내 노출됐을 때 → 최상위 후보
     rotated[0]!;
 
   console.log(

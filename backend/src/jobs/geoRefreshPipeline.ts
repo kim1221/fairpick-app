@@ -48,12 +48,17 @@ async function getGeoReport(): Promise<{
 }
 
 /**
- * Full Geo Refresh Pipeline 실행
+ * Geo Refresh Pipeline 실행
+ *
+ * @param options.lightMode true = 수집 + 중복제거만 실행 (15:00 오후 파이프라인용)
+ *                          false(기본) = 전체 파이프라인 (geo + AI enrichment 포함)
  */
-export async function runGeoRefreshPipeline(): Promise<void> {
+export async function runGeoRefreshPipeline(options: { lightMode?: boolean; schedulerJobName?: string } = {}): Promise<void> {
+  const { lightMode = false, schedulerJobName } = options;
   const pipelineStart = Date.now();
   const startTime = new Date().toISOString();
   const nodeEnv = process.env.NODE_ENV || 'development';
+  const modeLabel = lightMode ? 'LIGHT (collect+dedupe only)' : 'FULL';
 
   // Step 결과 추적
   let okSteps = 0;
@@ -61,8 +66,8 @@ export async function runGeoRefreshPipeline(): Promise<void> {
   const stepResults: { name: string; status: 'OK' | 'FAILED'; elapsed: number }[] = [];
 
   console.log('═'.repeat(80));
-  console.log(`[GeoRefreshPipeline] START (timestamp=${startTime}, NODE_ENV=${nodeEnv})`);
-  console.log('[GeoRefreshPipeline] Starting Full Geo Refresh Pipeline');
+  console.log(`[GeoRefreshPipeline] START (timestamp=${startTime}, NODE_ENV=${nodeEnv}, mode=${modeLabel})`);
+  console.log(`[GeoRefreshPipeline] Starting ${modeLabel} Geo Refresh Pipeline`);
   console.log('═'.repeat(80));
   console.log();
 
@@ -97,7 +102,7 @@ export async function runGeoRefreshPipeline(): Promise<void> {
       stepResults.push({ name: 'STEP1-collect', status: 'FAILED', elapsed: parseFloat(elapsed) });
     } else {
       try {
-        await runCollectionJob();
+        await runCollectionJob({ schedulerJobName: schedulerJobName ?? 'geo-refresh-03' });
         const elapsed = ((Date.now() - step1Start) / 1000).toFixed(1);
         const elapsedMs = Date.now() - step1Start;
         const step1MemEnd = Math.round(process.memoryUsage().rss / 1024 / 1024);
@@ -119,6 +124,16 @@ export async function runGeoRefreshPipeline(): Promise<void> {
       }
     }
     console.log();
+
+    // STEP 2~5: lightMode에서는 수집 + 중복제거만 하고 종료
+    if (lightMode) {
+      console.log('[GeoRefreshPipeline] lightMode=true → STEP2~5 skipped (geo/AI enrichment 생략)');
+      console.log();
+      // AFTER geo report는 lightMode에서도 출력 (수집 결과 확인용)
+      const after = await getGeoReport();
+      console.log(`[GeoRefreshPipeline] AFTER:  canonical_live=${after.canonical_total_live}, with_geo=${after.canonical_with_geo_live}, pct=${after.canonical_pct_with_geo_live}%`);
+      return;
+    }
 
     // STEP 2: GeoBackfill (Address-based)
     console.log('[GeoRefreshPipeline][STEP2] geoBackfill START (address-based, live-only, limit=2000)');

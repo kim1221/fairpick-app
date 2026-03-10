@@ -36,6 +36,8 @@ import { calculateConsensusLight, calculateStructuralScore } from './lib/hotScor
 import { calculateDataCompleteness, DataCompletenessScore } from './lib/dataQuality';
 import { embedQuery, toVectorLiteral } from './lib/embeddingService';
 import { buildTodayPickPool, pickTodayPickCandidate, buildTodayPickPoolV2, pickTodayPickCandidateV2, applyPersonalizationV2, USE_TODAY_PICK_V2, type ScoredTodayPickCandidate } from './lib/todayPickSelector';
+import { runningJobs } from './lib/jobState';
+import { runOpsJob, KNOWN_JOB_NAMES } from './lib/opsJobRunner';
 
 /**
  * 카테고리별 기본 운영시간 반환
@@ -1179,10 +1181,11 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
     `);
     
     const logsResult = await pool.query(`
-      SELECT id, source, type, status, started_at, completed_at, items_count, success_count, failed_count
+      SELECT id, scheduler_job_name, source, type, status, started_at, completed_at,
+             items_count, success_count, failed_count, skipped_count, error_message
       FROM collection_logs
       ORDER BY started_at DESC
-      LIMIT 10
+      LIMIT 20
     `);
     
     res.json({
@@ -7425,6 +7428,7 @@ interface UserClickHistory {
   recentClickedIds: Set<string>;    // 최근 3일 클릭
   todayPickClickedIds: Set<string>; // today_pick, 전날 이전 14일
   todayPickRecentIds: Set<string>;  // today_pick, 전날 이전 3일
+  todayPickImpressionIds: Set<string>; // today_pick, 최근 3일 노출 (impression)
   categoryClickCounts: Map<string, number>; // 카테고리별 (event,section) 단위 집계
   cachedAt: number;
 }
@@ -7483,11 +7487,27 @@ async function getUserClickHistory(userId: string): Promise<UserClickHistory> {
     }
   });
 
+  // 최근 3일 today_pick impression 조회 (두 번째 쿼리, 기존 click 쿼리와 독립)
+  const impressionResult = await pool.query(
+    `SELECT event_id
+     FROM user_events
+     WHERE user_id = $1
+       AND action_type = 'impression'
+       AND section_slug = 'today_pick'
+       AND created_at > NOW() - INTERVAL '3 days'
+     GROUP BY event_id`,
+    [userId],
+  );
+  const todayPickImpressionIds = new Set<string>(
+    impressionResult.rows.map((r: any) => r.event_id),
+  );
+
   const history: UserClickHistory = {
     clickedIds,
     recentClickedIds,
     todayPickClickedIds,
     todayPickRecentIds,
+    todayPickImpressionIds,
     categoryClickCounts,
     cachedAt: now,
   };
@@ -7583,6 +7603,7 @@ app.get('/api/home/sections', async (req, res) => {
     let recentClickedIds = new Set<string>();
     let todayPickClickedIds = new Set<string>();
     let todayPickRecentIds = new Set<string>();
+    let todayPickImpressionIds = new Set<string>();
     let categoryClickCounts = new Map<string, number>();
     if (userId) {
       try {
@@ -7591,6 +7612,7 @@ app.get('/api/home/sections', async (req, res) => {
         recentClickedIds = history.recentClickedIds;
         todayPickClickedIds = history.todayPickClickedIds;
         todayPickRecentIds = history.todayPickRecentIds;
+        todayPickImpressionIds = history.todayPickImpressionIds;
         categoryClickCounts = history.categoryClickCounts;
 
         // [DEBUG] 카테고리 집계 로그
@@ -7657,11 +7679,26 @@ app.get('/api/home/sections', async (req, res) => {
         if (USE_TODAY_PICK_V2) {
           const rawCandidates = pool_.rawEvents as ScoredTodayPickCandidate[];
           const personalized = applyPersonalizationV2(rawCandidates, categoryClickCounts);
-          const picked = pickTodayPickCandidateV2(personalized, todayPickRecentIds, todayPickClickedIds);
+          const picked = pickTodayPickCandidateV2(
+            personalized,
+            todayPickRecentIds,
+            todayPickClickedIds,
+            todayPickImpressionIds,
+          );
           pickedEvent = picked?.event ?? null;
         } else {
           pickedEvent = pickTodayPickCandidate(pool_.rawEvents, recentClickedIds, clickedIds);
         }
+
+        // impression 기록 (fire-and-forget, 응답 지연 없음)
+        if (userId && pickedEvent) {
+          pool.query(
+            `INSERT INTO user_events (user_id, event_id, action_type, section_slug, metadata)
+             VALUES ($1, $2, 'impression', 'today_pick', '{}'::jsonb)`,
+            [userId, pickedEvent.id],
+          ).catch(() => {});
+        }
+
         events = pickedEvent ? [mapEventForFrontend(pickedEvent)].filter(Boolean) : [];
 
       } else if (pool_.slug === 'discovery' || pool_.slug === 'beginner') {
@@ -8018,6 +8055,162 @@ app.delete('/admin/curation-themes/:id', requireAdminAuth, async (req, res) => {
   }
 });
 
+
+// ============================================================
+// Admin Ops API
+// ============================================================
+
+/**
+ * GET /admin/ops/executions
+ * 최근 collection_logs 조회 (페이지네이션 지원)
+ */
+app.get('/admin/ops/executions', requireAdminAuth, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const offset = parseInt(req.query.offset as string) || 0;
+    const jobName = req.query.job as string | undefined;
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (jobName) {
+      params.push(jobName);
+      conditions.push(`scheduler_job_name = $${params.length}`);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit, offset);
+
+    const result = await pool.query(
+      `SELECT id, scheduler_job_name, source, type, status, started_at, completed_at,
+              items_count, success_count, failed_count, skipped_count, error_message
+       FROM collection_logs
+       ${where}
+       ORDER BY started_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    res.json({ executions: result.rows, limit, offset });
+  } catch (error) {
+    console.error('[Admin] GET /admin/ops/executions failed:', error);
+    res.status(500).json({ message: 'Failed to load executions' });
+  }
+});
+
+/**
+ * GET /admin/ops/executions/:id
+ * 단일 실행 상세 조회
+ */
+app.get('/admin/ops/executions/:id', requireAdminAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, scheduler_job_name, source, type, status, started_at, completed_at,
+              items_count, success_count, failed_count, skipped_count, error_message
+       FROM collection_logs
+       WHERE id = $1`,
+      [req.params.id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Execution not found' });
+    }
+
+    const row = result.rows[0];
+    const durationMs = row.completed_at
+      ? new Date(row.completed_at).getTime() - new Date(row.started_at).getTime()
+      : null;
+
+    res.json({
+      id: row.id,
+      jobName: row.scheduler_job_name ?? row.source ?? row.type ?? 'unknown',
+      jobLabel: [row.scheduler_job_name, row.type].filter(Boolean).join(' · '),
+      status: row.status === 'partial' ? 'partial_success' : row.status,
+      startedAt: row.started_at,
+      endedAt: row.completed_at ?? null,
+      durationMs,
+      totalCount: row.items_count ?? 0,
+      successCount: row.success_count ?? 0,
+      failedCount: row.failed_count ?? 0,
+      skippedCount: row.skipped_count ?? 0,
+      summary: null,
+      errorMessage: row.error_message ?? null,
+      steps: [],
+      failedItems: [],
+    });
+  } catch (error) {
+    console.error('[Admin] GET /admin/ops/executions/:id failed:', error);
+    res.status(500).json({ message: 'Failed to load execution' });
+  }
+});
+
+/**
+ * GET /admin/ops/jobs
+ * 스케줄러 잡 목록 + 각 잡의 마지막 실행 상태
+ */
+app.get('/admin/ops/jobs', requireAdminAuth, async (req, res) => {
+  try {
+    // 각 scheduler_job_name의 가장 최근 로그 1건씩
+    const result = await pool.query(`
+      SELECT DISTINCT ON (scheduler_job_name)
+             id, scheduler_job_name, source, type, status, started_at, completed_at,
+             items_count, success_count, failed_count, skipped_count, error_message
+      FROM collection_logs
+      WHERE scheduler_job_name IS NOT NULL
+      ORDER BY scheduler_job_name, started_at DESC
+    `);
+
+    // running 상태 오버라이드 (메모리 기반 — 서버 내부 Set)
+    const currentlyRunning = Array.from(runningJobs);
+
+    res.json({
+      logs: result.rows,
+      currentlyRunning,
+      knownJobNames: KNOWN_JOB_NAMES,
+    });
+  } catch (error) {
+    console.error('[Admin] GET /admin/ops/jobs failed:', error);
+    res.status(500).json({ message: 'Failed to load jobs' });
+  }
+});
+
+/**
+ * POST /admin/ops/jobs/:jobName/run
+ * 잡 즉시 실행 (fire-and-forget)
+ * - 409: 이미 실행 중
+ * - 404: 알 수 없는 잡 이름
+ */
+app.post('/admin/ops/jobs/:jobName/run', requireAdminAuth, async (req, res) => {
+  const jobName = String(req.params.jobName);
+
+  try {
+    const result = runOpsJob(jobName);
+    res.json({
+      success: true,
+      message: `Job '${jobName}' started`,
+      jobName: result.jobName,
+      startedAt: result.startedAt,
+    });
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'NOT_FOUND') {
+      return res.status(404).json({ message: `Unknown job: ${jobName}`, knownJobs: KNOWN_JOB_NAMES });
+    }
+    if (code === 'ALREADY_RUNNING') {
+      return res.status(409).json({ message: `Job '${jobName}' is already running` });
+    }
+    console.error(`[Admin] POST /admin/ops/jobs/${jobName}/run failed:`, err);
+    res.status(500).json({ message: 'Failed to start job' });
+  }
+});
+
+/**
+ * POST /admin/ops/executions/:id/retry
+ * 실행 재시도 (stub — 향후 구현)
+ */
+app.post('/admin/ops/executions/:id/retry', requireAdminAuth, async (req, res) => {
+  res.status(501).json({ message: 'Retry not yet implemented' });
+});
 
 // ============================================================
 // Event Loop Lag Monitoring

@@ -579,6 +579,29 @@ export async function getAllCanonicalEventsForNormalization(): Promise<Canonical
   return result.rows;
 }
 
+// Delta 처리용: 정규화가 필요한 이벤트만 조회 (full scan 방지)
+// - main_category null / 허용 목록 외 → 미분류 또는 잘못된 카테고리
+// - sub_category null / 빈값 → 서브 카테고리 미설정
+// - updated_at 25시간 이내 → 최근 수집/갱신된 이벤트 (재검증 필요)
+// - is_deleted = false, source_priority_winner != 'manual' → 활성 비수동 이벤트만
+export async function getCanonicalEventsForNormalizationDelta(): Promise<CanonicalEventForNormalization[]> {
+  const result = await pool.query(`
+    SELECT id, title, main_category, sub_category, source_priority_winner, sources
+    FROM canonical_events
+    WHERE is_deleted = false
+      AND source_priority_winner != 'manual'
+      AND (
+        main_category IS NULL
+        OR main_category NOT IN ('공연', '전시', '축제', '행사', '팝업')
+        OR sub_category IS NULL
+        OR sub_category = ''
+        OR updated_at > NOW() - INTERVAL '25 hours'
+      )
+    ORDER BY created_at DESC
+  `);
+  return result.rows;
+}
+
 // Canonical 이벤트 카테고리 업데이트
 export async function updateCanonicalEventCategories(
   id: string,

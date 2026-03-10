@@ -1,5 +1,5 @@
 import {
-  getAllCanonicalEventsForNormalization,
+  getCanonicalEventsForNormalizationDelta,
   updateCanonicalEventCategories,
 } from '../db';
 
@@ -202,11 +202,14 @@ function validateAndCorrectCategories(
 async function normalizeCategories() {
   console.log('[NormalizeCategories] Starting category normalization...');
 
-  // 1. 모든 canonical events 조회
-  console.log('[NormalizeCategories] Fetching all canonical events...');
-  const events = await getAllCanonicalEventsForNormalization();
+  // 1. Delta: 정규화가 필요한 이벤트만 조회
+  //    - main_category null / 허용 목록 외
+  //    - sub_category null / 빈값
+  //    - 최근 25시간 이내 수집/갱신 이벤트
+  console.log('[NormalizeCategories] Fetching delta events (null/invalid categories + recent 25h)...');
+  const events = await getCanonicalEventsForNormalizationDelta();
 
-  console.log(`[NormalizeCategories] Found ${events.length} canonical events`);
+  console.log(`[NormalizeCategories] Delta: ${events.length} events to process`);
 
   let updatedCount = 0;
   let unchangedCount = 0;
