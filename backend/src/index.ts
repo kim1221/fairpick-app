@@ -1185,7 +1185,7 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
              items_count, success_count, failed_count, skipped_count, error_message
       FROM collection_logs
       ORDER BY started_at DESC
-      LIMIT 20
+      LIMIT 100
     `);
     
     res.json({
