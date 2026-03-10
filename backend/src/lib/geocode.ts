@@ -201,10 +201,37 @@ export async function geocodeBestEffort(
 
 /**
  * region 추출 헬퍼 (주소 문자열에서 시/도 단위 추출)
+ * 전체 시도명(전라남도, 경상북도 등)과 약칭(전남, 경북 등) 모두 처리
  */
 export function extractRegion(address: string): string | null {
   if (!address) return null;
 
+  // 전체 시도명 → 약칭 매핑 (먼저 체크)
+  const fullNameMap: [RegExp, string][] = [
+    [/^서울특별시/, '서울'],
+    [/^부산광역시/, '부산'],
+    [/^대구광역시/, '대구'],
+    [/^인천광역시/, '인천'],
+    [/^광주광역시/, '광주'],
+    [/^대전광역시/, '대전'],
+    [/^울산광역시/, '울산'],
+    [/^세종특별자치시/, '세종'],
+    [/^경기도/, '경기'],
+    [/^강원특별자치도|^강원도/, '강원'],
+    [/^충청북도/, '충북'],
+    [/^충청남도/, '충남'],
+    [/^전북특별자치도|^전라북도/, '전북'],
+    [/^전라남도/, '전남'],
+    [/^경상북도/, '경북'],
+    [/^경상남도/, '경남'],
+    [/^제주특별자치도/, '제주'],
+  ];
+
+  for (const [pattern, region] of fullNameMap) {
+    if (pattern.test(address)) return region;
+  }
+
+  // 이미 약칭으로 시작하는 경우
   const match = address.match(
     /^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)/
   );
