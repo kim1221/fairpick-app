@@ -630,8 +630,8 @@ export default function EventsPage() {
         metadata: selectedEvent.metadata,
       };
 
-      // 🆕 좌표가 null이 아닐 때만 포함 (null이면 백엔드가 자동 지오코딩)
-      if (selectedEvent.lat !== null && selectedEvent.lng !== null) {
+      // 🆕 좌표 + region 모두 있을 때만 포함 (region이 null이면 백엔드가 재지오코딩)
+      if (selectedEvent.lat !== null && selectedEvent.lng !== null && selectedEvent.region) {
         updateData.lat = selectedEvent.lat;
         updateData.lng = selectedEvent.lng;
         updateData.region = selectedEvent.region;
