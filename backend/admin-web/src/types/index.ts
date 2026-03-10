@@ -262,6 +262,21 @@ export interface ImageMetadata {
   uploadedBy?: string;
 }
 
+// 이벤트 삭제 결과
+export interface DeleteEventResult {
+  success: boolean;
+  message: string;
+  eventId: string;
+  deleteMode: 'soft';
+  dbDeleted: boolean;
+  r2Action: 'preserved' | 'not_applicable';
+  r2ActionReason: 'soft_delete_retention' | 'external_url' | 'no_image';
+  imageKey: string | null;
+  imageStorage: string | null;
+  scheduledCleanupAfter: string | null; // 'YYYY-MM-DD'
+  item: Event;
+}
+
 // 이미지 업로드 응답
 export interface UploadImageResponse {
   success: boolean;

@@ -2164,9 +2164,9 @@ app.delete('/admin/events/:id', requireAdminAuth, async (req, res) => {
     const eventId = req.params.id;
     const { reason } = req.body; // 삭제 사유 (선택)
 
-    // 이벤트 존재 확인
+    // 이벤트 존재 확인 (이미지 정보 포함)
     const checkResult = await pool.query(
-      'SELECT id, title, is_deleted FROM canonical_events WHERE id = $1',
+      'SELECT id, title, is_deleted, image_key, image_storage, image_url FROM canonical_events WHERE id = $1',
       [eventId]
     );
 
@@ -2193,16 +2193,46 @@ app.delete('/admin/events/:id', requireAdminAuth, async (req, res) => {
 
     const deletedEvent = formatEventDates(result.rows[0]);
 
+    // 30일 후 정리 예정일 계산
+    const scheduledCleanupAfter = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split('T')[0];
+
+    const imageKey: string | null = event.image_key ?? null;
+    const imageStorage: string | null = event.image_storage ?? null;
+
+    // R2 이미지 처리 방침 결정
+    let r2Action: 'preserved' | 'not_applicable';
+    let r2ActionReason: string;
+    if (imageStorage === 'cdn' && imageKey) {
+      r2Action = 'preserved';
+      r2ActionReason = 'soft_delete_retention'; // 30일 후 cleanup job에서 정리
+    } else {
+      r2Action = 'not_applicable';
+      r2ActionReason = imageStorage === 'external' ? 'external_url' : 'no_image';
+    }
+
     console.log('[Admin] ✅ Event soft deleted:', {
       id: eventId,
       title: event.title,
-      reason: reason || 'Admin deleted'
+      reason: reason || 'Admin deleted',
+      imageKey,
+      imageStorage,
+      r2Action,
     });
 
     res.json({
       success: true,
-      message: 'Event deleted successfully',
-      item: deletedEvent
+      message: '이벤트 삭제 완료',
+      eventId,
+      deleteMode: 'soft',
+      dbDeleted: true,
+      r2Action,
+      r2ActionReason,
+      imageKey,
+      imageStorage,
+      scheduledCleanupAfter: imageStorage === 'cdn' ? scheduledCleanupAfter : null,
+      item: deletedEvent,
     });
   } catch (error) {
     console.error('[Admin] Delete event failed:', error);

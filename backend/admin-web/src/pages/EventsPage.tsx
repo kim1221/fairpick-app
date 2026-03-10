@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi } from '../services/api';
-import type { Event } from '../types';
+import type { Event, DeleteEventResult } from '../types';
 import CompletenessBar from '../components/CompletenessBar';
 import DeployChecklist from '../components/DeployChecklist';
 import FieldSelectorModal from '../components/FieldSelectorModal';
@@ -28,6 +28,8 @@ export default function EventsPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [enriching, setEnriching] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; reason: string }>({ open: false, reason: '' });
+  const [deleteResult, setDeleteResult] = useState<DeleteEventResult | null>(null);
 
   // AI 보완 — 필드 선택 모달
   const [showFieldSelectorModal, setShowFieldSelectorModal] = useState(false);
@@ -568,25 +570,19 @@ export default function EventsPage() {
     }
   };
 
-  const handleDeleteEvent = async () => {
+  const handleDeleteEvent = () => {
     if (!selectedEvent) return;
+    setDeleteConfirm({ open: true, reason: '' });
+  };
 
-    const confirmed = window.confirm(
-      `정말로 "${selectedEvent.title}" 이벤트를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`
-    );
-
-    if (!confirmed) return;
-
-    // 삭제 사유 입력 (선택)
-    const reason = window.prompt('삭제 사유를 입력하세요 (선택):');
-
+  const handleDeleteConfirm = async () => {
+    if (!selectedEvent) return;
+    setDeleteConfirm((s) => ({ ...s, open: false }));
     try {
-      await adminApi.deleteEvent(selectedEvent.id, reason || undefined);
-      alert('✅ 이벤트가 삭제되었습니다.');
-
-      // 목록 새로고침 및 모달 닫기
+      const result = await adminApi.deleteEvent(selectedEvent.id, deleteConfirm.reason || undefined);
+      setDeleteResult(result);
       setSelectedEvent(null);
-      refetch(); // useQuery의 refetch 함수 사용
+      refetch();
     } catch (error: any) {
       console.error('[Delete] Error:', error);
       alert('❌ 삭제 실패: ' + (error.response?.data?.message || error.message));
@@ -3353,6 +3349,117 @@ export default function EventsPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 삭제 확인 모달 ── */}
+      {deleteConfirm.open && selectedEvent && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-1">이벤트 삭제</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              <span className="font-medium text-gray-800">"{selectedEvent.title}"</span> 이벤트를 삭제합니다.
+              <br />
+              <span className="text-yellow-600 text-xs">※ Soft delete — 30일 후 자동 정리됩니다.</span>
+            </p>
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-600 mb-1">삭제 사유 (선택)</label>
+              <input
+                type="text"
+                value={deleteConfirm.reason}
+                onChange={(e) => setDeleteConfirm((s) => ({ ...s, reason: e.target.value }))}
+                placeholder="예: 종료된 행사, 중복 데이터..."
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                autoFocus
+                onKeyDown={(e) => e.key === 'Enter' && handleDeleteConfirm()}
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDeleteConfirm({ open: false, reason: '' })}
+                className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200 transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+              >
+                삭제 확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 삭제 결과 모달 ── */}
+      {deleteResult && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-2xl">🗑️</span>
+              <h3 className="text-lg font-semibold text-gray-900">삭제 결과</h3>
+            </div>
+
+            <div className="space-y-3">
+              {/* DB 삭제 */}
+              <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                <span className="text-sm text-gray-600">DB 삭제</span>
+                {deleteResult.dbDeleted ? (
+                  <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">완료</span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full">실패</span>
+                )}
+              </div>
+
+              {/* 삭제 방식 */}
+              <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                <span className="text-sm text-gray-600">삭제 방식</span>
+                <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full">
+                  Soft Delete
+                </span>
+              </div>
+
+              {/* R2 이미지 상태 */}
+              <div className="py-2 border-b border-gray-100">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm text-gray-600">R2 이미지</span>
+                  {deleteResult.r2Action === 'preserved' ? (
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">보존 중</span>
+                  ) : (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs font-medium rounded-full">해당없음</span>
+                  )}
+                </div>
+                {deleteResult.r2Action === 'preserved' && deleteResult.scheduledCleanupAfter && (
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {deleteResult.scheduledCleanupAfter} 이후 정리 예정 (30일 보존 정책)
+                  </p>
+                )}
+                {deleteResult.r2Action === 'not_applicable' && (
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {deleteResult.r2ActionReason === 'external_url' ? '외부 URL 이미지 (R2 미사용)' : '이미지 없음'}
+                  </p>
+                )}
+              </div>
+
+              {/* 이미지 Key */}
+              {deleteResult.imageKey && (
+                <div className="py-2 border-b border-gray-100">
+                  <p className="text-xs text-gray-500 mb-1">Image Key</p>
+                  <code className="text-xs text-gray-700 bg-gray-50 px-2 py-1 rounded block break-all">
+                    {deleteResult.imageKey}
+                  </code>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => setDeleteResult(null)}
+              className="mt-5 w-full px-4 py-2 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-900 transition-colors"
+            >
+              확인
+            </button>
           </div>
         </div>
       )}

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Event, DashboardStats, PaginatedResponse, PopupFormData, UploadImageResponse } from '../types';
+import type { Event, DashboardStats, PaginatedResponse, PopupFormData, UploadImageResponse, DeleteEventResult } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 const isDev = import.meta.env.DEV;
@@ -118,10 +118,11 @@ export const adminApi = {
   },
 
   // 이벤트 삭제
-  deleteEvent: async (id: string, reason?: string): Promise<void> => {
-    await api.delete(`/admin/events/${id}`, {
+  deleteEvent: async (id: string, reason?: string): Promise<DeleteEventResult> => {
+    const res = await api.delete<DeleteEventResult>(`/admin/events/${id}`, {
       data: { reason }
     });
+    return res.data;
   },
 
   // 팝업 생성
