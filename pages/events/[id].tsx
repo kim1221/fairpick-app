@@ -493,11 +493,14 @@ function EventDetailPage() {
           {/* Title */}
           <Post.H2 paddingBottom={event.overview?.trim() ? 6 : 16}>{event.title}</Post.H2>
 
-          {/* Overview 인라인 — 제목 바로 아래 흥미 유도 */}
+          {/* Overview 인라인 — 제목 바로 아래 흥미 유도 + 더보기 */}
           {event.overview?.trim() && (
-            <Text style={styles.inlineOverview} numberOfLines={2} ellipsizeMode="tail">
-              {event.overview.trim()}
-            </Text>
+            <Pressable onPress={() => setActiveSheet('overview')}>
+              <Text style={styles.inlineOverview} numberOfLines={2} ellipsizeMode="tail">
+                {event.overview.trim()}
+              </Text>
+              <Text style={styles.inlineOverviewMore}>더보기 ›</Text>
+            </Pressable>
           )}
 
           {/* Tier 1: 크리티컬 알림 (사전 등록, 대기, 마지막 입장) */}
@@ -529,9 +532,8 @@ function EventDetailPage() {
             const gridCardCount = 2 + (hasPriceData ? 1 : 0) + (hasHoursDetail ? 1 : 0);
             const isOddGrid = gridCardCount % 2 !== 0;
 
-            // 오버뷰 상세정보 존재 여부 (공연 크루 포함)
-            const hasOverviewDetail =
-              !!event.overview?.trim() ||
+            // 공연 크루 정보 존재 여부 (overview는 인라인으로 처리하므로 분리)
+            const hasCrew =
               !!event.crewDirector || !!event.crewWriter || !!event.crewComposer;
 
             return (
@@ -621,8 +623,8 @@ function EventDetailPage() {
             )}
           </View>
 
-          {/* 오버뷰 카드 */}
-          {hasOverviewDetail && (
+          {/* 공연 크루 카드 — crew 정보가 있을 때만 노출 (overview는 인라인으로 처리) */}
+          {hasCrew && (
             <Pressable
               style={styles.overviewCard}
               onPress={() => setActiveSheet('overview')}
@@ -630,10 +632,7 @@ function EventDetailPage() {
               <Icon name="icon-star-mono" size={20} color={adaptive.grey600} style={{ marginRight: 12, marginTop: 2 }} />
               <View style={styles.overviewCardContent}>
                 <View style={styles.overviewCardTitleRow}>
-                  <Text style={styles.overviewCardTitle}>이 이벤트는요</Text>
-                  <View style={styles.aiLabel}>
-                    <Text style={styles.aiLabelText}>AI 요약</Text>
-                  </View>
+                  <Text style={styles.overviewCardTitle}>공연 정보</Text>
                 </View>
               </View>
               <View style={styles.overviewCardAction}>
@@ -695,9 +694,11 @@ function EventDetailPage() {
             </View>
           )}
 
-          {/* 지도 및 주소 섹션 */}
+          {/* 오시는 길 섹션 */}
           {event.venue && (
-            <View style={styles.mapSection}>
+            <>
+              <Text style={[styles.infoSectionTitle, { marginTop: 20 }]}>오시는 길</Text>
+              <View style={[styles.mapSection, { marginTop: 0 }]}>
               <View style={styles.addressCard}>
                 <View style={styles.addressInfo}>
                   <Text style={styles.venueTitle}>{event.venue}</Text>
@@ -727,6 +728,7 @@ function EventDetailPage() {
                 </View>
               )}
             </View>
+            </>
           )}
 
         </View>
@@ -1053,6 +1055,12 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: a.grey600,
+    marginBottom: 4,
+  },
+  inlineOverviewMore: {
+    fontSize: 12,
+    color: a.grey400,
+    textAlign: 'right',
     marginBottom: 16,
   },
   keyInfoGrid: {
