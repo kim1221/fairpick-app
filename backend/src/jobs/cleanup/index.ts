@@ -1,5 +1,6 @@
 import { pool } from '../../db';
 import crypto from 'crypto';
+import { deleteEventImage } from '../../lib/imageUpload';
 
 /**
  * ============================================================
@@ -42,6 +43,7 @@ export async function runCleanupJob(): Promise<void> {
 
   let deletedCount = 0;
   let hardDeletedCount = 0;
+  let r2DeletedCount = 0;
   let userEventsDeletedCount = 0;
   let rawEventsDeletedCount = 0;
   let errorMessage: string | null = null;
@@ -178,6 +180,60 @@ export async function runCleanupJob(): Promise<void> {
     if (expiredIds.rowCount && expiredIds.rowCount > 0) {
       const ids = expiredIds.rows.map((r: any) => r.id);
 
+      // R2 이미지 삭제 (DB 삭제 전 처리)
+      const imageRows = await pool.query<{ id: string; image_key: string }>(`
+        SELECT id, image_key
+        FROM canonical_events
+        WHERE id = ANY($1)
+          AND image_storage = 'cdn'
+          AND image_key IS NOT NULL
+      `, [ids]);
+
+      if (imageRows.rows.length > 0) {
+        const imageKeys = imageRows.rows.map(r => r.image_key);
+
+        // 배치 refCheck: 삭제 배치 외 다른 이벤트가 같은 key를 참조하는지 1회 쿼리
+        const sharedResult = await pool.query<{ image_key: string }>(`
+          SELECT image_key
+          FROM canonical_events
+          WHERE image_key = ANY($1)
+            AND NOT (id = ANY($2::uuid[]))
+          GROUP BY image_key
+          HAVING COUNT(*) > 0
+        `, [imageKeys, ids]);
+
+        const sharedKeys = new Set<string>(sharedResult.rows.map(r => r.image_key));
+        let r2SkippedCount = 0;
+
+        for (const row of imageRows.rows) {
+          if (sharedKeys.has(row.image_key)) {
+            r2SkippedCount++;
+            continue;  // 다른 이벤트가 참조 중 → 삭제 건너뜀
+          }
+
+          try {
+            await deleteEventImage(row.image_key);
+            r2DeletedCount++;
+
+            // image_audit_log 기록 (fire-and-forget)
+            pool.query(`
+              INSERT INTO image_audit_log
+                (event_id, action, image_key, deleted_at, deletion_reason)
+              VALUES ($1, 'delete', $2, NOW(), 'hard_delete_cleanup')
+            `, [row.id, row.image_key]).catch(() => {});
+          } catch (err: any) {
+            console.error(
+              `[CleanupJob] R2 delete failed for key ${row.image_key}:`, err?.message,
+            );
+            // R2 실패해도 DB hard-delete는 계속 진행
+          }
+        }
+
+        console.log(
+          `[CleanupJob] R2 images: deleted=${r2DeletedCount}, skipped(shared)=${r2SkippedCount}`,
+        );
+      }
+
       // 연관 레코드 먼저 삭제 (FK 없는 테이블)
       await pool.query(`DELETE FROM user_likes   WHERE event_id = ANY($1)`, [ids]);
       await pool.query(`DELETE FROM user_recent  WHERE event_id = ANY($1)`, [ids]);
@@ -228,6 +284,7 @@ export async function runCleanupJob(): Promise<void> {
   console.log(
     `[CleanupJob] Completed - Status: ${finalStatus}, ` +
     `Soft deleted: ${deletedCount}, Hard deleted: ${hardDeletedCount}, ` +
+    `R2 images deleted: ${r2DeletedCount}, ` +
     `user_events purged: ${userEventsDeletedCount}, ` +
     `raw_events purged: ${rawEventsDeletedCount}`,
   );
