@@ -147,27 +147,14 @@ const REGION_LIST_FALLBACK: RegionItem[] = [
 const REGION_COUNTS_CACHE_TTL_MS = 30 * 60 * 1000;
 let _regionCountsCache: { data: RegionItem[]; expiresAt: number } | null = null;
 
-// 시도(Kakao region_1depth_name) → 앱 지역 코드 매핑
+// Kakao region_1depth_name → 앱 지역 코드 매핑
+// 대부분 지역은 이미 단축형("서울", "경기", "부산" 등)으로 반환됨
+// 특별자치도/시만 예외적으로 full name이 오므로 해당 4개만 매핑
 const SIDO_TO_REGION: Record<string, string> = {
-  '서울특별시': '서울',
-  '경기도': '경기',
-  '부산광역시': '부산',
-  '인천광역시': '인천',
-  '대구광역시': '대구',
-  '대전광역시': '대전',
-  '광주광역시': '광주',
-  '울산광역시': '울산',
-  '세종특별자치시': '세종',
-  '강원도': '강원',
   '강원특별자치도': '강원',
-  '충청북도': '충북',
-  '충청남도': '충남',
-  '전라북도': '전북',
   '전북특별자치도': '전북',
-  '전라남도': '전남',
-  '경상북도': '경북',
-  '경상남도': '경남',
   '제주특별자치도': '제주',
+  '세종특별자치시': '세종',
 };
 
 interface ActiveFilters {
@@ -573,67 +560,6 @@ function getReasonLabel(item: EventCardData): string | null {
 }
 
 // ─────────────────────────────────────────────────
-// 카테고리 entry 카드 (발견탭 기본 상태 전용)
-// ─────────────────────────────────────────────────
-const CATEGORY_ENTRY_COLORS: Record<string, { bg: string; text: string }> = {
-  '팝업': { bg: '#FFF0E6', text: '#C04000' },
-  '전시': { bg: '#F0EAFF', text: '#5B2BBF' },
-  '공연': { bg: '#FFF0F0', text: '#B91C1C' },
-  '축제': { bg: '#E6FAF2', text: '#0D7A52' },
-  '행사': { bg: '#EAF2FF', text: '#1A56C7' },
-};
-
-const CATEGORY_ENTRIES = CATEGORIES.filter(c => c.value !== null) as Array<{
-  id: string;
-  label: string;
-  value: string;
-}>;
-
-interface CategoryEntryRowProps {
-  onPress: (value: string) => void;
-}
-
-const CategoryEntryRow = React.memo(function CategoryEntryRow({ onPress }: CategoryEntryRowProps) {
-  return (
-    <View style={categoryEntryStyles.row}>
-      {CATEGORY_ENTRIES.map((cat) => {
-        const color = CATEGORY_ENTRY_COLORS[cat.label] ?? { bg: '#F2F4F6', text: '#4E5968' };
-        return (
-          <Pressable
-            key={cat.id}
-            style={[categoryEntryStyles.card, { backgroundColor: color.bg }]}
-            onPress={() => onPress(cat.value)}
-          >
-            <Text style={[categoryEntryStyles.label, { color: color.text }]}>{cat.label}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-});
-
-const categoryEntryStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingTop: 12,
-    paddingBottom: 4,
-    gap: 6,
-  },
-  card: {
-    flex: 1,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-});
-
-// ─────────────────────────────────────────────────
 // 그리드 카드 — useLike 훅 사용을 위해 별도 컴포넌트
 // ─────────────────────────────────────────────────
 function GridCard({ item, onPress }: { item: EventCardData; onPress: (id: string) => void }) {
@@ -922,7 +848,8 @@ function ExplorePage() {
       const { latitude, longitude } = location.coords;
       const geo = await reverseGeocode(latitude, longitude);
       const sido = geo.sido?.trim();
-      const region = sido ? SIDO_TO_REGION[sido] : undefined;
+      // 직접 매치 우선(서울, 경기 등) → 예외 매핑(강원특별자치도 등) → undefined
+      const region = sido ? (SIDO_TO_REGION[sido] ?? sido) : undefined;
       if (region) {
         handleRegionSelect(region); // 시트 닫힘 + 필터 적용
       }
@@ -979,18 +906,10 @@ function ExplorePage() {
     />
   );
 
-  // ─── FlatList 헤더: 카테고리 entry(기본 상태) + 결과 카운트 ──
-  const isNoFilter =
-    activeFilters.category === null &&
-    activeFilters.region === null &&
-    activeFilters.quickFilter === null;
-
+  // ─── FlatList 헤더: 결과 카운트 ───────────────
   const renderListHeader = () => (
-    <View>
-      {isNoFilter && <CategoryEntryRow onPress={handleCategoryPress} />}
-      <View style={styles.countRow}>
-        <Text style={styles.countText}>총 {totalCount.toLocaleString()}개</Text>
-      </View>
+    <View style={styles.countRow}>
+      <Text style={styles.countText}>총 {totalCount.toLocaleString()}개</Text>
     </View>
   );
 
