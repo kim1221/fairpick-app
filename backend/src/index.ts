@@ -7529,6 +7529,25 @@ function sampleWithClickDownrank<T extends { id: string }>(
   return result;
 }
 
+/**
+ * impression downrank 포함 샘플링
+ * 1순위: 클릭도 없고 최근 24h 노출도 없음 (fresh)
+ * 2순위: 최근 24h 노출 있지만 클릭 없음 (impressed)
+ * 3순위: 클릭한 적 있음 (clicked)
+ */
+function sampleWithImpressionDownrank<T extends { id: string }>(
+  arr: T[],
+  n: number,
+  clickedIds: Set<string>,
+  recentImpressionIds: Set<string> = new Set(),
+): T[] {
+  if (arr.length <= n) return arr;
+  const fresh     = shuffleArray(arr.filter(e => !clickedIds.has(e.id) && !recentImpressionIds.has(e.id)));
+  const impressed = shuffleArray(arr.filter(e => !clickedIds.has(e.id) && recentImpressionIds.has(e.id)));
+  const clicked   = shuffleArray(arr.filter(e => clickedIds.has(e.id)));
+  return [...fresh, ...impressed, ...clicked].slice(0, n);
+}
+
 // ============================================================
 // GET /api/home/sections
 // curation_themes 테이블 기반 홈 화면 섹션 데이터 일괄 반환
@@ -7564,7 +7583,10 @@ interface UserClickHistory {
   todayPickClickedIds: Set<string>; // today_pick, 전날 이전 14일
   todayPickRecentIds: Set<string>;  // today_pick, 전날 이전 3일
   todayPickImpressionIds: Set<string>; // today_pick, 최근 3일 노출 (impression)
-  categoryClickCounts: Map<string, number>; // 카테고리별 (event,section) 단위 집계
+  categoryClickCounts: Map<string, number>; // 카테고리별 (event,section) 단위 집계 + save boost 포함
+  savedIds: Set<string>;            // 현재 저장된 이벤트 (net save, 14일 이내)
+  sectionClickCounts: Map<string, number>; // 섹션별 클릭 수 (추후 섹션 순서 개인화용)
+  recentImpressionIds: Set<string>; // 최근 24h non-today_pick impression (event-level)
   cachedAt: number;
 }
 const userClickCacheMap = new Map<string, UserClickHistory>();
@@ -7603,6 +7625,7 @@ async function getUserClickHistory(userId: string): Promise<UserClickHistory> {
   const todayPickClickedIds = new Set<string>();
   const todayPickRecentIds = new Set<string>();
   const categoryClickCounts = new Map<string, number>();
+  const sectionClickCounts = new Map<string, number>();
 
   result.rows.forEach((r: any) => {
     const lastClicked = new Date(r.last_clicked).getTime();
@@ -7619,6 +7642,11 @@ async function getUserClickHistory(userId: string): Promise<UserClickHistory> {
 
     if (r.main_category) {
       categoryClickCounts.set(r.main_category, (categoryClickCounts.get(r.main_category) ?? 0) + 1);
+    }
+
+    // 섹션별 클릭 수 집계 (추후 섹션 순서 개인화용, 로그 없음)
+    if (r.section_slug) {
+      sectionClickCounts.set(r.section_slug, (sectionClickCounts.get(r.section_slug) ?? 0) + 1);
     }
   });
 
@@ -7637,6 +7665,46 @@ async function getUserClickHistory(userId: string): Promise<UserClickHistory> {
     impressionResult.rows.map((r: any) => r.event_id),
   );
 
+  // 세 번째 쿼리: save/unsave net 상태 (ROW_NUMBER로 이벤트별 최신 action만 추출)
+  const saveResult = await pool.query(
+    `SELECT event_id, main_category
+     FROM (
+       SELECT
+         ue.event_id,
+         ue.action_type,
+         ce.main_category,
+         ROW_NUMBER() OVER (PARTITION BY ue.event_id ORDER BY ue.created_at DESC) AS rn
+       FROM user_events ue
+       LEFT JOIN canonical_events ce ON ue.event_id = ce.id
+       WHERE ue.user_id = $1
+         AND ue.action_type IN ('save', 'unsave')
+         AND ue.created_at > NOW() - INTERVAL '14 days'
+     ) sub
+     WHERE rn = 1 AND action_type = 'save'`,
+    [userId],
+  );
+  const savedIds = new Set<string>(saveResult.rows.map((r: any) => r.event_id));
+  // 저장된 이벤트 카테고리 → categoryClickCounts에 +5 가산 (click의 약 2.5배 관심 신호)
+  saveResult.rows.forEach((r: any) => {
+    if (r.main_category) {
+      categoryClickCounts.set(r.main_category, (categoryClickCounts.get(r.main_category) ?? 0) + 5);
+    }
+  });
+
+  // 네 번째 쿼리: 최근 24h non-today_pick impression (event-level cooldown 판단용)
+  const multiImpressionResult = await pool.query(
+    `SELECT DISTINCT event_id
+     FROM user_events
+     WHERE user_id = $1
+       AND action_type = 'impression'
+       AND section_slug != 'today_pick'
+       AND created_at > NOW() - INTERVAL '24 hours'`,
+    [userId],
+  );
+  const recentImpressionIds = new Set<string>(
+    multiImpressionResult.rows.map((r: any) => r.event_id),
+  );
+
   const history: UserClickHistory = {
     clickedIds,
     recentClickedIds,
@@ -7644,6 +7712,9 @@ async function getUserClickHistory(userId: string): Promise<UserClickHistory> {
     todayPickRecentIds,
     todayPickImpressionIds,
     categoryClickCounts,
+    savedIds,
+    sectionClickCounts,
+    recentImpressionIds,
     cachedAt: now,
   };
   userClickCacheMap.set(userId, history);
@@ -7740,6 +7811,7 @@ app.get('/api/home/sections', async (req, res) => {
     let todayPickRecentIds = new Set<string>();
     let todayPickImpressionIds = new Set<string>();
     let categoryClickCounts = new Map<string, number>();
+    let recentImpressionIds = new Set<string>();
     if (userId) {
       try {
         const history = await getUserClickHistory(userId as string);
@@ -7749,6 +7821,7 @@ app.get('/api/home/sections', async (req, res) => {
         todayPickRecentIds = history.todayPickRecentIds;
         todayPickImpressionIds = history.todayPickImpressionIds;
         categoryClickCounts = history.categoryClickCounts;
+        recentImpressionIds = history.recentImpressionIds;
 
         // [DEBUG] 카테고리 집계 로그
         // 기존 3쿼리 방식(행 단위 COUNT)과 비교하려면 이 로그의 값과
@@ -7836,15 +7909,27 @@ app.get('/api/home/sections', async (req, res) => {
 
         events = pickedEvent ? [mapEventForFrontend(pickedEvent)].filter(Boolean) : [];
 
-      } else if (pool_.slug === 'discovery' || pool_.slug === 'beginner') {
+      } else if (['trending', 'budget_pick', 'date_pick', 'discovery', 'beginner'].includes(pool_.slug)) {
         // 상위 섹션 중복 제거 (shownIds 기반)
         const deduped = pool_.rawEvents.filter((e: any) => !shownIds.has(e.id));
-        // 최근 3일 클릭 다운랭킹 (카테고리 boost 미적용)
-        events = sampleWithClickDownrank(deduped, pool_.limit, recentClickedIds)
+
+        // 카테고리 친화도 소폭 가점 (+2~3, 최대 +5) — save boost 포함한 categoryClickCounts 사용
+        const boosted = categoryClickCounts.size > 0
+          ? deduped
+            .map((e: any) => {
+              const cnt = categoryClickCounts.get(e.main_category ?? '') ?? 0;
+              const boost = Math.min(cnt >= 3 ? 3 : cnt >= 1 ? 2 : 0, 5);
+              return boost > 0 ? { ...e, score: (e.score ?? 0) + boost } : e;
+            })
+            .sort((a: any, b: any) => (b.score ?? 0) - (a.score ?? 0))
+          : deduped;
+
+        // 최근 3일 클릭 + 최근 24h impression 다운랭킹 (제외가 아니라 후순위)
+        events = sampleWithImpressionDownrank(boosted, pool_.limit, recentClickedIds, recentImpressionIds)
           .map(mapEventForFrontend)
           .filter(Boolean);
 
-      } else if (pool_.slug === 'this_weekend' || pool_.slug === 'date_pick' || pool_.slug === 'walkable') {
+      } else if (pool_.slug === 'this_weekend' || pool_.slug === 'walkable') {
         // 상위 섹션 중복 제거 (shownIds 기반)
         const deduped = pool_.rawEvents.filter((e: any) => !shownIds.has(e.id));
 
@@ -7859,7 +7944,7 @@ app.get('/api/home/sections', async (req, res) => {
             .sort((a: any, b: any) => (b.score ?? 0) - (a.score ?? 0))
           : deduped;
 
-        // 최근 3일 클릭 다운랭킹 (제외가 아니라 후순위)
+        // 최근 3일 클릭 다운랭킹
         events = sampleWithClickDownrank(boosted, pool_.limit, recentClickedIds)
           .map(mapEventForFrontend)
           .filter(Boolean);
@@ -7882,6 +7967,31 @@ app.get('/api/home/sections', async (req, res) => {
         events,
       };
     });
+
+    // impression 일괄 기록 (fire-and-forget)
+    // event-level 24h cooldown: recentImpressionIds에 없는 이벤트만 기록
+    if (userId) {
+      const IMPRESSION_SECTIONS = ['trending', 'budget_pick', 'date_pick', 'discovery', 'beginner'];
+      const newRows: [string, string, string][] = [];
+      const insertedEventIds = new Set<string>(); // 이번 응답에서 이벤트 중복 방지
+      sections.forEach(sec => {
+        if (IMPRESSION_SECTIONS.includes(sec.slug)) {
+          sec.events.forEach((e: any) => {
+            if (e?.id && !recentImpressionIds.has(e.id) && !insertedEventIds.has(e.id)) {
+              newRows.push([userId as string, e.id, sec.slug]);
+              insertedEventIds.add(e.id);
+            }
+          });
+        }
+      });
+      if (newRows.length > 0) {
+        const ph = newRows.map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, 'impression', $${i * 3 + 3})`).join(', ');
+        pool.query(
+          `INSERT INTO user_events (user_id, event_id, action_type, section_slug) VALUES ${ph}`,
+          newRows.flat(),
+        ).catch(() => {});
+      }
+    }
 
     res.json({ success: true, sections });
   } catch (error: any) {
