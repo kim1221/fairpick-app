@@ -237,13 +237,13 @@ export function initScheduler() {
     });
     console.log('[Scheduler] registered: AI Popup Discovery @ 08:00 KST');
 
-    // 매일 09:00 KST - 찜한 이벤트 종료 D-3 알림 발송
-    cron.schedule('0 9 * * *', async () => {
-      await runJobSafely('end-soon-notifications', sendEndSoonNotifications);
-    }, {
-      timezone: 'Asia/Seoul'
-    });
-    console.log('[Scheduler] registered: End-soon notifications @ 09:00 KST');
+    // 매일 09:00 KST - 찜한 이벤트 종료 D-3 알림 발송 (기능 보류 중 — 재개 시 주석 해제)
+    // cron.schedule('0 9 * * *', async () => {
+    //   await runJobSafely('end-soon-notifications', sendEndSoonNotifications);
+    // }, {
+    //   timezone: 'Asia/Seoul'
+    // });
+    // console.log('[Scheduler] registered: End-soon notifications @ 09:00 KST');
 
     // 매주 월요일 09:00 KST - AI Hot Rating (전시/공연/축제 핫함 평가)
     cron.schedule('0 9 * * 1', async () => {
@@ -276,7 +276,7 @@ export function initScheduler() {
     console.log('  - 04:15 KST: Phase 2 Internal Fields (metadata.internal generation)');
     console.log('  - 05:00 KST: Embed new events (벡터 임베딩 생성)');
     console.log('  - 08:00 KST: AI Popup Discovery (팝업 신규 발굴)');
-    console.log('  - 09:00 KST: End-soon notifications (찜한 이벤트 D-3 알림)');
+    // console.log('  - 09:00 KST: End-soon notifications (찜한 이벤트 D-3 알림) — 보류');
     console.log('  - 09:00 KST (Mon): AI Hot Rating (전시/공연/축제 핫함 평가)');
     console.log('  - 15:00 KST: Light collect pipeline (collect + dedupe only, geo/AI 생략)');
     console.log('');
