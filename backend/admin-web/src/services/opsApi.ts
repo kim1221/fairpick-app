@@ -119,17 +119,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     expectedIntervalHours: 24,
     sourceKeywords: ['popup-discovery', 'ai-popup'],
   },
-  {
-    name: 'end-soon-notifications',
-    label: '종료 알림 발송',
-    description: '찜한 이벤트 D-3 알림',
-    schedule: '매일 09:00',
-    scheduleHour: 9,
-    scheduleMinute: 0,
-    scheduleDayOfWeek: null,
-    expectedIntervalHours: 24,
-    sourceKeywords: ['end-soon', 'notification'],
-  },
+  // end-soon-notifications: 기능 보류 중 (scheduler.ts도 주석 처리됨)
   {
     name: 'ai-hot-rating',
     label: 'AI Hot Rating',
