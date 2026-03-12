@@ -106,6 +106,30 @@ export async function logEventClick(
   return logUserAction(eventId, 'click', options);
 }
 
+/** 이벤트 상세 체류 시간 로그 (페이지 이탈 시 호출) */
+export async function logEventDwell(
+  eventId: string,
+  dwellSeconds: number,
+): Promise<UserEventResponse> {
+  return logUserAction(eventId, 'dwell', { metadata: { dwell_seconds: dwellSeconds } });
+}
+
+/** CTA 버튼 클릭 로그 (티켓 예매, 공식 홈페이지 등) */
+export async function logEventCtaClick(
+  eventId: string,
+  ctaType: string,
+): Promise<UserEventResponse> {
+  return logUserAction(eventId, 'cta_click', { metadata: { cta_type: ctaType } });
+}
+
+/** 바텀시트 오픈 로그 */
+export async function logEventSheetOpen(
+  eventId: string,
+  sheetType: 'price' | 'hours' | 'overview',
+): Promise<UserEventResponse> {
+  return logUserAction(eventId, 'sheet_open', { metadata: { sheet_type: sheetType } });
+}
+
 /** 검색 쿼리 로그 — 자동완성 데이터 축적용 */
 export async function logSearchQuery(
   query: string,
@@ -134,6 +158,9 @@ const userEventService = {
   logEventUnsave,
   logEventShare,
   logEventClick,
+  logEventDwell,
+  logEventCtaClick,
+  logEventSheetOpen,
   logSearchQuery,
 };
 

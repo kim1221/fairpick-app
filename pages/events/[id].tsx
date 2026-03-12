@@ -19,6 +19,7 @@ type Adaptive = ReturnType<typeof useAdaptive>;
 type EventStyles = ReturnType<typeof createStyles>;
 
 import eventService from '../../src/services/eventService';
+import { logEventDwell, logEventCtaClick, logEventSheetOpen } from '../../src/services/userEventService';
 import { EventCardData } from '../../src/data/events';
 import { EventImage } from '../../src/components/EventImage';
 import { pushRecent } from '../../src/utils/storage';
@@ -112,6 +113,19 @@ function formatOpeningHoursSummary(openingHours: any): string {
 // ─────────────────────────────────────────────────
 function isKopisUrl(url: string): boolean {
   return url.includes('kopis.or.kr');
+}
+
+// ─────────────────────────────────────────────────
+// Helper: URL → cta_type enum (로그 분석용 고정값)
+// 라벨 문자열 대신 링크 출처 키를 기준으로 분류
+// ─────────────────────────────────────────────────
+function getCtaTypeEnum(event: EventCardData, url: string): string {
+  const links = event.externalLinks ?? {};
+  if (links.ticket === url)      return 'ticket';
+  if (links.reservation === url) return 'reservation';
+  if (links.official === url)    return 'official';
+  if (links.instagram === url)   return 'instagram';
+  return 'other';
 }
 
 // ─────────────────────────────────────────────────
@@ -329,11 +343,38 @@ function EventDetailPage() {
     };
   }, [params?.id]);
 
+  // dwell 시간 측정: 이벤트 데이터가 로드된 시점부터 페이지 이탈까지
+  // 5초 미만은 노이즈로 간주하여 기록하지 않음
+  useEffect(() => {
+    if (!event?.id) return;
+    const mountTime = Date.now();
+    return () => {
+      const dwellSeconds = Math.round((Date.now() - mountTime) / 1000);
+      if (dwellSeconds >= 5) {
+        logEventDwell(event.id, dwellSeconds).catch(() => {});
+      }
+    };
+  }, [event?.id]);
+
+  // sheet open 핸들러 (로그 + 상태 변경)
+  const handleOpenSheet = (sheetType: 'price' | 'hours' | 'overview') => {
+    if (event?.id) {
+      logEventSheetOpen(event.id, sheetType).catch(() => {});
+    }
+    setActiveSheet(sheetType);
+  };
+
   const handleOpenLink = async (url?: string) => {
-    const targetUrl = url ?? getPrimaryCTALink(event!)?.url;
+    const primaryLink = getPrimaryCTALink(event!);
+    const targetUrl = url ?? primaryLink?.url;
     if (!targetUrl) {
       await dialog.openAlert({ title: '링크 없음', description: '연결된 링크가 없어요.' });
       return;
+    }
+
+    // cta_click 로그: URL → enum (ticket|reservation|official|instagram|other)
+    if (event?.id) {
+      logEventCtaClick(event.id, getCtaTypeEnum(event, targetUrl)).catch(() => {});
     }
 
     try {
@@ -495,7 +536,7 @@ function EventDetailPage() {
 
           {/* Overview 인라인 — 제목 바로 아래 흥미 유도 + 더보기 */}
           {event.overview?.trim() && (
-            <Pressable onPress={() => setActiveSheet('overview')}>
+            <Pressable onPress={() => handleOpenSheet('overview')}>
               <Text style={styles.inlineOverview} numberOfLines={2} ellipsizeMode="tail">
                 {event.overview.trim()}
               </Text>
@@ -583,7 +624,7 @@ function EventDetailPage() {
             {hasPriceData && (
               <Pressable
                 style={[styles.keyInfoCard, (isOddGrid && !hasHoursDetail) && styles.keyInfoCardFull]}
-                onPress={() => hasPriceDetail && setActiveSheet('price')}
+                onPress={() => hasPriceDetail && handleOpenSheet('price')}
                 disabled={!hasPriceDetail}
               >
                 <Icon name="icon-won-mono" size={20} color={adaptive.grey600} />
@@ -606,7 +647,7 @@ function EventDetailPage() {
             {hasHoursDetail && (
               <Pressable
                 style={[styles.keyInfoCard, isOddGrid && styles.keyInfoCardFull]}
-                onPress={() => setActiveSheet('hours')}
+                onPress={() => handleOpenSheet('hours')}
               >
                 <Icon name="icon-clock-mono" size={20} color={adaptive.grey600} />
                 <View style={styles.keyInfoContent}>
@@ -627,7 +668,7 @@ function EventDetailPage() {
           {hasCrew && (
             <Pressable
               style={styles.overviewCard}
-              onPress={() => setActiveSheet('overview')}
+              onPress={() => handleOpenSheet('overview')}
             >
               <Icon name="icon-star-mono" size={20} color={adaptive.grey600} style={{ marginRight: 12, marginTop: 2 }} />
               <View style={styles.overviewCardContent}>

@@ -7911,7 +7911,14 @@ app.get('/api/home/sections', async (req, res) => {
 
       } else if (['trending', 'budget_pick', 'date_pick', 'discovery', 'beginner'].includes(pool_.slug)) {
         // 상위 섹션 중복 제거 (shownIds 기반)
-        const deduped = pool_.rawEvents.filter((e: any) => !shownIds.has(e.id));
+        // date_pick: 전시/팝업은 희소 카테고리라 상위 섹션에서 소비됐어도 재사용 허용
+        const deduped = (pool_.slug === 'date_pick')
+          ? pool_.rawEvents.filter((e: any) =>
+              !shownIds.has(e.id) ||
+              e.main_category === '전시' ||
+              e.main_category === '팝업'
+            )
+          : pool_.rawEvents.filter((e: any) => !shownIds.has(e.id));
 
         // 카테고리 친화도 소폭 가점 (+2~3, 최대 +5) — save boost 포함한 categoryClickCounts 사용
         const boosted = categoryClickCounts.size > 0

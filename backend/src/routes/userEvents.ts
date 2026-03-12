@@ -14,7 +14,7 @@ const router = express.Router();
 interface UserEventRequest {
   userId: string;        // 익명 ID 또는 로그인 userId
   eventId: string;       // 이벤트 ID
-  actionType: 'view' | 'save' | 'unsave' | 'share' | 'click';
+  actionType: 'view' | 'save' | 'unsave' | 'share' | 'click' | 'dwell' | 'cta_click' | 'sheet_open';
   metadata?: Record<string, any>;
 }
 
@@ -67,9 +67,9 @@ async function logUserEvent(
   try {
     // 1. user_events 테이블에 로그 기록
     await client.query(
-      `INSERT INTO user_events (user_id, event_id, action_type, created_at)
-       VALUES ($1, $2, $3, NOW())`,
-      [internalUserId, eventId, actionType]
+      `INSERT INTO user_events (user_id, event_id, action_type, metadata, created_at)
+       VALUES ($1, $2, $3, $4::jsonb, NOW())`,
+      [internalUserId, eventId, actionType, metadata ? JSON.stringify(metadata) : null]
     );
 
     // 2. canonical_events 테이블의 카운트 증가 (실시간 반영)
@@ -107,7 +107,7 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     // 2. actionType 검증
-    const validActionTypes = ['view', 'save', 'unsave', 'share', 'click'];
+    const validActionTypes = ['view', 'save', 'unsave', 'share', 'click', 'dwell', 'cta_click', 'sheet_open'];
     if (!validActionTypes.includes(actionType)) {
       return res.status(400).json({
         success: false,

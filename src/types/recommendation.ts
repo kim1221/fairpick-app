@@ -63,7 +63,7 @@ export type EventDetail = ScoredEvent;
 
 // 사용자 행동 로그 타입
 // impression은 미래 확장용 (현재 프론트에서는 미사용)
-export type ActionType = 'view' | 'save' | 'unsave' | 'share' | 'click' | 'impression';
+export type ActionType = 'view' | 'save' | 'unsave' | 'share' | 'click' | 'impression' | 'dwell' | 'cta_click' | 'sheet_open';
 
 export interface UserEventLog {
   userId: string;

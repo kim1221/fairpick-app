@@ -885,9 +885,44 @@ export async function getDatePick(
 
   let rows = (await pool.query(buildQuery(cityZoneFilter), [fetchLimit])).rows;
 
-  if (cityZoneFilter && rows.length < limit) {
-    console.log(`[getDatePick] 권역 결과 ${rows.length}개 < ${limit} → 전국 폴백`);
-    rows = (await pool.query(buildQuery(''), [fetchLimit])).rows;
+  if (cityZoneFilter) {
+    if (rows.length < limit) {
+      // 기존 폴백: 전체 결과 부족
+      console.log(`[getDatePick] 권역 결과 ${rows.length}개 < ${limit} → 전국 폴백`);
+      rows = (await pool.query(buildQuery(''), [fetchLimit])).rows;
+    } else {
+      // 희소 카테고리 제한 보충: 전시/팝업만 slot cap 부족분만큼 전국에서 보충
+      // 공연은 수도권 유지 (전국 보충 없음), 수도권 이벤트가 항상 앞에 위치
+      const zoneExhibitCnt = rows.filter((r: any) => r.main_category === '전시').length;
+      const zonePopupCnt   = rows.filter((r: any) => r.main_category === '팝업').length;
+      const needExhibit    = Math.max(0, (DATE_PICK_SLOT_CAP['전시'] ?? 0) - zoneExhibitCnt);
+      const needPopup      = Math.max(0, (DATE_PICK_SLOT_CAP['팝업'] ?? 0) - zonePopupCnt);
+
+      if (needExhibit > 0 || needPopup > 0) {
+        console.log(
+          `[getDatePick] 전시 ${zoneExhibitCnt}/${DATE_PICK_SLOT_CAP['전시']}` +
+          ` 팝업 ${zonePopupCnt}/${DATE_PICK_SLOT_CAP['팝업']} 부족` +
+          ` → 전국 보충 (전시+${needExhibit} 팝업+${needPopup})`
+        );
+        const nationalRows = (await pool.query(buildQuery(''), [fetchLimit])).rows;
+        const existingIds  = new Set(rows.map((r: any) => r.id));
+        const supplements: any[] = [];
+        let exhibitAdded = 0, popupAdded = 0;
+
+        for (const r of nationalRows) {
+          if (existingIds.has(r.id)) continue;
+          if (r.main_category === '전시' && exhibitAdded < needExhibit) {
+            supplements.push(r);
+            exhibitAdded++;
+          } else if (r.main_category === '팝업' && popupAdded < needPopup) {
+            supplements.push(r);
+            popupAdded++;
+          }
+          if (exhibitAdded >= needExhibit && popupAdded >= needPopup) break;
+        }
+        rows = [...rows, ...supplements]; // 수도권 먼저, 전국 보충이 뒤에
+      }
+    }
   }
 
   const scored = rows.map(row => ({
