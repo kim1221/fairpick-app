@@ -946,8 +946,8 @@ export async function getDatePick(
     }
   }
 
-  const DATE_PICK_DIST_WEIGHT = 0.40;
-  const DATE_PICK_NORMALIZE_KM = 30;
+  const DATE_PICK_DIST_WEIGHT = 0.30;
+  const DATE_PICK_NORMALIZE_KM = 50;
 
   const scored = rows.map(row => {
     const contentScore = row.buzz_score ?? 0;
