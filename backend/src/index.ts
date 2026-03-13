@@ -8253,7 +8253,9 @@ app.get('/api/home/sections', async (req, res) => {
         }
 
         // impression 기록 (fire-and-forget, 응답 지연 없음)
-        if (resolvedUserId && pickedEvent) {
+        // todayPickImpressionIds: 최근 3일 today_pick section 노출 이력 (user+event 기준)
+        // 이미 3일 내 노출된 이벤트는 기록 skip — 다른 섹션과 동일한 hard dedup 적용
+        if (resolvedUserId && pickedEvent && !todayPickImpressionIds.has(pickedEvent.id)) {
           pool.query(
             `INSERT INTO user_events (user_id, event_id, action_type, section_slug, metadata)
              VALUES ($1, $2, 'impression', 'today_pick', '{}'::jsonb)`,
