@@ -17,6 +17,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const opsItems = [
     { path: '/ops', label: '운영 센터', icon: '📡' },
     { path: '/', label: '대시보드', icon: '📊' },
+    { path: '/personalization', label: '개인화 관제', icon: '📈' },
   ];
 
   const contentItems = [

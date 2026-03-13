@@ -19,7 +19,7 @@ type Adaptive = ReturnType<typeof useAdaptive>;
 type EventStyles = ReturnType<typeof createStyles>;
 
 import eventService from '../../src/services/eventService';
-import { logEventDwell, logEventCtaClick, logEventSheetOpen } from '../../src/services/userEventService';
+import { logEventDwell, logEventCtaClick, logEventSheetOpen, logEventView, logEventSave, logEventUnsave } from '../../src/services/userEventService';
 import { EventCardData } from '../../src/data/events';
 import { EventImage } from '../../src/components/EventImage';
 import { pushRecent } from '../../src/utils/storage';
@@ -267,6 +267,9 @@ function EventDetailPage() {
           setEvent(data);
           setStatus('ready');
 
+          // 이벤트 상세 진입 로그
+          logEventView(data.id).catch(() => {});
+
           // DEV: 데이터 타입 확인
           if (__DEV__) {
             console.log('[EventDetail] openingHours typeof:', typeof data.openingHours, data.openingHours);
@@ -393,6 +396,13 @@ function EventDetailPage() {
 
     try {
       const result = await toggleLikeWithSync();
+
+      // 찜 행동 로그
+      if (result.liked) {
+        logEventSave(event.id).catch(() => {});
+      } else {
+        logEventUnsave(event.id).catch(() => {});
+      }
 
       // 사용자 프로필 업데이트 (찜 추가 시에만)
       if (result.liked) {

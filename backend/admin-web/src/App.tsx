@@ -8,6 +8,7 @@ import CreateEventPage from './pages/CreateEventPage';
 import HotSuggestionsPage from './pages/HotSuggestionsPage';
 import CurationThemesPage from './pages/CurationThemesPage';
 import OpsPage from './pages/OpsPage';
+import PersonalizationPage from './pages/PersonalizationPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -95,6 +96,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <OpsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/personalization"
+            element={
+              <ProtectedRoute>
+                <PersonalizationPage />
               </ProtectedRoute>
             }
           />

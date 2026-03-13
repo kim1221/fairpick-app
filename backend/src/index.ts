@@ -1278,7 +1278,9 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
 
 // ─── 개인화 이벤트 관제 API ────────────────────────────────────────────────
 
-/** period 파라미터 → 시작 시각(Date) 변환 */
+/** period 파라미터 → 시작 시각(Date) 변환
+ *  'today'는 KST(UTC+9) 자정 기준: UTC midnight이 아닌 KST 00:00 = UTC 전날 15:00
+ */
 function personalizationPeriodStart(period: string): Date {
   const now = new Date();
   switch (period) {
@@ -1286,11 +1288,25 @@ function personalizationPeriodStart(period: string): Date {
     case '7d':  return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     case 'today':
     default: {
-      const d = new Date(now);
-      d.setHours(0, 0, 0, 0);
-      return d;
+      const KST_OFFSET_MS = 9 * 60 * 60 * 1000; // UTC+9
+      const kstNowMs = now.getTime() + KST_OFFSET_MS;
+      // KST 날짜 기준 자정(ms) → UTC로 역산
+      const kstMidnightMs = kstNowMs - (kstNowMs % (24 * 60 * 60 * 1000));
+      return new Date(kstMidnightMs - KST_OFFSET_MS);
     }
   }
+}
+
+/** pg TIMESTAMP WITHOUT TIMEZONE → UTC ISO 문자열
+ *  pg는 TIMESTAMP 컬럼을 "YYYY-MM-DD HH:MM:SS.ffffff" 문자열로 반환.
+ *  브라우저가 이를 로컬 시간(KST)으로 파싱하면 9시간 오차가 생기므로
+ *  항상 'Z'(UTC) 마킹이 붙은 ISO 문자열로 변환한다.
+ */
+function toUtcIso(v: unknown): string | null {
+  if (!v) return null;
+  if (v instanceof Date) return v.toISOString();
+  // "2026-03-14 10:30:00.123456" → "2026-03-14T10:30:00.123456Z"
+  return String(v).replace(' ', 'T') + 'Z';
 }
 
 // GET /admin/personalization/health
@@ -1311,8 +1327,8 @@ app.get('/admin/personalization/health', requireAdminAuth, async (_req, res) => 
     res.json({
       last5min,
       last15min,
-      last1h:       parseInt(row.last1h ?? '0'),
-      lastEventAt:  row.last_event_at ?? null,
+      last1h:      parseInt(row.last1h ?? '0'),
+      lastEventAt: toUtcIso(row.last_event_at),
       status,
     });
   } catch (err) {
@@ -1470,7 +1486,7 @@ app.get('/admin/personalization/recent-events', requireAdminAuth, async (req, re
     res.json({
       items: rows.map((r) => ({
         id:           r.id,
-        createdAt:    r.created_at,
+        createdAt:    toUtcIso(r.created_at),
         userId:       r.user_id,
         userType:     r.user_type,
         actionType:   r.action_type,
@@ -1546,20 +1562,26 @@ app.get('/admin/personalization/trend', requireAdminAuth, async (req, res) => {
       ? new Date(Date.now() - 24 * 60 * 60 * 1000)
       : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
+    // day 버킷: KST 자정 기준 (created_at + 9h로 날짜 경계 이동 후 역산)
+    // hour 버킷: UTC 그대로 → 프론트에서 toLocaleTimeString(KST)으로 표시
+    const bucketExpr = granularity === 'day'
+      ? "DATE_TRUNC('day', created_at + INTERVAL '9 hours') - INTERVAL '9 hours'"
+      : "DATE_TRUNC('hour', created_at)";
+
     const { rows } = await pool.query(`
       SELECT
-        DATE_TRUNC($1, created_at) AS bucket,
-        COUNT(*)::int              AS count
+        ${bucketExpr} AS bucket,
+        COUNT(*)::int AS count
       FROM user_events
-      WHERE created_at >= $2
+      WHERE created_at >= $1
       GROUP BY 1
       ORDER BY 1
-    `, [granularity, since]);
+    `, [since]);
 
     res.json({
       granularity,
       points: rows.map((r) => ({
-        bucket: r.bucket,
+        bucket: toUtcIso(r.bucket),
         count:  r.count,
       })),
     });
@@ -8158,6 +8180,21 @@ app.get('/api/home/sections', async (req, res) => {
       }
     }
 
+    // userId → 실제 users.id 해석 (FK-safe impression INSERT를 위해)
+    // 로그인 유저는 users.id를 그대로 전달, 익명 유저는 users.anonymous_id로 조회
+    let resolvedUserId: string | undefined = undefined;
+    if (userId) {
+      try {
+        const r = await pool.query(
+          'SELECT id FROM users WHERE id = $1::uuid OR anonymous_id = $1::uuid LIMIT 1',
+          [userId],
+        );
+        if (r.rows.length > 0) resolvedUserId = r.rows[0].id;
+      } catch {
+        // 해석 실패 시 impression 로깅 건너뜀
+      }
+    }
+
     // 2. 이벤트 풀 캐시 확인 (30분 TTL + KST 자정 date-change invalidate)
     const cacheKey = getSectionsCacheKey(location);
     const now = Date.now();
@@ -8216,12 +8253,12 @@ app.get('/api/home/sections', async (req, res) => {
         }
 
         // impression 기록 (fire-and-forget, 응답 지연 없음)
-        if (userId && pickedEvent) {
+        if (resolvedUserId && pickedEvent) {
           pool.query(
             `INSERT INTO user_events (user_id, event_id, action_type, section_slug, metadata)
              VALUES ($1, $2, 'impression', 'today_pick', '{}'::jsonb)`,
-            [userId, pickedEvent.id],
-          ).catch(() => {});
+            [resolvedUserId, pickedEvent.id],
+          ).catch(err => console.error('[home/sections] today_pick impression insert failed:', err));
         }
 
         events = pickedEvent ? [mapEventForFrontend(pickedEvent)].filter(Boolean) : [];
@@ -8294,7 +8331,7 @@ app.get('/api/home/sections', async (req, res) => {
 
     // impression 일괄 기록 (fire-and-forget)
     // event-level 24h cooldown: recentImpressionIds에 없는 이벤트만 기록
-    if (userId) {
+    if (resolvedUserId) {
       const IMPRESSION_SECTIONS = ['trending', 'budget_pick', 'date_pick', 'discovery', 'beginner'];
       const newRows: [string, string, string][] = [];
       const insertedEventIds = new Set<string>(); // 이번 응답에서 이벤트 중복 방지
@@ -8302,7 +8339,7 @@ app.get('/api/home/sections', async (req, res) => {
         if (IMPRESSION_SECTIONS.includes(sec.slug)) {
           sec.events.forEach((e: any) => {
             if (e?.id && !recentImpressionIds.has(e.id) && !insertedEventIds.has(e.id)) {
-              newRows.push([userId as string, e.id, sec.slug]);
+              newRows.push([resolvedUserId as string, e.id, sec.slug]);
               insertedEventIds.add(e.id);
             }
           });
@@ -8313,7 +8350,7 @@ app.get('/api/home/sections', async (req, res) => {
         pool.query(
           `INSERT INTO user_events (user_id, event_id, action_type, section_slug) VALUES ${ph}`,
           newRows.flat(),
-        ).catch(() => {});
+        ).catch(err => console.error('[home/sections] bulk impression insert failed:', err));
       }
     }
 

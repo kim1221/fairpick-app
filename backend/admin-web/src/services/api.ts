@@ -1,5 +1,13 @@
 import axios from 'axios';
 import type { Event, DashboardStats, PaginatedResponse, PopupFormData, UploadImageResponse, DeleteEventResult, AdminHealth, ApiHealth } from '../types';
+import type {
+  PersonalizationHealth,
+  PersonalizationSummary,
+  PersonalizationSignalQuality,
+  RecentEvent,
+  TopEvent,
+  TrendPoint,
+} from '../types/personalization';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 const isDev = import.meta.env.DEV;
@@ -527,6 +535,35 @@ export const approveHotSuggestion = async (id: string) => {
 export const rejectHotSuggestion = async (id: string) => {
   const { data } = await api.post(`/admin/hot-suggestions/${id}/reject`);
   return data;
+};
+
+// ─────────────────────────────────────────────────────────────
+// 개인화 이벤트 관제 API
+// ─────────────────────────────────────────────────────────────
+
+export const personalizationApi = {
+  getHealth: (): Promise<PersonalizationHealth> =>
+    api.get('/admin/personalization/health').then((r) => r.data),
+
+  getSummary: (period: 'today' | '1h' | '7d' = 'today'): Promise<PersonalizationSummary> =>
+    api.get('/admin/personalization/summary', { params: { period } }).then((r) => r.data),
+
+  getSignalQuality: (period: 'today' | '7d' = 'today'): Promise<PersonalizationSignalQuality> =>
+    api.get('/admin/personalization/signal-quality', { params: { period } }).then((r) => r.data),
+
+  getRecentEvents: (params?: {
+    limit?: number;
+    actionType?: string;
+    userId?: string;
+    eventId?: string;
+  }): Promise<{ items: RecentEvent[] }> =>
+    api.get('/admin/personalization/recent-events', { params }).then((r) => r.data),
+
+  getTopEvents: (period: '7d' | '1d' = '7d'): Promise<{ period: string; items: TopEvent[] }> =>
+    api.get('/admin/personalization/top-events', { params: { period } }).then((r) => r.data),
+
+  getTrend: (granularity: 'day' | 'hour' = 'day'): Promise<{ granularity: string; points: TrendPoint[] }> =>
+    api.get('/admin/personalization/trend', { params: { granularity } }).then((r) => r.data),
 };
 
 export default api;
