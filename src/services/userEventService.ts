@@ -7,6 +7,7 @@
 import { API_BASE_URL, API_ENDPOINTS, API_TIMEOUT, API_ERROR_MESSAGES } from '../config/api';
 import type { ActionType, UserEventLog, UserEventResponse } from '../types/recommendation';
 import { getCurrentUserId } from '../utils/anonymousUser';
+import { getOrCreateSessionId } from '../utils/session';
 
 // 클릭/노출 로그에 전달할 추천 컨텍스트
 export interface LogActionOptions {
@@ -25,7 +26,10 @@ async function logUserAction(
   options?: LogActionOptions,
 ): Promise<UserEventResponse> {
   try {
-    const userId = await getCurrentUserId();
+    const [userId, sessionId] = await Promise.all([
+      getCurrentUserId(),
+      getOrCreateSessionId(),
+    ]);
 
     const payload: UserEventLog = {
       userId,
@@ -33,7 +37,7 @@ async function logUserAction(
       actionType,
       sectionSlug: options?.sectionSlug,
       rankPosition: options?.rankPosition,
-      sessionId: options?.sessionId,
+      sessionId: options?.sessionId ?? sessionId,
       metadata: options?.metadata,
     };
 
