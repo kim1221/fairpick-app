@@ -15,6 +15,9 @@ interface UserEventRequest {
   userId: string;        // 익명 ID 또는 로그인 userId
   eventId: string;       // 이벤트 ID
   actionType: 'view' | 'save' | 'unsave' | 'share' | 'click' | 'dwell' | 'cta_click' | 'sheet_open';
+  sectionSlug?: string;
+  rankPosition?: number;
+  sessionId?: string;
   metadata?: Record<string, any>;
 }
 
@@ -61,15 +64,18 @@ async function logUserEvent(
   internalUserId: string,
   eventId: string,
   actionType: string,
+  sectionSlug?: string,
+  rankPosition?: number,
+  sessionId?: string,
   metadata?: Record<string, any>
 ): Promise<void> {
   const client = await pool.connect();
   try {
     // 1. user_events 테이블에 로그 기록
     await client.query(
-      `INSERT INTO user_events (user_id, event_id, action_type, metadata, created_at)
-       VALUES ($1, $2, $3, $4::jsonb, NOW())`,
-      [internalUserId, eventId, actionType, metadata ? JSON.stringify(metadata) : null]
+      `INSERT INTO user_events (user_id, event_id, action_type, section_slug, rank_position, session_id, metadata, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW())`,
+      [internalUserId, eventId, actionType, sectionSlug ?? null, rankPosition ?? null, sessionId ?? null, metadata ? JSON.stringify(metadata) : null]
     );
 
     // 2. canonical_events 테이블의 카운트 증가 (실시간 반영)
@@ -96,7 +102,7 @@ async function logUserEvent(
  */
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { userId, eventId, actionType, metadata } = req.body as UserEventRequest;
+    const { userId, eventId, actionType, sectionSlug, rankPosition, sessionId, metadata } = req.body as UserEventRequest;
 
     // 1. 입력 검증
     if (!userId || !eventId || !actionType) {
@@ -130,7 +136,7 @@ router.post('/', async (req: Request, res: Response) => {
     const internalUserId = await getOrCreateUser(userId, isAnonymous);
 
     // 5. 행동 로그 기록
-    await logUserEvent(internalUserId, eventId, actionType, metadata);
+    await logUserEvent(internalUserId, eventId, actionType, sectionSlug, rankPosition, sessionId, metadata);
 
     // 6. 성공 응답
     res.json({
