@@ -1276,6 +1276,301 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
   }
 });
 
+// ─── 개인화 이벤트 관제 API ────────────────────────────────────────────────
+
+/** period 파라미터 → 시작 시각(Date) 변환 */
+function personalizationPeriodStart(period: string): Date {
+  const now = new Date();
+  switch (period) {
+    case '1h':  return new Date(now.getTime() - 60 * 60 * 1000);
+    case '7d':  return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    case 'today':
+    default: {
+      const d = new Date(now);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+  }
+}
+
+// GET /admin/personalization/health
+app.get('/admin/personalization/health', requireAdminAuth, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '5 minutes')  AS last5min,
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '15 minutes') AS last15min,
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 hour')     AS last1h,
+        MAX(created_at) AS last_event_at
+      FROM user_events
+    `);
+    const row = rows[0];
+    const last5min  = parseInt(row.last5min  ?? '0');
+    const last15min = parseInt(row.last15min ?? '0');
+    const status = last5min > 0 ? 'alive' : last15min > 0 ? 'warning' : 'dead';
+    res.json({
+      last5min,
+      last15min,
+      last1h:       parseInt(row.last1h ?? '0'),
+      lastEventAt:  row.last_event_at ?? null,
+      status,
+    });
+  } catch (err) {
+    console.error('[Admin] personalization/health failed:', err);
+    res.status(500).json({ message: 'Failed to load personalization health' });
+  }
+});
+
+// GET /admin/personalization/summary?period=today|1h|7d
+app.get('/admin/personalization/summary', requireAdminAuth, async (req, res) => {
+  try {
+    const period = (req.query.period as string) || 'today';
+    const since = personalizationPeriodStart(period);
+
+    const [totalsResult, breakdownResult] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(*)                                              AS total_events,
+          COUNT(DISTINCT ue.user_id)                           AS active_users,
+          COUNT(DISTINCT ue.user_id) FILTER (
+            WHERE u.toss_user_key IS NOT NULL)                 AS logged_in_users,
+          COUNT(DISTINCT ue.event_id)                          AS unique_events
+        FROM user_events ue
+        LEFT JOIN users u ON ue.user_id = u.id
+        WHERE ue.created_at >= $1
+      `, [since]),
+      pool.query(`
+        SELECT action_type, COUNT(*) AS cnt
+        FROM user_events
+        WHERE created_at >= $1
+        GROUP BY action_type
+        ORDER BY cnt DESC
+      `, [since]),
+    ]);
+
+    const t = totalsResult.rows[0];
+    const totalEvents   = parseInt(t.total_events   ?? '0');
+    const activeUsers   = parseInt(t.active_users   ?? '0');
+    const loggedInUsers = parseInt(t.logged_in_users ?? '0');
+
+    const actionBreakdown: Record<string, number> = {};
+    for (const row of breakdownResult.rows) {
+      actionBreakdown[row.action_type] = parseInt(row.cnt ?? '0');
+    }
+
+    res.json({
+      period,
+      totalEvents,
+      activeUsers,
+      loggedInUsers,
+      anonymousUsers: Math.max(0, activeUsers - loggedInUsers),
+      uniqueEvents:   parseInt(t.unique_events ?? '0'),
+      actionBreakdown,
+    });
+  } catch (err) {
+    console.error('[Admin] personalization/summary failed:', err);
+    res.status(500).json({ message: 'Failed to load personalization summary' });
+  }
+});
+
+// GET /admin/personalization/signal-quality?period=today|7d
+app.get('/admin/personalization/signal-quality', requireAdminAuth, async (req, res) => {
+  try {
+    const period = (req.query.period as string) || 'today';
+    const since = personalizationPeriodStart(period);
+
+    const { rows } = await pool.query(`
+      SELECT
+        COUNT(*)                                                            AS total,
+        COUNT(*) FILTER (WHERE user_id IS NULL)                             AS null_user_id,
+        COUNT(*) FILTER (WHERE section_slug IS NOT NULL)                    AS has_section_slug,
+        COUNT(*) FILTER (WHERE rank_position IS NOT NULL)                   AS has_rank_position,
+        COUNT(*) FILTER (WHERE session_id IS NOT NULL)                      AS has_session_id,
+        COUNT(*) FILTER (WHERE metadata IS NOT NULL)                        AS has_metadata,
+        COUNT(*) FILTER (WHERE action_type NOT IN (
+          'view','save','unsave','share','click','dwell','cta_click','sheet_open'
+        ))                                                                   AS unknown_action_type,
+        COUNT(*) FILTER (WHERE action_type = 'dwell')                       AS dwell_total,
+        COUNT(*) FILTER (
+          WHERE action_type = 'dwell'
+          AND (metadata->>'dwell_seconds') IS NOT NULL)                     AS dwell_with_seconds
+      FROM user_events
+      WHERE created_at >= $1
+    `, [since]);
+
+    const r = rows[0];
+    const total = parseInt(r.total ?? '0');
+    const rate = (n: string) => total > 0 ? Math.round(parseInt(n ?? '0') / total * 1000) / 1000 : 0;
+    const dwellTotal = parseInt(r.dwell_total ?? '0');
+
+    res.json({
+      total,
+      nullUserId:        { count: parseInt(r.null_user_id        ?? '0'), rate: rate(r.null_user_id) },
+      sectionSlugRate:   { count: parseInt(r.has_section_slug    ?? '0'), rate: rate(r.has_section_slug) },
+      rankPositionRate:  { count: parseInt(r.has_rank_position   ?? '0'), rate: rate(r.has_rank_position) },
+      sessionIdRate:     { count: parseInt(r.has_session_id      ?? '0'), rate: rate(r.has_session_id) },
+      metadataRate:      { count: parseInt(r.has_metadata        ?? '0'), rate: rate(r.has_metadata) },
+      unknownActionType: { count: parseInt(r.unknown_action_type ?? '0'), rate: rate(r.unknown_action_type) },
+      dwellWithSeconds:  {
+        count: parseInt(r.dwell_with_seconds ?? '0'),
+        total: dwellTotal,
+        rate:  dwellTotal > 0 ? Math.round(parseInt(r.dwell_with_seconds ?? '0') / dwellTotal * 1000) / 1000 : 0,
+      },
+    });
+  } catch (err) {
+    console.error('[Admin] personalization/signal-quality failed:', err);
+    res.status(500).json({ message: 'Failed to load signal quality' });
+  }
+});
+
+// GET /admin/personalization/recent-events?limit=50&actionType=&userId=&eventId=
+app.get('/admin/personalization/recent-events', requireAdminAuth, async (req, res) => {
+  try {
+    const limit     = Math.min(parseInt((req.query.limit as string) || '50'), 200);
+    const actionType = req.query.actionType as string | undefined;
+    const userId    = req.query.userId     as string | undefined;
+    const eventId   = req.query.eventId    as string | undefined;
+
+    const conditions: string[] = [];
+    const params: any[] = [];
+
+    if (actionType) { params.push(actionType); conditions.push(`ue.action_type = $${params.length}`); }
+    if (userId)     { params.push(userId);     conditions.push(`ue.user_id::text = $${params.length}`); }
+    if (eventId)    { params.push(eventId);    conditions.push(`ue.event_id::text = $${params.length}`); }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit);
+
+    const { rows } = await pool.query(`
+      SELECT
+        ue.id,
+        ue.created_at,
+        ue.user_id,
+        CASE
+          WHEN u.toss_user_key IS NOT NULL THEN 'logged_in'
+          WHEN ue.user_id IS NOT NULL      THEN 'anonymous'
+          ELSE 'unknown'
+        END AS user_type,
+        ue.action_type,
+        ue.event_id,
+        ce.title        AS event_title,
+        ce.main_category,
+        ue.section_slug,
+        ue.rank_position,
+        ue.session_id,
+        ue.metadata
+      FROM user_events ue
+      LEFT JOIN users u ON ue.user_id = u.id
+      LEFT JOIN canonical_events ce ON ue.event_id IS NOT NULL AND ue.event_id = ce.id
+      ${whereClause}
+      ORDER BY ue.created_at DESC
+      LIMIT $${params.length}
+    `, params);
+
+    res.json({
+      items: rows.map((r) => ({
+        id:           r.id,
+        createdAt:    r.created_at,
+        userId:       r.user_id,
+        userType:     r.user_type,
+        actionType:   r.action_type,
+        eventId:      r.event_id,
+        eventTitle:   r.event_title    ?? null,
+        mainCategory: r.main_category  ?? null,
+        sectionSlug:  r.section_slug   ?? null,
+        rankPosition: r.rank_position  ?? null,
+        sessionId:    r.session_id     ?? null,
+        metadata:     r.metadata       ?? null,
+      })),
+    });
+  } catch (err) {
+    console.error('[Admin] personalization/recent-events failed:', err);
+    res.status(500).json({ message: 'Failed to load recent events' });
+  }
+});
+
+// GET /admin/personalization/top-events?period=7d|1d
+app.get('/admin/personalization/top-events', requireAdminAuth, async (req, res) => {
+  try {
+    const period = (req.query.period as string) || '7d';
+    // '1d' → 직전 24시간, '7d' → 7일
+    const sinceDate = period === '1d'
+      ? new Date(Date.now() - 24 * 60 * 60 * 1000)
+      : personalizationPeriodStart(period);
+
+    const { rows } = await pool.query(`
+      SELECT
+        ue.event_id,
+        ce.title,
+        ce.main_category,
+        ce.region,
+        COUNT(*) FILTER (WHERE ue.action_type = 'click')     AS click_count,
+        COUNT(*) FILTER (WHERE ue.action_type = 'save')      AS save_count,
+        COUNT(*) FILTER (WHERE ue.action_type = 'dwell')     AS dwell_count,
+        COUNT(*) FILTER (WHERE ue.action_type = 'cta_click') AS cta_click_count,
+        COUNT(*)                                              AS total_interactions
+      FROM user_events ue
+      LEFT JOIN canonical_events ce ON ue.event_id IS NOT NULL AND ue.event_id = ce.id
+      WHERE ue.created_at >= $1
+        AND ue.action_type IN ('click', 'save', 'dwell', 'cta_click')
+      GROUP BY ue.event_id, ce.title, ce.main_category, ce.region
+      ORDER BY total_interactions DESC
+      LIMIT 20
+    `, [sinceDate]);
+
+    res.json({
+      period,
+      items: rows.map((r) => ({
+        eventId:          r.event_id,
+        title:            r.title            ?? null,
+        mainCategory:     r.main_category    ?? null,
+        region:           r.region           ?? null,
+        clickCount:       parseInt(r.click_count     ?? '0'),
+        saveCount:        parseInt(r.save_count      ?? '0'),
+        dwellCount:       parseInt(r.dwell_count     ?? '0'),
+        ctaClickCount:    parseInt(r.cta_click_count ?? '0'),
+        totalInteractions: parseInt(r.total_interactions ?? '0'),
+      })),
+    });
+  } catch (err) {
+    console.error('[Admin] personalization/top-events failed:', err);
+    res.status(500).json({ message: 'Failed to load top events' });
+  }
+});
+
+// GET /admin/personalization/trend?granularity=day|hour
+app.get('/admin/personalization/trend', requireAdminAuth, async (req, res) => {
+  try {
+    const granularity = (req.query.granularity as string) === 'hour' ? 'hour' : 'day';
+    const since = granularity === 'hour'
+      ? new Date(Date.now() - 24 * 60 * 60 * 1000)
+      : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const { rows } = await pool.query(`
+      SELECT
+        DATE_TRUNC($1, created_at) AS bucket,
+        COUNT(*)::int              AS count
+      FROM user_events
+      WHERE created_at >= $2
+      GROUP BY 1
+      ORDER BY 1
+    `, [granularity, since]);
+
+    res.json({
+      granularity,
+      points: rows.map((r) => ({
+        bucket: r.bucket,
+        count:  r.count,
+      })),
+    });
+  } catch (err) {
+    console.error('[Admin] personalization/trend failed:', err);
+    res.status(500).json({ message: 'Failed to load trend' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Admin: 이미지 통계 (디버깅용)
 app.get('/admin/image-stats', requireAdminAuth, async (req, res) => {
   try {
@@ -7568,9 +7863,27 @@ interface SectionsCache {
   cachedAt: number;
 }
 const sectionsCacheMap = new Map<string, SectionsCache>();
-const SECTIONS_CACHE_TTL_MS = 5 * 60 * 1000; // 5분
+const SECTIONS_CACHE_TTL_MS = 30 * 60 * 1000; // 30분 (session consistency)
 // single-flight: 동일 캐시 키에 대한 중복 빌드 방지
 const buildInFlightMap = new Map<string, Promise<SectionsCache>>();
+
+/**
+ * KST 기준 날짜 문자열 반환 (YYYY-MM-DD)
+ * Railway 서버 타임존(UTC)에 의존하지 않기 위해 명시적으로 Asia/Seoul 사용.
+ * ending_soon D-7 기준이 KST이므로 캐시 날짜 비교도 KST 기준이어야 한다.
+ */
+function getKSTDateString(ts: number): string {
+  return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  // en-CA → "YYYY-MM-DD" 형식 (ISO 날짜 형식과 동일)
+}
+
+/**
+ * 캐시가 만들어진 KST 날짜가 현재 KST 날짜와 다르면 true.
+ * 자정(KST 00:00)이 지나면 ending_soon D-7 기준이 바뀌므로 캐시 무효화 필요.
+ */
+function isCacheStaleByDate(cached: SectionsCache): boolean {
+  return getKSTDateString(cached.cachedAt) !== getKSTDateString(Date.now());
+}
 
 // ─── 유저 클릭 이력 캐시 (1분 TTL) ──────────────────────────────────────────
 // 기존 3쿼리(직렬) → 1쿼리 병합 + 인메모리 분류로 대체
@@ -7841,12 +8154,12 @@ app.get('/api/home/sections', async (req, res) => {
       }
     }
 
-    // 2. 이벤트 풀 캐시 확인 (5분 TTL)
+    // 2. 이벤트 풀 캐시 확인 (30분 TTL + KST 자정 date-change invalidate)
     const cacheKey = getSectionsCacheKey(location);
     const now = Date.now();
     let cached = sectionsCacheMap.get(cacheKey);
 
-    if (!cached || now - cached.cachedAt > SECTIONS_CACHE_TTL_MS) {
+    if (!cached || now - cached.cachedAt > SECTIONS_CACHE_TTL_MS || isCacheStaleByDate(cached)) {
       // 캐시 MISS → single-flight: 동일 키 중복 빌드 방지
       let buildPromise = buildInFlightMap.get(cacheKey);
       if (!buildPromise) {
