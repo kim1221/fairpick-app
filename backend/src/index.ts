@@ -7647,6 +7647,10 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`[API] Server listening on http://0.0.0.0:${PORT}`);
   console.log(`[API] PID: ${process.pid}`);
   console.log(`[API] Started at: ${new Date().toISOString()}`);
+  // [VERIFY] KST 날짜 포맷 확인 — Railway/Node 환경에서 "YYYY-MM-DD" 출력 보장 여부 확인용
+  // 정상: [API] KST date check: "2026-03-14" (UTC+9 기준)
+  // 이상: en-CA locale 미지원 환경에서 다른 포맷 반환 시 이 로그에서 감지
+  console.log(`[API] KST date check: "${getKSTDateString(Date.now())}" (UTC now: ${new Date().toISOString()})`);
 
   // 🔍 [DEBUG] 등록된 라우트 덤프
   console.log('\n[DEBUG] 📋 Registered routes:');
