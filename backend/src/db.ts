@@ -1,5 +1,11 @@
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import { config } from './config';
+
+// TIMESTAMP WITHOUT TIME ZONE (OID 1114):
+// node-postgres의 기본 파서는 pg 서버가 보낸 문자열을 로컬 프로세스 타임존으로 해석해
+// Asia/Seoul 환경에서 UTC 값을 9시간 빠르게 반환하는 버그가 있다.
+// raw string으로 반환해 toUtcIso()가 'Z'를 붙여 UTC로 처리하도록 한다.
+types.setTypeParser(1114, (val: string) => val);
 
 // DATABASE_URL이 있으면 connectionString으로, 없으면 개별 환경변수로 연결
 export const pool = process.env.DATABASE_URL
@@ -11,6 +17,14 @@ export const pool = process.env.DATABASE_URL
       idleTimeoutMillis: 30000,        // 유휴 연결 30초 후 해제
     })
   : new Pool(config.db);
+
+// 모든 신규 연결에 UTC 타임존 강제 적용
+// — TIMESTAMP WITHOUT TZ 컬럼에 NOW() 등이 UTC 값으로 저장되도록 보장
+pool.on('connect', (client) => {
+  client.query("SET timezone = 'UTC'").catch((err) =>
+    console.error('[DB] SET timezone UTC failed:', err),
+  );
+});
 
 export async function upsertEvent(event: EventRecord) {
   await pool.query(
