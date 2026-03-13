@@ -1,5 +1,6 @@
 [build]
 builder = "NIXPACKS"
+watchPatterns = ["backend/**"]
 
 [deploy]
 startCommand = "npm run start"
