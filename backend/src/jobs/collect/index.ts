@@ -42,8 +42,8 @@ export async function runCollectionJob(options?: { schedulerJobName?: string }):
   try {
     await pool.query(`
       INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, items_count, success_count, failed_count)
-      VALUES ($1, $2, 'system', 'collect', 'running', $3, 0, 0, 0)
-    `, [logId, schedulerJobName, startTime]);
+      VALUES ($1, $2, 'system', 'collect', 'running', NOW(), 0, 0, 0)
+    `, [logId, schedulerJobName]);
   } catch (error) {
     console.error('[CollectJob] Failed to create collection log:', error);
     // 로그 실패해도 job은 계속 진행

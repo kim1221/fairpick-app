@@ -28,8 +28,8 @@ export async function withJobLog<T>(
       `INSERT INTO collection_logs
          (id, scheduler_job_name, source, type, status, started_at,
           items_count, success_count, failed_count, skipped_count)
-       VALUES ($1, $2, 'system', $3, 'running', $4, 0, 0, 0, 0)`,
-      [logId, schedulerJobName, schedulerJobName, startTime]
+       VALUES ($1, $2, 'system', $3, 'running', NOW(), 0, 0, 0, 0)`,
+      [logId, schedulerJobName, schedulerJobName]
     );
   } catch (err) {
     console.error(`[JobLogger][${schedulerJobName}] Failed to create log:`, err);

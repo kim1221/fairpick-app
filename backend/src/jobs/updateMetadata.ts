@@ -9,10 +9,19 @@ import crypto from 'crypto';
 
 export async function updateMetadata(): Promise<void> {
   const logId = crypto.randomUUID();
-  const startTime = new Date();
 
   console.log('[UpdateMetadata] Starting metadata update job...');
   console.log(`[UpdateMetadata] Log ID: ${logId}`);
+
+  // 시작 로그 기록 (started_at = NOW() — DB 서버 시간으로 timezone 일관성 보장)
+  try {
+    await pool.query(`
+      INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, items_count, success_count, failed_count)
+      VALUES ($1, 'metadata', 'system', 'metadata_update', 'running', NOW(), 0, 0, 0)
+    `, [logId]);
+  } catch (logError) {
+    console.error('[UpdateMetadata] Failed to create start log:', logError);
+  }
 
   try {
     // 1. is_ending_soon 업데이트
@@ -87,25 +96,27 @@ export async function updateMetadata(): Promise<void> {
 
     console.log(`[UpdateMetadata] Updated popularity_score: ${popularityResult.rowCount} rows`);
 
-    // 4. collection_logs에 기록
+    // 4. collection_logs 완료 업데이트
     await pool.query(`
-      INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, completed_at, items_count, success_count, failed_count)
-      VALUES ($1, 'metadata', 'system', 'metadata_update', 'success', $2, NOW(), $3, $3, 0)
-    `, [logId, startTime, popularityResult.rowCount]);
+      UPDATE collection_logs
+      SET status = 'success', completed_at = NOW(), items_count = $1, success_count = $1
+      WHERE id = $2
+    `, [popularityResult.rowCount, logId]);
 
     console.log('[UpdateMetadata] ✓ Metadata update completed successfully');
 
   } catch (error: any) {
     console.error('[UpdateMetadata] ✗ Failed:', error);
 
-    // 실패 로그 기록
+    // 실패 로그 업데이트
     try {
       await pool.query(`
-        INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, completed_at, items_count, success_count, failed_count, error_message)
-        VALUES ($1, 'metadata', 'system', 'metadata_update', 'failed', $2, NOW(), 0, 0, 1, $3)
-      `, [logId, startTime, error.message]);
+        UPDATE collection_logs
+        SET status = 'failed', completed_at = NOW(), failed_count = 1, error_message = $1
+        WHERE id = $2
+      `, [error.message, logId]);
     } catch (logError) {
-      console.error('[UpdateMetadata] Failed to log error:', logError);
+      console.error('[UpdateMetadata] Failed to update error log:', logError);
     }
 
     throw error;
