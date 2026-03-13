@@ -17,9 +17,9 @@ import { deleteEventImage } from '../../lib/imageUpload';
  * Retention 정책:
  * - collection_logs: 30일 초과 삭제
  * - event_change_logs: 90일 초과 삭제
- * - user_events (impression): 90일 초과 삭제  ← today_pick 로직은 최근 3일만 사용
- * - user_events (view, click): 180일 초과 삭제
- * - user_events (save, share): 365일 초과 삭제 ← 사용자 자산, 더 길게 보존
+ * - user_events (impression, dwell, sheet_open): 90일 초과 삭제  ← 단기 행동 신호
+ * - user_events (view, click, cta_click): 180일 초과 삭제
+ * - user_events (save, unsave, share): 365일 초과 삭제 ← 사용자 자산, 더 길게 보존
  * - raw_kopis/culture/tour_events: end_at 기준 180일 초과 삭제
  *   ← canonical에 이미 반영됨. 대응 canonical은 최소 150일 전 hard delete 완료
  */
@@ -68,37 +68,37 @@ export async function runCleanupJob(): Promise<void> {
 
     // ─── user_events Retention (action_type별 TTL) ────────────────────────────
 
-    // impression: 90일 — today_pick 로직이 최근 3일만 사용하므로 장기 보존 불필요
-    const deletedImpressions = await pool.query(`
+    // impression / dwell / sheet_open: 90일 — 단기 행동 신호, 장기 보존 불필요
+    const deletedShort = await pool.query(`
       DELETE FROM user_events
-      WHERE action_type = 'impression'
+      WHERE action_type IN ('impression', 'dwell', 'sheet_open')
         AND created_at < NOW() - INTERVAL '90 days'
     `);
 
-    // view / click: 180일
-    const deletedViewClick = await pool.query(`
+    // view / click / cta_click: 180일
+    const deletedMedium = await pool.query(`
       DELETE FROM user_events
-      WHERE action_type IN ('view', 'click')
+      WHERE action_type IN ('view', 'click', 'cta_click')
         AND created_at < NOW() - INTERVAL '180 days'
     `);
 
-    // save / share: 365일 (사용자 자산 — 더 길게 보존)
-    const deletedSaveShare = await pool.query(`
+    // save / unsave / share: 365일 (사용자 자산 — 더 길게 보존)
+    const deletedLong = await pool.query(`
       DELETE FROM user_events
-      WHERE action_type IN ('save', 'share')
+      WHERE action_type IN ('save', 'unsave', 'share')
         AND created_at < NOW() - INTERVAL '365 days'
     `);
 
-    const impressionDeleted = deletedImpressions.rowCount || 0;
-    const viewClickDeleted = deletedViewClick.rowCount || 0;
-    const saveShareDeleted = deletedSaveShare.rowCount || 0;
-    userEventsDeletedCount = impressionDeleted + viewClickDeleted + saveShareDeleted;
+    const shortDeleted = deletedShort.rowCount || 0;
+    const mediumDeleted = deletedMedium.rowCount || 0;
+    const longDeleted = deletedLong.rowCount || 0;
+    userEventsDeletedCount = shortDeleted + mediumDeleted + longDeleted;
 
     console.log(
       `[CleanupJob] user_events retention: ` +
-      `impression(>90d)=${impressionDeleted}, ` +
-      `view/click(>180d)=${viewClickDeleted}, ` +
-      `save/share(>365d)=${saveShareDeleted} ` +
+      `impression/dwell/sheet_open(>90d)=${shortDeleted}, ` +
+      `view/click/cta_click(>180d)=${mediumDeleted}, ` +
+      `save/unsave/share(>365d)=${longDeleted} ` +
       `(total=${userEventsDeletedCount})`,
     );
 
