@@ -17,16 +17,16 @@ import { deleteEventImage } from '../../lib/imageUpload';
  * Retention 정책:
  * - collection_logs: 30일 초과 삭제
  * - event_change_logs: 90일 초과 삭제
- * - user_events (impression, dwell, sheet_open): 90일 초과 삭제  ← 단기 행동 신호
- * - user_events (view, click, cta_click): 180일 초과 삭제
- * - user_events (save, unsave, share): 365일 초과 삭제 ← 사용자 자산, 더 길게 보존
+ * - user_events (impression):              30일 ← 추천 쿨다운(3일)에만 사용, 가장 빠르게 쌓임
+ * - user_events (dwell, sheet_open):       60일 ← 중기 관심도 신호
+ * - user_events (view, click, cta_click):  90일 ← 중기 행동 분석
+ * - user_events (save, unsave, share):    365일 ← 사용자 자산, 장기 보존
  * - raw_kopis/culture/tour_events: end_at 기준 180일 초과 삭제
  *   ← canonical에 이미 반영됨. 대응 canonical은 최소 150일 전 hard delete 완료
  */
 
 export async function runCleanupJob(): Promise<void> {
   const logId = crypto.randomUUID();
-  const startTime = new Date();
 
   console.log('[CleanupJob] Starting cleanup job...');
   console.log(`[CleanupJob] Log ID: ${logId}`);
@@ -35,8 +35,8 @@ export async function runCleanupJob(): Promise<void> {
   try {
     await pool.query(`
       INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, items_count, success_count, failed_count)
-      VALUES ($1, 'cleanup', 'system', 'cleanup', 'running', $2, 0, 0, 0)
-    `, [logId, startTime]);
+      VALUES ($1, 'cleanup', 'system', 'cleanup', 'running', NOW(), 0, 0, 0)
+    `, [logId]);
   } catch (error) {
     console.error('[CleanupJob] Failed to create collection log:', error);
   }
@@ -68,36 +68,45 @@ export async function runCleanupJob(): Promise<void> {
 
     // ─── user_events Retention (action_type별 TTL) ────────────────────────────
 
-    // impression / dwell / sheet_open: 90일 — 단기 행동 신호, 장기 보존 불필요
-    const deletedShort = await pool.query(`
+    // impression: 30일 — 추천 쿨다운(3일)에만 사용, 가장 빠르게 쌓이는 신호
+    const deletedImpression = await pool.query(`
       DELETE FROM user_events
-      WHERE action_type IN ('impression', 'dwell', 'sheet_open')
-        AND created_at < NOW() - INTERVAL '90 days'
+      WHERE action_type = 'impression'
+        AND created_at < NOW() - INTERVAL '30 days'
     `);
 
-    // view / click / cta_click: 180일
+    // dwell / sheet_open: 60일 — 중기 관심도 신호
+    const deletedShort = await pool.query(`
+      DELETE FROM user_events
+      WHERE action_type IN ('dwell', 'sheet_open')
+        AND created_at < NOW() - INTERVAL '60 days'
+    `);
+
+    // view / click / cta_click: 90일 — 중기 행동 분석
     const deletedMedium = await pool.query(`
       DELETE FROM user_events
       WHERE action_type IN ('view', 'click', 'cta_click')
-        AND created_at < NOW() - INTERVAL '180 days'
+        AND created_at < NOW() - INTERVAL '90 days'
     `);
 
-    // save / unsave / share: 365일 (사용자 자산 — 더 길게 보존)
+    // save / unsave / share: 365일 — 사용자 자산, 장기 보존
     const deletedLong = await pool.query(`
       DELETE FROM user_events
       WHERE action_type IN ('save', 'unsave', 'share')
         AND created_at < NOW() - INTERVAL '365 days'
     `);
 
+    const impressionDeleted = deletedImpression.rowCount || 0;
     const shortDeleted = deletedShort.rowCount || 0;
     const mediumDeleted = deletedMedium.rowCount || 0;
     const longDeleted = deletedLong.rowCount || 0;
-    userEventsDeletedCount = shortDeleted + mediumDeleted + longDeleted;
+    userEventsDeletedCount = impressionDeleted + shortDeleted + mediumDeleted + longDeleted;
 
     console.log(
       `[CleanupJob] user_events retention: ` +
-      `impression/dwell/sheet_open(>90d)=${shortDeleted}, ` +
-      `view/click/cta_click(>180d)=${mediumDeleted}, ` +
+      `impression(>30d)=${impressionDeleted}, ` +
+      `dwell/sheet_open(>60d)=${shortDeleted}, ` +
+      `view/click/cta_click(>90d)=${mediumDeleted}, ` +
       `save/unsave/share(>365d)=${longDeleted} ` +
       `(total=${userEventsDeletedCount})`,
     );

@@ -189,6 +189,7 @@ function SummarySection({ data }: { data: PersonalizationSummary | undefined }) 
   return (
     <div className="mb-6">
       <SectionTitle>오늘의 KPI</SectionTitle>
+      <p className="text-xs text-gray-400 mb-3">오늘 자정(KST) 이후 user_events 기준</p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <MetricCard label="총 이벤트 수" value={data.totalEvents.toLocaleString()} sub="건" />
         <MetricCard label="Active 유저" value={data.activeUsers.toLocaleString()} sub="명" />
@@ -396,6 +397,7 @@ function RecentEventsSection() {
   return (
     <div className="mb-6">
       <SectionTitle>최근 Raw Sample</SectionTitle>
+      <p className="text-xs text-gray-400 mb-2">user_events 원본 로그 최근 {limit}건 (필터 적용 시 해당 조건 기준)</p>
       <div className="flex flex-wrap gap-2 mb-3">
         <select
           value={actionType}
@@ -495,6 +497,7 @@ function TopEventsSection() {
   return (
     <div className="mb-6">
       <SectionTitle>상위 상호작용 이벤트</SectionTitle>
+      <p className="text-xs text-gray-400 mb-2">click · save · dwell · cta_click 기준 (impression 제외) — user_events 직접 집계</p>
       <TabBar
         options={[
           { label: '최근 7일', value: '7d' },
@@ -630,6 +633,9 @@ export default function PersonalizationPage() {
           <h1 className="text-2xl font-bold text-gray-900">개인화 이벤트 관제</h1>
           <p className="text-sm text-gray-500 mt-1">
             user_events 파이프라인 health · 수집 품질 · 추천 feature 현황
+          </p>
+          <p className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1 mt-2 inline-block">
+            모든 수치는 <code className="font-mono">user_events</code> 테이블 직접 집계 (집계 캐시 없음 · 조회 시점 기준 실시간)
           </p>
         </div>
         {lastUpdated && (
