@@ -85,9 +85,17 @@ function pct(rate: number) {
   return `${Math.round(rate * 100)}%`;
 }
 
+/** ISO 문자열 → KST 표시
+ *  백엔드가 'Z' 없는 UTC 문자열을 반환하는 경우에도 올바르게 KST로 표시한다.
+ *  (timeZone 미지정 시 브라우저 로컬 타임존 사용 → Railway/UTC 환경에서 9시간 오차 발생)
+ */
 function fmtTime(iso: string) {
-  const d = new Date(iso);
+  // Z/+HH:MM 없는 문자열은 UTC로 강제 해석 (Railway 서버가 반환하는 naive UTC timestamp 대응)
+  const utcIso = /[Z+]/.test(iso.slice(-6)) ? iso : iso + 'Z';
+  const d = new Date(utcIso);
+  if (isNaN(d.getTime())) return iso;
   return d.toLocaleString('ko-KR', {
+    timeZone: 'Asia/Seoul',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -98,7 +106,9 @@ function fmtTime(iso: string) {
 
 function relativeTime(iso: string | null) {
   if (!iso) return '없음';
-  const diff = Date.now() - new Date(iso).getTime();
+  // Z/+HH:MM 없는 문자열은 UTC로 강제 해석
+  const utcIso = /[Z+]/.test(iso.slice(-6)) ? iso : iso + 'Z';
+  const diff = Date.now() - new Date(utcIso).getTime();
   const s = Math.floor(diff / 1000);
   if (s < 60) return `${s}초 전`;
   const m = Math.floor(s / 60);
@@ -234,7 +244,7 @@ function ActionBreakdownSection() {
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                 <XAxis type="number" tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="action_type" tick={{ fontSize: 11 }} width={80} />
-                <Tooltip formatter={(v: number) => v.toLocaleString()} />
+                <Tooltip formatter={(v: number | undefined) => (v ?? 0).toLocaleString()} />
                 <Bar dataKey="count" radius={[0, 4, 4, 0]}>
                   {chartData.map((entry) => (
                     <Cell
@@ -546,12 +556,16 @@ function TrendSection() {
     refetchInterval: 60_000,
   });
 
-  const points = (data?.points ?? []).map((p) => ({
-    ...p,
-    label: granularity === 'hour'
-      ? new Date(p.bucket).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
-      : new Date(p.bucket).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }),
-  }));
+  const points = (data?.points ?? []).map((p) => {
+    const utcBucket = /[Z+]/.test(p.bucket.slice(-6)) ? p.bucket : p.bucket + 'Z';
+    const d = new Date(utcBucket);
+    return {
+      ...p,
+      label: granularity === 'hour'
+        ? d.toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' })
+        : d.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit' }),
+    };
+  });
 
   return (
     <div className="mb-6">
@@ -571,7 +585,7 @@ function TrendSection() {
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip formatter={(v: number) => [`${v.toLocaleString()}건`, '이벤트 수']} />
+              <Tooltip formatter={(v: number | undefined) => [`${(v ?? 0).toLocaleString()}건`, '이벤트 수']} />
               <Bar dataKey="count" fill="#6366f1" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
