@@ -6,6 +6,9 @@ export const pool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
+      max: 10,
+      connectionTimeoutMillis: 5000,  // 연결 대기 최대 5초 (헬스체크 무한 대기 방지)
+      idleTimeoutMillis: 30000,        // 유휴 연결 30초 후 해제
     })
   : new Pool(config.db);
 

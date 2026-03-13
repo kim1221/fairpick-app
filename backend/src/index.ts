@@ -8732,27 +8732,29 @@ function gracefulShutdown(signal: string) {
   console.log(`[Shutdown] ${signal} received at ${new Date().toISOString()}`);
   console.log('[Shutdown] Starting graceful shutdown...');
 
-  // 새로운 연결 거부
-  server.close(() => {
-    console.log('[Shutdown] HTTP server closed');
-  });
-
-  // DB 연결 종료
-  pool.end(() => {
-    console.log('[Shutdown] Database pool closed');
-  });
-
   // 최대 30초 대기 후 강제 종료
-  setTimeout(() => {
+  const forceTimer = setTimeout(() => {
     console.error('[Shutdown] Forcing shutdown after 30s timeout');
     process.exit(1);
   }, 30000);
+  forceTimer.unref();
 
-  // 정상 종료
-  setTimeout(() => {
-    console.log('[Shutdown] Graceful shutdown completed');
-    process.exit(0);
-  }, 5000);
+  // HTTP 서버 종료 + DB 풀 종료를 병렬로 await 후 정상 종료
+  const closeServer = new Promise<void>((resolve) => server.close(() => {
+    console.log('[Shutdown] HTTP server closed');
+    resolve();
+  }));
+  const closePool = pool.end().then(() => {
+    console.log('[Shutdown] Database pool closed');
+  });
+
+  Promise.all([closeServer, closePool])
+    .catch((err) => console.error('[Shutdown] Error during cleanup:', err))
+    .finally(() => {
+      console.log('[Shutdown] Graceful shutdown completed');
+      clearTimeout(forceTimer);
+      process.exit(0);
+    });
 }
 
 // SIGTERM, SIGINT 핸들러 등록
