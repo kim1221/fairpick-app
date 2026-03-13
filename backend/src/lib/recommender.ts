@@ -238,6 +238,27 @@ export function calcDistanceScore(distanceKm: number): number {
 }
 
 /**
+ * 거리 선형 점수 계산 (0~100)
+ * dist_score = max(0, 1 - distKm / normalizeKm) * 100
+ */
+export function calcLinearDistScore(distKm: number, normalizeKm: number): number {
+  return Math.max(0, (1 - distKm / normalizeKm) * 100);
+}
+
+/**
+ * Haversine 공식으로 두 좌표 간 거리 계산 (km)
+ */
+export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/**
  * 인기 점수 계산 (0~100) - 로그 스케일
  */
 export function calcBuzzScore(event: Event): number {
@@ -925,11 +946,30 @@ export async function getDatePick(
     }
   }
 
-  const scored = rows.map(row => ({
-    ...row,
-    score: row.buzz_score ?? 0,
-    reason: ['데이트 추천'],
-  }));
+  const DATE_PICK_DIST_WEIGHT = 0.40;
+  const DATE_PICK_NORMALIZE_KM = 30;
+
+  const scored = rows.map(row => {
+    const contentScore = row.buzz_score ?? 0;
+    let distKm: number | undefined;
+    let distScore = 0;
+    if (location && row.lat != null && row.lng != null) {
+      distKm = haversineKm(location.lat, location.lng, Number(row.lat), Number(row.lng));
+      distScore = calcLinearDistScore(distKm, DATE_PICK_NORMALIZE_KM);
+    }
+    const finalScore = contentScore * (1 - DATE_PICK_DIST_WEIGHT) + distScore * DATE_PICK_DIST_WEIGHT;
+    return { ...row, score: finalScore, distance_km: distKm, reason: ['데이트 추천'] };
+  });
+
+  [...scored].sort((a, b) => b.score - a.score).slice(0, 5).forEach(r => {
+    const contentScore = r.buzz_score ?? 0;
+    const distKm = r.distance_km;
+    const distScore = distKm != null ? calcLinearDistScore(distKm, DATE_PICK_NORMALIZE_KM) : 0;
+    console.log(
+      `[getDatePick] "${(r.title ?? '').substring(0, 30)}" content=${contentScore.toFixed(1)} dist_km=${distKm != null ? distKm.toFixed(1) : 'N/A'} dist_score=${distScore.toFixed(1)} final=${r.score.toFixed(1)}`
+    );
+  });
+
   return applySlotCap(scored, DATE_PICK_SLOT_CAP, limit);
 }
 
@@ -1148,11 +1188,30 @@ export async function getBeginner(
     rows = (await pool.query(buildQuery(''), [fetchLimit])).rows;
   }
 
-  const scored = rows.map(row => ({
-    ...row,
-    score: row.buzz_score ?? 0,
-    reason: ['처음 가도 좋은 곳'],
-  }));
+  const BEGINNER_DIST_WEIGHT = 0.20;
+  const BEGINNER_NORMALIZE_KM = 50;
+
+  const scored = rows.map(row => {
+    const contentScore = row.buzz_score ?? 0;
+    let distKm: number | undefined;
+    let distScore = 0;
+    if (location && row.lat != null && row.lng != null) {
+      distKm = haversineKm(location.lat, location.lng, Number(row.lat), Number(row.lng));
+      distScore = calcLinearDistScore(distKm, BEGINNER_NORMALIZE_KM);
+    }
+    const finalScore = contentScore * (1 - BEGINNER_DIST_WEIGHT) + distScore * BEGINNER_DIST_WEIGHT;
+    return { ...row, score: finalScore, distance_km: distKm, reason: ['처음 가도 좋은 곳'] };
+  });
+
+  [...scored].sort((a, b) => b.score - a.score).slice(0, 5).forEach(r => {
+    const contentScore = r.buzz_score ?? 0;
+    const distKm = r.distance_km;
+    const distScore = distKm != null ? calcLinearDistScore(distKm, BEGINNER_NORMALIZE_KM) : 0;
+    console.log(
+      `[getBeginner] "${(r.title ?? '').substring(0, 30)}" content=${contentScore.toFixed(1)} dist_km=${distKm != null ? distKm.toFixed(1) : 'N/A'} dist_score=${distScore.toFixed(1)} final=${r.score.toFixed(1)}`
+    );
+  });
+
   return applySlotCap(scored, BEGINNER_SLOT_CAP, limit);
 }
 
