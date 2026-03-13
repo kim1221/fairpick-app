@@ -56,12 +56,17 @@ export default function ExecutionLogTable({
                   } ${isWarn ? 'bg-red-50/40' : ''}`}
                 >
                   <td className="px-4 py-3 text-gray-700 whitespace-nowrap font-mono text-xs">
-                    {new Date(log.started_at).toLocaleString('ko-KR', {
-                      month: '2-digit',
-                      day: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
+                    {(() => {
+                      const normalized = log.started_at.replace(' ', 'T');
+                      const utcIso = /[Z+]/.test(normalized.slice(-6)) ? normalized : normalized + 'Z';
+                      return new Date(utcIso).toLocaleString('ko-KR', {
+                        timeZone: 'Asia/Seoul',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      });
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-gray-900 font-medium">{log.source || '—'}</td>
                   <td className="px-4 py-3 text-gray-600">{log.type || '—'}</td>

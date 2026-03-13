@@ -7,7 +7,13 @@ import RunNowButton from './RunNowButton';
 
 function fmtDateTime(iso: string | null): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('ko-KR', {
+  // Z/+HH:MM 없는 문자열(naive UTC)은 UTC로 강제 해석 후 KST 표시
+  const normalized = iso.replace(' ', 'T');
+  const utcIso = /[Z+]/.test(normalized.slice(-6)) ? normalized : normalized + 'Z';
+  const d = new Date(utcIso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString('ko-KR', {
+    timeZone: 'Asia/Seoul',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

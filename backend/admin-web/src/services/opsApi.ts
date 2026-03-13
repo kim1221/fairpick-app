@@ -149,7 +149,14 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
 // ──────────────────────────────────────────────────────────────
 
 function deriveJobStatus(log: CollectionLog): JobStatus {
-  if (log.status === 'running') return 'running';
+  if (log.status === 'running') {
+    // 2시간 이상 running이면 좀비 상태로 판단 (서버 재시작 등으로 미완료된 로그)
+    const normalized = log.started_at.replace(' ', 'T');
+    const utcIso = /[Z+]/.test(normalized.slice(-6)) ? normalized : normalized + 'Z';
+    const elapsedMs = Date.now() - new Date(utcIso).getTime();
+    if (elapsedMs > 2 * 60 * 60 * 1000) return 'stale';
+    return 'running';
+  }
   if (log.status === 'failed') return 'failed';
   if (log.status === 'partial') return 'partial_success';  // collect/index.ts 호환
   if (log.status === 'success') {
