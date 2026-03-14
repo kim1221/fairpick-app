@@ -1411,7 +1411,7 @@ app.get('/admin/personalization/signal-quality', requireAdminAuth, async (req, r
         COUNT(*) FILTER (WHERE session_id IS NOT NULL)                      AS has_session_id,
         COUNT(*) FILTER (WHERE metadata IS NOT NULL)                        AS has_metadata,
         COUNT(*) FILTER (WHERE action_type NOT IN (
-          'view','save','unsave','share','click','dwell','cta_click','sheet_open'
+          'view','save','unsave','share','click','dwell','cta_click','sheet_open','impression'
         ))                                                                   AS unknown_action_type,
         COUNT(*) FILTER (WHERE action_type = 'dwell')                       AS dwell_total,
         COUNT(*) FILTER (
