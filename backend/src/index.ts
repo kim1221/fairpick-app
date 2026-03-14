@@ -1281,18 +1281,25 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
 /** period 파라미터 → 시작 시각(Date) 변환
  *  'today'는 KST(UTC+9) 자정 기준: UTC midnight이 아닌 KST 00:00 = UTC 전날 15:00
  */
-function personalizationPeriodStart(period: string): Date {
+/**
+ * period 파라미터 → UTC ISO 문자열 반환 (TIMESTAMP WITHOUT TZ 컬럼 비교용)
+ *
+ * pg 드라이버는 JS Date 객체를 로컬 timezone(KST +09:00)으로 직렬화하므로
+ * TIMESTAMP WITHOUT TZ 컬럼과의 >= 비교가 비정상적으로 동작한다.
+ * 쿼리에서 $1::timestamp 캐스팅과 함께 ISO 문자열을 사용해야 정확하게 비교된다.
+ */
+function personalizationPeriodStart(period: string): string {
   const now = new Date();
   switch (period) {
-    case '1h':  return new Date(now.getTime() - 60 * 60 * 1000);
-    case '7d':  return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    case '1h':  return new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+    case '7d':  return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
     case 'today':
     default: {
       const KST_OFFSET_MS = 9 * 60 * 60 * 1000; // UTC+9
       const kstNowMs = now.getTime() + KST_OFFSET_MS;
       // KST 날짜 기준 자정(ms) → UTC로 역산
       const kstMidnightMs = kstNowMs - (kstNowMs % (24 * 60 * 60 * 1000));
-      return new Date(kstMidnightMs - KST_OFFSET_MS);
+      return new Date(kstMidnightMs - KST_OFFSET_MS).toISOString();
     }
   }
 }
@@ -1353,12 +1360,12 @@ app.get('/admin/personalization/summary', requireAdminAuth, async (req, res) => 
           COUNT(DISTINCT ue.event_id)                          AS unique_events
         FROM user_events ue
         LEFT JOIN users u ON ue.user_id = u.id
-        WHERE ue.created_at >= $1
+        WHERE ue.created_at >= $1::timestamp
       `, [since]),
       pool.query(`
         SELECT action_type, COUNT(*) AS cnt
         FROM user_events
-        WHERE created_at >= $1
+        WHERE created_at >= $1::timestamp
         GROUP BY action_type
         ORDER BY cnt DESC
       `, [since]),
@@ -1411,7 +1418,7 @@ app.get('/admin/personalization/signal-quality', requireAdminAuth, async (req, r
           WHERE action_type = 'dwell'
           AND (metadata->>'dwell_seconds') IS NOT NULL)                     AS dwell_with_seconds
       FROM user_events
-      WHERE created_at >= $1
+      WHERE created_at >= $1::timestamp
     `, [since]);
 
     const r = rows[0];
@@ -1511,7 +1518,7 @@ app.get('/admin/personalization/top-events', requireAdminAuth, async (req, res) 
     const period = (req.query.period as string) || '7d';
     // '1d' → 직전 24시간, '7d' → 7일
     const sinceDate = period === '1d'
-      ? new Date(Date.now() - 24 * 60 * 60 * 1000)
+      ? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
       : personalizationPeriodStart(period);
 
     const { rows } = await pool.query(`
@@ -1527,7 +1534,7 @@ app.get('/admin/personalization/top-events', requireAdminAuth, async (req, res) 
         COUNT(*)                                              AS total_interactions
       FROM user_events ue
       LEFT JOIN canonical_events ce ON ue.event_id IS NOT NULL AND ue.event_id = ce.id
-      WHERE ue.created_at >= $1
+      WHERE ue.created_at >= $1::timestamp
         AND ue.action_type IN ('click', 'save', 'dwell', 'cta_click')
       GROUP BY ue.event_id, ce.title, ce.main_category, ce.region
       ORDER BY total_interactions DESC
@@ -1559,8 +1566,8 @@ app.get('/admin/personalization/trend', requireAdminAuth, async (req, res) => {
   try {
     const granularity = (req.query.granularity as string) === 'hour' ? 'hour' : 'day';
     const since = granularity === 'hour'
-      ? new Date(Date.now() - 24 * 60 * 60 * 1000)
-      : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      ? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
     // day 버킷: KST 자정 기준 (created_at + 9h로 날짜 경계 이동 후 역산)
     // hour 버킷: UTC 그대로 → 프론트에서 toLocaleTimeString(KST)으로 표시
@@ -1573,7 +1580,7 @@ app.get('/admin/personalization/trend', requireAdminAuth, async (req, res) => {
         ${bucketExpr} AS bucket,
         COUNT(*)::int AS count
       FROM user_events
-      WHERE created_at >= $1
+      WHERE created_at >= $1::timestamp
       GROUP BY 1
       ORDER BY 1
     `, [since]);
