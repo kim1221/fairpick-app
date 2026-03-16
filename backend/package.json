@@ -7,6 +7,7 @@
     "build": "tsc --noEmit || true",
     "dev": "NODE_ENV=development PORT=5001 ts-node -r dotenv/config src/index.ts",
     "start": "NODE_ENV=production ts-node --transpile-only -r dotenv/config src/index.ts",
+    "start:scheduler": "NODE_ENV=production ts-node --transpile-only -r dotenv/config src/scheduler-entry.ts",
     "start:api": "NODE_ENV=production PORT=5001 ts-node -r dotenv/config src/index.ts",
     "start:staging": "NODE_ENV=staging ts-node -r dotenv/config src/index.ts",
     "start:admin": "npx http-server public -p 4000 --cors",
