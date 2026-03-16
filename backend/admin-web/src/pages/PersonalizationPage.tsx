@@ -379,8 +379,9 @@ function RecentEventsSection() {
   const [userId, setUserId] = useState('');
   const [eventId, setEventId] = useState('');
 
+  const limit = 50;
   const params = {
-    limit: 50,
+    limit,
     ...(actionType && { actionType }),
     ...(userId && { userId }),
     ...(eventId && { eventId }),
