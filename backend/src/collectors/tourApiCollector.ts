@@ -249,95 +249,90 @@ async function fetchTourApiEvents() {
       for (const item of items) {
         processedCount++;
 
-      // 먼저 기본 필터(기간/지역 등)를 통과한 이벤트만 상세 API를 호출합니다.
-      const mappedBeforeDetail = mapTourApiItem(item);
-      if (!mappedBeforeDetail) {
-        continue;
-      }
-
-      // 상세 텍스트(프로그램/부대행사/이용요금/예약 등) 보강 → 태그 품질 향상
-      // 요청 사이에 아주 짧은 텀을 둬서 안정성을 높입니다.
-      await sleep(50);
-      const detail = await fetchDetailTextWithRetry(item.contentid, item.contenttypeid);
-      if (detail?.text) {
-        item.detailText = detail.text;
-        // detailCommon2의 homepage를 원본 item.homepage보다 우선(HTML/링크가 더 잘 들어있는 편)
-        if (detail.homepage) {
-          item.homepage = detail.homepage;
-          // 디버그: homepage가 들어온 경우 로그
-          console.log(`[TourAPI] ${item.title} - homepage: ${detail.homepage.slice(0, 80)}`);
+        // 기본 필터(기간/지역 등) 먼저 통과 여부 확인 (fast path)
+        const mappedBeforeDetail = mapTourApiItem(item);
+        if (!mappedBeforeDetail) {
+          continue;
         }
-        // detailIntro2의 eventplace 주입
-        if (detail.eventplace) {
-          item.eventplace = detail.eventplace;
+
+        // 증분 체크: 이미 events 테이블에 있으면 상세 API 호출 스킵
+        // (API 호출 비용이 크므로 신규 이벤트에만 상세 수집 적용)
+        const exists = await existsInDB(item.contentid);
+        if (exists) {
+          consecutiveExistsCount++;
+          skippedCount++;
+
+          // 연속으로 N개가 이미 있으면 수집 중단 (이후는 모두 기존 데이터)
+          if (consecutiveExistsCount >= CONSECUTIVE_EXISTS_THRESHOLD) {
+            console.log(`[TourAPI] Found ${CONSECUTIVE_EXISTS_THRESHOLD} consecutive existing items. Stopping incremental collection.`);
+            break;
+          }
+          continue;
         }
-        // detailCommon2의 overview 주입 (원본 searchFestival2에는 overview가 없으므로)
-        if (detail.overview) {
-          item.overview = detail.overview;
+
+        // 새 이벤트만 상세 API 호출 (detailText + detailImage)
+        consecutiveExistsCount = 0;
+
+        // 상세 텍스트(프로그램/부대행사/이용요금/예약 등) 보강 → 태그 품질 향상
+        await sleep(50);
+        const detail = await fetchDetailTextWithRetry(item.contentid, item.contenttypeid);
+        if (detail?.text) {
+          item.detailText = detail.text;
+          if (detail.homepage) {
+            item.homepage = detail.homepage;
+            console.log(`[TourAPI] ${item.title} - homepage: ${detail.homepage.slice(0, 80)}`);
+          }
+          if (detail.eventplace) {
+            item.eventplace = detail.eventplace;
+          }
+          if (detail.overview) {
+            item.overview = detail.overview;
+          }
+          detailTextSuccess += 1;
+        } else {
+          detailTextFailed += 1;
         }
-        detailTextSuccess += 1;
-      } else {
-        detailTextFailed += 1;
-      }
 
-      // detailText가 주입된 상태로 한 번 더 매핑(태그 품질 반영)
-      const mapped = mapTourApiItem(item);
-      if (!mapped) {
-        continue;
-      }
-
-      // Fetch high-resolution detail image
-      const detailImage = await fetchDetailImage(item.contentid);
-      if (detailImage) {
-        // Use high-res image for both thumbnail and detail
-        mapped.thumbnailUrl = detailImage;
-        mapped.detailImageUrl = detailImage;
-      }
-
-      // Raw 테이블에는 항상 UPSERT (exists 여부와 무관)
-      try {
-        const location = parseLocation(item);
-
-        await upsertRawTourEvent({
-          sourceEventId: item.contentid,
-          sourceUrl: mapped.detailLink,
-          payload: item as unknown as Record<string, unknown>,
-          title: mapped.title,
-          startAt: mapped.startDate,
-          endAt: mapped.endDate,
-          venue: mapped.venue,
-          region: mapped.region,
-          mainCategory: mapped.category,
-          subCategory: item.cat2 || item.cat3,
-          imageUrl: mapped.thumbnailUrl,
-          address: location.address,
-          lat: location.lat,
-          lng: location.lng,
-        });
-        console.log(`[TourAPI] Raw upserted: contentid=${item.contentid}${location.address ? ' (위치 포함)' : ''}`);
-      } catch (error) {
-        console.error(`[TourAPI] Failed to upsert raw: ${item.contentid}`, error);
-      }
-
-      // 증분 체크: 이미 events 테이블에 있는지 확인
-      const exists = await existsInDB(item.contentid);
-      if (exists) {
-        consecutiveExistsCount++;
-        skippedCount++;
-
-        // 연속으로 N개가 이미 있으면 수집 중단 (이후는 모두 기존 데이터)
-        if (consecutiveExistsCount >= CONSECUTIVE_EXISTS_THRESHOLD) {
-          console.log(`[TourAPI] Found ${CONSECUTIVE_EXISTS_THRESHOLD} consecutive existing items. Stopping incremental collection.`);
-          break;
+        // detailText가 주입된 상태로 한 번 더 매핑(태그 품질 반영)
+        const mapped = mapTourApiItem(item);
+        if (!mapped) {
+          continue;
         }
-        continue; // events 테이블 저장은 skip
-      }
 
-      // 새 데이터 발견 → 연속 카운트 리셋
-      consecutiveExistsCount = 0;
+        // Fetch high-resolution detail image
+        const detailImage = await fetchDetailImage(item.contentid);
+        if (detailImage) {
+          mapped.thumbnailUrl = detailImage;
+          mapped.detailImageUrl = detailImage;
+        }
 
-      // events 테이블 저장 (새로운 이벤트만)
-      await upsertEvent({
+        // Raw 테이블에는 UPSERT (신규 이벤트만)
+        try {
+          const location = parseLocation(item);
+
+          await upsertRawTourEvent({
+            sourceEventId: item.contentid,
+            sourceUrl: mapped.detailLink,
+            payload: item as unknown as Record<string, unknown>,
+            title: mapped.title,
+            startAt: mapped.startDate,
+            endAt: mapped.endDate,
+            venue: mapped.venue,
+            region: mapped.region,
+            mainCategory: mapped.category,
+            subCategory: item.cat2 || item.cat3,
+            imageUrl: mapped.thumbnailUrl,
+            address: location.address,
+            lat: location.lat,
+            lng: location.lng,
+          });
+          console.log(`[TourAPI] Raw upserted: contentid=${item.contentid}${location.address ? ' (위치 포함)' : ''}`);
+        } catch (error) {
+          console.error(`[TourAPI] Failed to upsert raw: ${item.contentid}`, error);
+        }
+
+        // events 테이블 저장
+        await upsertEvent({
           ...mapped,
           tags: mapped.tags ?? [],
         });

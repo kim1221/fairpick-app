@@ -463,7 +463,23 @@ async function collectCultureEvents() {
       // 카테고리 매핑
       const category = mapRealmToCategory(item.realmName, item.serviceName || '');
 
-      // 상세 정보 조회 (raw 저장을 위해 exists 체크 전에 수행)
+      // 증분 체크: 이미 events 테이블에 있으면 상세 API 호출 스킵
+      const exists = await existsInDB(item.seq);
+      if (exists) {
+        consecutiveExistsCount++;
+        totalSkipped++;
+
+        // 연속 N개가 이미 있으면 수집 중단
+        if (consecutiveExistsCount >= CONSECUTIVE_EXISTS_THRESHOLD) {
+          console.log(`[Culture] Found ${CONSECUTIVE_EXISTS_THRESHOLD} consecutive existing items. Stopping.`);
+          break;
+        }
+        continue;
+      }
+
+      // 새 이벤트만 상세 API 호출 + 이미지 유효성 검사
+      consecutiveExistsCount = 0;
+
       await new Promise((resolve) => setTimeout(resolve, 50));
       const detail = await fetchDetail(item.seq);
 
@@ -474,7 +490,7 @@ async function collectCultureEvents() {
       // 이미지: detail의 imgUrl > thumbnail 순으로 사용, 유효성 검사 후 저장
       const imageUrl = await getValidImageUrl(detailItem.imgUrl || item.thumbnail);
 
-      // Raw 테이블에는 항상 UPSERT (exists 여부와 무관)
+      // Raw 테이블 UPSERT (신규 이벤트만)
       try {
         const isFree = parseIsFree(detailItem.price);
         const location = parseLocation(detailItem);
@@ -500,23 +516,6 @@ async function collectCultureEvents() {
       } catch (error) {
         console.error(`[Culture] Failed to upsert raw: ${item.seq}`, error);
       }
-
-      // 증분 체크: 이미 events 테이블에 있는지 확인
-      const exists = await existsInDB(item.seq);
-      if (exists) {
-        consecutiveExistsCount++;
-        totalSkipped++;
-
-        // 연속 N개가 이미 있으면 수집 중단
-        if (consecutiveExistsCount >= CONSECUTIVE_EXISTS_THRESHOLD) {
-          console.log(`[Culture] Found ${CONSECUTIVE_EXISTS_THRESHOLD} consecutive existing items. Stopping.`);
-          break;
-        }
-        continue; // events 테이블 저장은 skip
-      }
-
-      // 새 데이터 발견 → 연속 카운트 리셋
-      consecutiveExistsCount = 0;
 
       // TourAPI와 중복 체크 (제목+기간+장소)
       const duplicate = await isDuplicate(item.title, formatDate(item.startDate), formatDate(item.endDate), item.place);

@@ -314,7 +314,15 @@ export function deriveSystemStatus(jobs: SchedulerJob[]): OpsSystemStatus {
   else if (warningJobs > 0) overall = 'warning';
   else overall = 'healthy';
 
-  const pipelineJob = jobs.find((j) => j.name === 'geo-refresh-03');
+  // geo-refresh-03 또는 collect-15 중 가장 최근 실행된 것을 파이프라인 기준으로 표시
+  const pipelineJobs = jobs.filter((j) => j.name === 'geo-refresh-03' || j.name === 'collect-15');
+  const pipelineJob = pipelineJobs
+    .filter((j) => j.lastExecution?.startedAt)
+    .sort((a, b) => {
+      const aMs = a.lastExecution?.startedAt ? new Date(a.lastExecution.startedAt).getTime() : 0;
+      const bMs = b.lastExecution?.startedAt ? new Date(b.lastExecution.startedAt).getTime() : 0;
+      return bMs - aMs;
+    })[0] ?? null;
 
   return {
     overall,

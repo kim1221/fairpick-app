@@ -448,7 +448,22 @@ async function collectKopisEvents() {
         continue;
       }
 
-      // 상세 정보 조회 (raw 저장을 위해 exists 체크 전에 수행)
+      // 증분 체크: 이미 events 테이블에 있으면 상세 API 호출 스킵
+      const exists = await existsInDB(item.mt20id);
+      if (exists) {
+        consecutiveExistsCount++;
+        totalSkipped++;
+
+        if (consecutiveExistsCount >= CONSECUTIVE_EXISTS_THRESHOLD) {
+          console.log(`[KOPIS] Found ${CONSECUTIVE_EXISTS_THRESHOLD} consecutive existing items. Stopping.`);
+          break;
+        }
+        continue;
+      }
+
+      // 새 이벤트만 상세 API 호출
+      consecutiveExistsCount = 0;
+
       await new Promise((resolve) => setTimeout(resolve, 50));
       const detail = await fetchPerformanceDetail(item.mt20id);
       const finalItem = detail || item;
@@ -456,10 +471,9 @@ async function collectKopisEvents() {
       // 시설 정보 조회 (좌표 획득)
       let facilityInfo: { la?: string; lo?: string; adres?: string; } | null = null;
       if (detail?.mt10id) {
-        await new Promise((resolve) => setTimeout(resolve, 50)); // API 호출 간격
+        await new Promise((resolve) => setTimeout(resolve, 50));
         facilityInfo = await fetchFacilityDetail(detail.mt10id);
         if (facilityInfo) {
-          // 시설 정보로 좌표 보완
           (finalItem as KopisDetailItem).la = facilityInfo.la || (finalItem as KopisDetailItem).la || '';
           (finalItem as KopisDetailItem).lo = facilityInfo.lo || (finalItem as KopisDetailItem).lo || '';
           (finalItem as KopisDetailItem).adres = facilityInfo.adres || (finalItem as KopisDetailItem).adres || '';
@@ -479,7 +493,7 @@ async function collectKopisEvents() {
         continue;
       }
 
-      // Raw 테이블에는 항상 UPSERT (exists 여부와 무관)
+      // Raw 테이블 UPSERT (신규 이벤트만)
       try {
         const detailItem = finalItem as KopisDetailItem;
         const isFree = deriveIsFree(normalizePriceText(detailItem.pcseguidance));
@@ -507,22 +521,6 @@ async function collectKopisEvents() {
       } catch (error) {
         console.error(`[KOPIS] Failed to upsert raw: ${item.mt20id}`, error);
       }
-
-      // 증분 체크: 이미 events 테이블에 있는지 확인
-      const exists = await existsInDB(item.mt20id);
-      if (exists) {
-        consecutiveExistsCount++;
-        totalSkipped++;
-
-        if (consecutiveExistsCount >= CONSECUTIVE_EXISTS_THRESHOLD) {
-          console.log(`[KOPIS] Found ${CONSECUTIVE_EXISTS_THRESHOLD} consecutive existing items. Stopping.`);
-          break;
-        }
-        continue; // events 테이블 저장은 skip
-      }
-
-      // 새 데이터 발견 → 연속 카운트 리셋
-      consecutiveExistsCount = 0;
 
       // events 테이블 저장 (새로운 이벤트만)
       try {
