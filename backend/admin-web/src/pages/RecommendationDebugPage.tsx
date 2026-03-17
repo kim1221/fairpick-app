@@ -319,7 +319,51 @@ function TodayPickSection({ data }: { data: RecommendationDebugResult }) {
         ⚠️ 이 결과는 예측값입니다. 아래 "섹션별 노출 이력"은 실제 DB에 기록된 사실입니다.
       </div>
 
-      <p className="text-xs text-gray-400 mb-5">후보 이벤트 {sim.poolSize}개 기준</p>
+      {/* ── 최종 예상 결과 요약 ── */}
+      {sim.selected.length === 0 ? (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-5">
+          <div className="text-sm font-semibold text-gray-500 mb-1">🎯 최종 예상 today_pick</div>
+          <p className="text-xs text-gray-400">
+            노출 가능한 신선한 후보가 없습니다. 아래 "우선순위 낮춤" / "오늘은 제외" 내역을 참고하세요.
+          </p>
+        </div>
+      ) : (
+        <div className="bg-white border-2 border-purple-300 rounded-xl p-4 mb-5 shadow-sm">
+          <div className="text-sm font-semibold text-purple-800 mb-3">
+            🎯 최종 예상 today_pick — 상위 {Math.min(sim.selected.length, 3)}개
+            <span className="ml-2 text-xs font-normal text-purple-400">
+              (후보 풀 {sim.poolSize}개 중 신선한 {sim.selected.length}개 기준)
+            </span>
+          </div>
+          <div className="space-y-3">
+            {sim.selected.slice(0, 3).map((e: SimulatedEvent, i: number) => (
+              <div key={e.id} className="flex items-start gap-3">
+                <span className="text-xl leading-none mt-0.5 shrink-0">
+                  {i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-gray-900 truncate">{e.title ?? e.id}</div>
+                  <div className="text-xs text-gray-500 mb-1.5">{e.category ?? '–'}</div>
+                  <div className="flex flex-wrap gap-1">
+                    {e.reasons.slice(0, 3).map((r, ri) => (
+                      <span key={ri} className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs border border-purple-200">
+                        {r}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {sim.selected.length > 3 && (
+            <p className="text-xs text-purple-400 mt-3 pl-9">
+              외 {sim.selected.length - 3}개 더 → 아래 "노출 우선" 상세 목록 참고
+            </p>
+          )}
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400 mb-5">─ 아래는 후보 풀 전체 분류 ─</p>
 
       {/* 노출 우선 */}
       <div className="mb-6">
