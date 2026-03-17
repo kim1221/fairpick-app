@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   BarChart,
@@ -374,6 +375,74 @@ function USER_TYPE_BADGE({ type }: { type: RecentEvent['userType'] }) {
   );
 }
 
+/** 잘린 ID + copy 버튼 + (선택) 추천 디버그 링크 */
+function CopyableId({
+  value,
+  debugLink = false,
+}: {
+  value: string | null;
+  debugLink?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const navigate = useNavigate();
+
+  if (!value) return <span className="text-gray-300">-</span>;
+
+  const truncated = value.length > 8 ? value.slice(0, 8) + '…' : value;
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  const handleDebug = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate(`/debug/recommendation?userId=${encodeURIComponent(value)}`);
+  };
+
+  return (
+    <span className="inline-flex items-center gap-1 group">
+      {/* 잘린 표시 — hover 시 전체 ID 툴팁 */}
+      <span className="font-mono text-gray-400 cursor-default" title={value}>
+        {truncated}
+      </span>
+
+      {/* copy 버튼 — hover 시 노출 */}
+      <button
+        onClick={handleCopy}
+        className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-gray-600 transition-all"
+        title={copied ? '복사됨!' : '클립보드에 복사'}
+      >
+        {copied ? (
+          <span className="text-green-500 text-[10px] font-bold">✓</span>
+        ) : (
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        )}
+      </button>
+
+      {/* 추천 디버그 링크 — userId에만 노출 */}
+      {debugLink && (
+        <button
+          onClick={handleDebug}
+          className="opacity-0 group-hover:opacity-100 text-indigo-300 hover:text-indigo-600 transition-all"
+          title="추천 디버그에서 열기"
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+        </button>
+      )}
+    </span>
+  );
+}
+
 function RecentEventsSection() {
   const [actionType, setActionType] = useState('');
   const [userId, setUserId] = useState('');
@@ -446,12 +515,10 @@ function RecentEventsSection() {
                     {fmtTime(row.createdAt)}
                   </td>
                   <td className="py-1.5 pr-3">
-                    <USER_TYPE_BADGE type={row.userType} />
-                    {row.userId && (
-                      <span className="ml-1 font-mono text-gray-400">
-                        {row.userId.slice(0, 8)}…
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1">
+                      <USER_TYPE_BADGE type={row.userType} />
+                      <CopyableId value={row.userId} debugLink={true} />
+                    </div>
                   </td>
                   <td className="py-1.5 pr-3">
                     <span
@@ -466,7 +533,12 @@ function RecentEventsSection() {
                       {row.eventTitle ?? <span className="text-gray-300">(없음)</span>}
                     </span>
                     {row.mainCategory && (
-                      <span className="text-gray-400">{row.mainCategory}</span>
+                      <span className="text-gray-400 text-[10px]">{row.mainCategory}</span>
+                    )}
+                    {row.eventId && (
+                      <div className="mt-0.5">
+                        <CopyableId value={row.eventId} />
+                      </div>
                     )}
                   </td>
                   <td className="py-1.5 pr-3 text-gray-500">{row.sectionSlug ?? '-'}</td>

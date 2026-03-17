@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { debugApi } from '../services/api';
 import type {
@@ -490,8 +491,11 @@ function HomeSectionsSummary({ data }: { data: RecommendationDebugResult }) {
 // ── 메인 페이지 ───────────────────────────────────────────────────────────────
 
 export default function RecommendationDebugPage() {
-  const [inputValue, setInputValue] = useState('');
-  const [queryUserId, setQueryUserId] = useState('');
+  const [searchParams] = useSearchParams();
+  const urlUserId = searchParams.get('userId') ?? '';
+
+  const [inputValue, setInputValue] = useState(urlUserId);
+  const [queryUserId, setQueryUserId] = useState(urlUserId);
   const [showErrorDetail, setShowErrorDetail] = useState(false);
 
   const { data, isLoading, isError, error } = useQuery<RecommendationDebugResult>({
