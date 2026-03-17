@@ -8115,11 +8115,15 @@ interface SectionPool {
 interface SectionsCache {
   pools: SectionPool[];
   cachedAt: number;
+  trendingCachedAt?: number;                   // trending 별도 갱신 시각
+  location?: { lat: number; lng: number };     // trending background refresh용
 }
 const sectionsCacheMap = new Map<string, SectionsCache>();
-const SECTIONS_CACHE_TTL_MS = 30 * 60 * 1000; // 30분 (session consistency)
+const SECTIONS_CACHE_TTL_MS   = 30 * 60 * 1000; // 30분 (session consistency)
+const TRENDING_CACHE_TTL_MS   = 15 * 60 * 1000; // trending 별도 TTL
 // single-flight: 동일 캐시 키에 대한 중복 빌드 방지
-const buildInFlightMap = new Map<string, Promise<SectionsCache>>();
+const buildInFlightMap        = new Map<string, Promise<SectionsCache>>();
+const trendingRefreshInFlight = new Set<string>(); // trending 중복 갱신 방지
 
 /**
  * KST 기준 날짜 문자열 반환 (YYYY-MM-DD)
@@ -8137,6 +8141,47 @@ function getKSTDateString(ts: number): string {
  */
 function isCacheStaleByDate(cached: SectionsCache): boolean {
   return getKSTDateString(cached.cachedAt) !== getKSTDateString(Date.now());
+}
+
+/**
+ * trending 섹션 background refresh (fire-and-forget)
+ *
+ * 30분 메인 캐시 히트 상태에서 trending만 15분 초과 시 호출.
+ * 현재 요청은 블로킹하지 않고 다음 요청부터 갱신된 trending 반영.
+ * trendingRefreshInFlight로 동시 중복 갱신 방지.
+ */
+async function refreshTrendingAsync(
+  cacheKey: string,
+  cached: SectionsCache,
+): Promise<void> {
+  if (trendingRefreshInFlight.has(cacheKey)) return;
+  trendingRefreshInFlight.add(cacheKey);
+
+  try {
+    const trendingPool = cached.pools.find(p => p.slug === 'trending');
+    if (!trendingPool) return;
+
+    const freshEvents = await recommender.getTrending(
+      pool,
+      cached.location,
+      new Set<string>(),
+      trendingPool.limit * 3,
+    );
+
+    const updatedPools = cached.pools.map(p =>
+      p.slug === 'trending' ? { ...p, rawEvents: freshEvents } : p,
+    );
+    sectionsCacheMap.set(cacheKey, {
+      ...cached,
+      pools: updatedPools,
+      trendingCachedAt: Date.now(),
+    });
+    console.log(`[home/sections] trending refreshed in background (key=${cacheKey})`);
+  } catch (err: any) {
+    console.error('[home/sections] trending background refresh failed:', err?.message);
+  } finally {
+    trendingRefreshInFlight.delete(cacheKey);
+  }
 }
 
 // ─── 유저 클릭 이력 캐시 (1분 TTL) ──────────────────────────────────────────
@@ -8435,7 +8480,12 @@ app.get('/api/home/sections', async (req, res) => {
         // 첫 미스 요청: 빌드 시작 후 Promise를 맵에 등록
         buildPromise = buildSectionPools(location)
           .then(pools => {
-            const newCache: SectionsCache = { pools, cachedAt: Date.now() };
+            const newCache: SectionsCache = {
+              pools,
+              cachedAt: Date.now(),
+              trendingCachedAt: Date.now(),
+              location,
+            };
             sectionsCacheMap.set(cacheKey, newCache);
             console.log(`[home/sections] cache MISS → built (key=${cacheKey})`);
             return newCache;
@@ -8455,6 +8505,12 @@ app.get('/api/home/sections', async (req, res) => {
       if (process.env.NODE_ENV !== 'production') {
         const ageS = ((now - cached.cachedAt) / 1000).toFixed(0);
         console.log(`[home/sections] cache HIT (key=${cacheKey}, age=${ageS}s)`);
+      }
+
+      // trending만 15분 초과 시 background 갱신 (현재 요청은 기존 데이터 그대로 반환)
+      const trendingAge = now - (cached.trendingCachedAt ?? cached.cachedAt);
+      if (trendingAge > TRENDING_CACHE_TTL_MS) {
+        refreshTrendingAsync(cacheKey, cached).catch(() => {});
       }
     }
 
