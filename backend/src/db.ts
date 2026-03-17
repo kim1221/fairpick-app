@@ -7,6 +7,14 @@ import { config } from './config';
 // raw string으로 반환해 toUtcIso()가 'Z'를 붙여 UTC로 처리하도록 한다.
 types.setTypeParser(1114, (val: string) => val);
 
+// JS Date 파라미터 직렬화를 항상 UTC로 강제:
+// TIMESTAMP WITHOUT TIME ZONE 컬럼은 pg가 보낸 값의 timezone 정보를 변환 없이 strip한다.
+// 기본값(false) 시 로컬 타임존(KST +09:00) 포함 문자열을 전송해도 PostgreSQL이 +09:00을 무시하고
+// KST 시각 그대로 저장 → 프론트에서 UTC로 읽으면 +9시간 오표시.
+// true로 설정하면 pg가 getUTCHours() 등 UTC 메서드를 사용해 "+00:00" 문자열로 전송 → 정확히 저장.
+import pg from 'pg';
+pg.defaults.parseInputDatesAsUTC = true;
+
 // DATABASE_URL이 있으면 connectionString으로, 없으면 개별 환경변수로 연결
 export const pool = process.env.DATABASE_URL
   ? new Pool({
