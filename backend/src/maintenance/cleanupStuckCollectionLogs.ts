@@ -1,7 +1,7 @@
 import { pool } from '../db';
 import { runningJobs } from '../lib/jobState';
 
-const DEFAULT_STUCK_MINUTES = 60;
+const DEFAULT_STUCK_MINUTES = 720; // geo-refresh-03은 최대 12h 실행될 수 있음
 
 function getStuckMinutes(): number {
   const raw = Number(process.env.FAILSAFE_STUCK_MINUTES ?? DEFAULT_STUCK_MINUTES);

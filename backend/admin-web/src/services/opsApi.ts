@@ -16,6 +16,8 @@ interface StaticJobDef {
   scheduleMinute: number;
   scheduleDayOfWeek: number | null;
   expectedIntervalHours: number;
+  /** 이 시간 초과 실행 중이면 stale 표시 (기본: 2h) */
+  maxRunHours: number;
   /** log source/type 키워드 — 로그 매칭에 사용 */
   sourceKeywords: string[];
 }
@@ -30,6 +32,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     scheduleMinute: 0,
     scheduleDayOfWeek: null,
     expectedIntervalHours: 24,
+    maxRunHours: 2,
     sourceKeywords: ['cleanup', 'auto-unfeature'],
   },
   {
@@ -41,6 +44,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     scheduleMinute: 0,
     scheduleDayOfWeek: null,
     expectedIntervalHours: 24,
+    maxRunHours: 1,
     sourceKeywords: ['metadata', 'update-metadata'],
   },
   {
@@ -52,6 +56,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     scheduleMinute: 15,
     scheduleDayOfWeek: null,
     expectedIntervalHours: 24,
+    maxRunHours: 1,
     sourceKeywords: ['featured-score', 'auto-featured'],
   },
   {
@@ -63,6 +68,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     scheduleMinute: 30,
     scheduleDayOfWeek: null,
     expectedIntervalHours: 24,
+    maxRunHours: 1,
     sourceKeywords: ['buzz', 'buzz-score'],
   },
   {
@@ -74,6 +80,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     scheduleMinute: 0,
     scheduleDayOfWeek: null,
     expectedIntervalHours: 24,
+    maxRunHours: 12,
     sourceKeywords: ['geo-refresh', 'kopis', 'cultural', 'tour', 'collect', 'geoRefresh'],
   },
   {
@@ -85,6 +92,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     scheduleMinute: 30,
     scheduleDayOfWeek: null,
     expectedIntervalHours: 24,
+    maxRunHours: 1,
     sourceKeywords: ['price', 'price-info'],
   },
   {
@@ -96,6 +104,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     scheduleMinute: 15,
     scheduleDayOfWeek: null,
     expectedIntervalHours: 24,
+    maxRunHours: 2,
     sourceKeywords: ['phase2', 'internal-fields', 'enrich-internal'],
   },
   {
@@ -107,6 +116,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     scheduleMinute: 0,
     scheduleDayOfWeek: null,
     expectedIntervalHours: 24,
+    maxRunHours: 2,
     sourceKeywords: ['embed', 'embedding'],
   },
   {
@@ -118,6 +128,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     scheduleMinute: 0,
     scheduleDayOfWeek: null,
     expectedIntervalHours: 24,
+    maxRunHours: 1,
     sourceKeywords: ['popup-discovery', 'ai-popup'],
   },
   // end-soon-notifications: 기능 보류 중 (scheduler.ts도 주석 처리됨)
@@ -130,6 +141,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     scheduleMinute: 0,
     scheduleDayOfWeek: 1,
     expectedIntervalHours: 168,
+    maxRunHours: 4,
     sourceKeywords: ['hot-rating', 'ai-hot'],
   },
   {
@@ -141,6 +153,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     scheduleMinute: 0,
     scheduleDayOfWeek: null,
     expectedIntervalHours: 24,
+    maxRunHours: 2,
     sourceKeywords: ['collect-15', 'light-collect'],
   },
 ];
@@ -225,7 +238,13 @@ function resolveEffectiveStatus(
   lastLog: CollectionLog | null
 ): JobStatus {
   if (!lastLog) return 'never_run';
-  if (lastLog.status === 'running') return 'running';
+
+  if (lastLog.status === 'running') {
+    // 잡별 maxRunHours 초과 → stale로 표시 (진행 중이지만 비정상적으로 길다)
+    const elapsedMs = Date.now() - toUtcMs(lastLog.started_at);
+    if (elapsedMs > jobDef.maxRunHours * 60 * 60 * 1000) return 'stale';
+    return 'running';
+  }
 
   const ageMs = Date.now() - toUtcMs(lastLog.started_at);
   const thresholdMs = jobDef.expectedIntervalHours * 2 * 60 * 60 * 1000;
