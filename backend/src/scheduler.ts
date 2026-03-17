@@ -14,6 +14,7 @@ import { sendEndSoonNotifications } from './jobs/sendEndSoonNotifications';
 import { runAutoFeaturedScore } from './jobs/autoFeaturedScore';
 import { runningJobs } from './lib/jobState';
 import { withJobLog } from './lib/jobLogger';
+import { pool } from './db';
 
 /**
  * ============================================================
@@ -40,6 +41,104 @@ import { withJobLog } from './lib/jobLogger';
 // Job Execution Tracking (중복 실행 방지)
 // ============================================================
 // runningJobs is imported from './lib/jobState' — shared with ops API routes
+
+// ============================================================
+// Startup Catch-up: 서버 재시작 시 누락된 잡 자동 재실행
+// ============================================================
+
+type CatchupItem = {
+  name: string;
+  schedH: number;
+  schedM: number;
+  expectedH: number;
+  fn: () => Promise<unknown>;
+};
+
+async function runMissedJobsOnStartup(): Promise<void> {
+  console.log('[Startup] 누락된 잡 확인 중...');
+  try {
+    // 이전 인스턴스에서 실행 중인 잡 확인 (최근 13h 이내 running 상태)
+    const { rows: runningRows } = await pool.query<{ scheduler_job_name: string }>(
+      `SELECT DISTINCT scheduler_job_name FROM collection_logs
+       WHERE status = 'running' AND started_at > NOW() - INTERVAL '13 hours'`
+    );
+    const dbRunning = new Set(runningRows.map((r) => r.scheduler_job_name));
+
+    // 최근 48h 내 마지막 성공/부분성공 실행 시각
+    const { rows: lastRunRows } = await pool.query<{ scheduler_job_name: string; last_started: string }>(
+      `SELECT scheduler_job_name, MAX(started_at) AS last_started
+       FROM collection_logs
+       WHERE scheduler_job_name IS NOT NULL
+         AND status IN ('success', 'partial', 'partial_success')
+         AND started_at > NOW() - INTERVAL '48 hours'
+       GROUP BY scheduler_job_name`
+    );
+    const lastRunMs: Record<string, number> = {};
+    for (const row of lastRunRows) {
+      lastRunMs[row.scheduler_job_name] = new Date(row.last_started + 'Z').getTime();
+    }
+
+    // KST 현재 시각
+    const nowMs = Date.now();
+    const kstDate = new Date(nowMs + 9 * 3_600_000);
+    const kstH = kstDate.getUTCHours();
+    const kstM = kstDate.getUTCMinutes();
+
+    const pastToday = (h: number, m: number) => kstH > h || (kstH === h && kstM >= m);
+    const hoursSince = (name: string) => {
+      const last = lastRunMs[name];
+      return last !== undefined ? (nowMs - last) / 3_600_000 : Infinity;
+    };
+
+    const CATCHUP: CatchupItem[] = [
+      { name: 'cleanup',                schedH:  0, schedM:  0, expectedH: 24, fn: runCleanupJob },
+      { name: 'metadata',               schedH:  2, schedM:  0, expectedH: 24, fn: updateMetadata },
+      { name: 'auto-featured-score',    schedH:  2, schedM: 15, expectedH: 24, fn: () => withJobLog('auto-featured-score', runAutoFeaturedScore) },
+      { name: 'buzz-score',             schedH:  2, schedM: 30, expectedH: 24, fn: updateBuzzScore },
+      { name: 'geo-refresh-03',         schedH:  3, schedM:  0, expectedH: 24, fn: () => runGeoRefreshPipeline({ schedulerJobName: 'geo-refresh-03' }) },
+      { name: 'price-info',             schedH:  3, schedM: 30, expectedH: 24, fn: () => withJobLog('price-info', () => runPriceInfoBackfill({ dryRun: false })) },
+      { name: 'phase2-internal-fields', schedH:  4, schedM: 15, expectedH: 24, fn: () => withJobLog('phase2-internal-fields', enrichInternalFields) },
+      { name: 'embed-new-events',       schedH:  5, schedM:  0, expectedH: 24, fn: () => withJobLog('embed-new-events', embedNewEvents) },
+      { name: 'ai-popup-discovery',     schedH:  8, schedM:  0, expectedH: 24, fn: () => withJobLog('ai-popup-discovery', runPopupDiscovery) },
+      { name: 'collect-15',             schedH: 15, schedM:  0, expectedH: 24, fn: () => runGeoRefreshPipeline({ lightMode: true, schedulerJobName: 'collect-15' }) },
+    ];
+
+    let geoRefreshQueued = false;
+    const missed: CatchupItem[] = [];
+
+    for (const job of CATCHUP) {
+      if (!pastToday(job.schedH, job.schedM)) continue;  // 오늘 아직 예정 시간 미도래
+      if (dbRunning.has(job.name)) {
+        console.log(`[Startup] ${job.name}: DB 실행 중 로그 존재 — 스킵`);
+        continue;
+      }
+      if (hoursSince(job.name) > job.expectedH * 0.85) {
+        // collect-15: geo-refresh-03도 실행 예정이면 스킵 (동일 수집 중복 방지)
+        if (job.name === 'collect-15' && geoRefreshQueued) {
+          console.log('[Startup] collect-15: geo-refresh-03 실행 예정으로 스킵');
+          continue;
+        }
+        if (job.name === 'geo-refresh-03') geoRefreshQueued = true;
+        missed.push(job);
+      }
+    }
+
+    if (missed.length === 0) {
+      console.log('[Startup] 누락 잡 없음.');
+      return;
+    }
+
+    console.log(`[Startup] 누락 잡 ${missed.length}개 감지: ${missed.map((j) => j.name).join(', ')}`);
+    for (const job of missed) {
+      await runJobSafely(job.name, job.fn);
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+    console.log('[Startup] 누락 잡 재실행 완료.');
+  } catch (err) {
+    console.error('[Startup] 누락 잡 체크 실패:', err);
+    // 초기화 실패해도 서버는 계속 실행
+  }
+}
 
 // 네트워크 일시 장애(DNS 실패, 연결 거부 등) 여부 판단
 function isTransientNetworkError(error: any): boolean {
@@ -264,6 +363,11 @@ export function initScheduler() {
     } else {
       console.log('[FailSafe] Fail-safe cleanup is disabled (ENABLE_FAILSAFE === "false")');
     }
+
+    // 서버 재시작 후 누락된 잡 보완 (10초 후 실행 — 서버 완전 초기화 대기)
+    setTimeout(() => {
+      runMissedJobsOnStartup().catch((err) => console.error('[Startup] catch-up error:', err));
+    }, 10_000);
 
     console.log('[Scheduler] ✓ Scheduler initialized successfully');
     console.log('[Scheduler] Scheduled jobs:');
