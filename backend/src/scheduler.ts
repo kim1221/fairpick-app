@@ -99,8 +99,9 @@ async function runMissedJobsOnStartup(): Promise<void> {
       { name: 'price-info',             schedH:  3, schedM: 30, expectedH: 24, fn: () => withJobLog('price-info', () => runPriceInfoBackfill({ dryRun: false })) },
       { name: 'phase2-internal-fields', schedH:  4, schedM: 15, expectedH: 24, fn: () => withJobLog('phase2-internal-fields', enrichInternalFields) },
       { name: 'embed-new-events',       schedH:  5, schedM:  0, expectedH: 24, fn: () => withJobLog('embed-new-events', embedNewEvents) },
-      { name: 'ai-popup-discovery',     schedH:  8, schedM:  0, expectedH: 24, fn: () => withJobLog('ai-popup-discovery', runPopupDiscovery) },
-      { name: 'collect-15',             schedH: 15, schedM:  0, expectedH: 24, fn: () => runGeoRefreshPipeline({ lightMode: true, schedulerJobName: 'collect-15' }) },
+      { name: 'ai-popup-discovery',     schedH:  8, schedM:  0, expectedH: 24,  fn: () => withJobLog('ai-popup-discovery', runPopupDiscovery) },
+      { name: 'ai-hot-rating',          schedH:  9, schedM:  0, expectedH: 168, fn: () => withJobLog('ai-hot-rating', runHotRating) },
+      { name: 'collect-15',             schedH: 15, schedM:  0, expectedH: 24,  fn: () => runGeoRefreshPipeline({ lightMode: true, schedulerJobName: 'collect-15' }) },
     ];
 
     let geoRefreshQueued = false;
