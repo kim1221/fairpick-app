@@ -178,13 +178,9 @@ function deriveJobStatus(log: CollectionLog): JobStatus {
 }
 
 export function mapLogToExecution(log: CollectionLog): JobExecution {
-  // running 상태이거나 completed_at이 현재보다 60초 이상 미래인 경우(서버 클럭 스큐) → null 처리
+  // running 상태이면 completed_at 무시 (DB에 값이 있어도 진행 중으로 표시)
   const rawEndedAt = log.completed_at ?? null;
-  const endedAt =
-    log.status === 'running' ||
-    (rawEndedAt !== null && toUtcMs(rawEndedAt) > Date.now() + 60_000)
-      ? null
-      : rawEndedAt;
+  const endedAt = log.status === 'running' ? null : rawEndedAt;
   const durationMs =
     endedAt
       ? toUtcMs(endedAt) - toUtcMs(log.started_at)
