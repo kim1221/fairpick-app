@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   BarChart,
@@ -25,6 +25,12 @@ import type {
 
 type Accent = 'none' | 'ok' | 'warn' | 'error';
 
+const ACCENT_BADGE: Record<string, { label: string; cls: string }> = {
+  ok:    { label: '정상', cls: 'bg-green-100 text-green-700' },
+  warn:  { label: '주의', cls: 'bg-yellow-100 text-yellow-800' },
+  error: { label: '이상', cls: 'bg-red-100 text-red-700' },
+};
+
 function MetricCard({
   label,
   value,
@@ -41,9 +47,17 @@ function MetricCard({
     accent === 'warn'  ? 'border-yellow-300' :
     accent === 'error' ? 'border-red-300'    :
     'border-gray-100';
+  const badge = accent !== 'none' ? ACCENT_BADGE[accent] : null;
   return (
     <div className={`bg-white rounded-lg border ${border} px-4 py-3`}>
-      <p className="text-[10px] uppercase font-semibold text-gray-400 mb-1">{label}</p>
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-[10px] uppercase font-semibold text-gray-400">{label}</p>
+        {badge && (
+          <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold leading-none ${badge.cls}`}>
+            {badge.label}
+          </span>
+        )}
+      </div>
       <p className="text-base font-semibold text-gray-900 leading-tight">{value}</p>
       {sub && <p className="text-[11px] text-gray-400 mt-0.5">{sub}</p>}
     </div>
@@ -444,8 +458,10 @@ function CopyableId({
 }
 
 function RecentEventsSection() {
+  const [searchParams] = useSearchParams();
   const [actionType, setActionType] = useState('');
-  const [userId, setUserId] = useState('');
+  // 개인화 관제 ← 추천 디버그에서 userId 파라미터로 넘어온 경우 자동 세팅
+  const [userId, setUserId] = useState(searchParams.get('userId') ?? '');
   const [eventId, setEventId] = useState('');
 
   const limit = 50;

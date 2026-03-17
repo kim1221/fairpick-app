@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { debugApi } from '../services/api';
 import type {
@@ -202,6 +202,40 @@ function SignalsSection({ data }: { data: RecommendationDebugResult }) {
   );
 }
 
+// ── impression 연속 묶음 처리 ─────────────────────────────────────────────────
+
+type ActionRow =
+  | { kind: 'single'; action: RecentAction }
+  | { kind: 'grouped'; count: number; sectionSlug: string | null; newestAt: string };
+
+/** 연속된 impression을 하나의 "묶음" 행으로 축약. 다른 action_type은 그대로 유지. */
+function groupImpressions(actions: RecentAction[]): ActionRow[] {
+  const rows: ActionRow[] = [];
+  let i = 0;
+  while (i < actions.length) {
+    if (actions[i].actionType !== 'impression') {
+      rows.push({ kind: 'single', action: actions[i] });
+      i++;
+    } else {
+      let j = i;
+      while (j < actions.length && actions[j].actionType === 'impression') j++;
+      const group = actions.slice(i, j);
+      if (group.length === 1) {
+        rows.push({ kind: 'single', action: group[0] });
+      } else {
+        rows.push({
+          kind: 'grouped',
+          count: group.length,
+          sectionSlug: group[0].sectionSlug,      // DESC order → group[0] = newest
+          newestAt: group[0].createdAt,
+        });
+      }
+      i = j;
+    }
+  }
+  return rows;
+}
+
 // ── 섹션 C: 최근 행동 ─────────────────────────────────────────────────────────
 
 const ACTION_FILTER_OPTIONS = [
@@ -267,25 +301,51 @@ function RecentActionsSection({ data }: { data: RecommendationDebugResult }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((action: RecentAction, i: number) => (
-                <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-                  <td className="py-2 pr-4 text-gray-500 text-xs whitespace-nowrap">
-                    {new Date(action.createdAt).toLocaleString('ko-KR', {
-                      month: 'numeric', day: 'numeric',
-                      hour: '2-digit', minute: '2-digit',
-                    })}
-                  </td>
-                  <td className="py-2 pr-4">
-                    <ActionBadge type={action.actionType} />
-                  </td>
-                  <td className="py-2 pr-4 text-gray-700 max-w-[200px] truncate text-xs">
-                    {action.eventTitle ?? <span className="text-gray-400">–</span>}
-                  </td>
-                  <td className="py-2 pr-4 text-gray-500 text-xs">{action.mainCategory ?? '–'}</td>
-                  <td className="py-2 pr-4 font-mono text-gray-400 text-xs">{action.sectionSlug ?? '–'}</td>
-                  <td className="py-2 text-gray-500 text-xs">{action.rankPosition ?? '–'}</td>
-                </tr>
-              ))}
+              {groupImpressions(filtered).map((row, i) => {
+                // ── 묶음 행 ──
+                if (row.kind === 'grouped') {
+                  return (
+                    <tr key={`g-${i}`} className="border-b border-gray-50 bg-slate-50/70">
+                      <td className="py-1.5 pr-4 text-gray-400 text-xs whitespace-nowrap">
+                        {new Date(row.newestAt).toLocaleString('ko-KR', {
+                          month: 'numeric', day: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                        })}
+                      </td>
+                      <td className="py-1.5 pr-4">
+                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-500 italic">
+                          노출 {row.count}회 묶음
+                        </span>
+                      </td>
+                      <td className="py-1.5 pr-4 text-gray-300 text-xs">–</td>
+                      <td className="py-1.5 pr-4 text-gray-300 text-xs">–</td>
+                      <td className="py-1.5 pr-4 font-mono text-gray-400 text-xs">{row.sectionSlug ?? '–'}</td>
+                      <td className="py-1.5 text-gray-300 text-xs">–</td>
+                    </tr>
+                  );
+                }
+                // ── 단일 행 ──
+                const action = row.action;
+                return (
+                  <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="py-2 pr-4 text-gray-500 text-xs whitespace-nowrap">
+                      {new Date(action.createdAt).toLocaleString('ko-KR', {
+                        month: 'numeric', day: 'numeric',
+                        hour: '2-digit', minute: '2-digit',
+                      })}
+                    </td>
+                    <td className="py-2 pr-4">
+                      <ActionBadge type={action.actionType} />
+                    </td>
+                    <td className="py-2 pr-4 text-gray-700 max-w-[200px] truncate text-xs">
+                      {action.eventTitle ?? <span className="text-gray-400">–</span>}
+                    </td>
+                    <td className="py-2 pr-4 text-gray-500 text-xs">{action.mainCategory ?? '–'}</td>
+                    <td className="py-2 pr-4 font-mono text-gray-400 text-xs">{action.sectionSlug ?? '–'}</td>
+                    <td className="py-2 text-gray-500 text-xs">{action.rankPosition ?? '–'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -335,9 +395,14 @@ function TodayPickSection({ data }: { data: RecommendationDebugResult }) {
               (후보 풀 {sim.poolSize}개 중 신선한 {sim.selected.length}개 기준)
             </span>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-1">
             {sim.selected.slice(0, 3).map((e: SimulatedEvent, i: number) => (
-              <div key={e.id} className="flex items-start gap-3">
+              <div
+                key={e.id}
+                className="flex items-start gap-3 cursor-pointer hover:bg-purple-50 rounded-lg px-2 py-2 -mx-2 transition-colors"
+                onClick={() => document.getElementById('pool-detail')?.scrollIntoView({ behavior: 'smooth' })}
+                title="클릭하면 아래 전체 후보 목록으로 이동"
+              >
                 <span className="text-xl leading-none mt-0.5 shrink-0">
                   {i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}
                 </span>
@@ -345,7 +410,7 @@ function TodayPickSection({ data }: { data: RecommendationDebugResult }) {
                   <div className="text-sm font-semibold text-gray-900 truncate">{e.title ?? e.id}</div>
                   <div className="text-xs text-gray-500 mb-1.5">{e.category ?? '–'}</div>
                   <div className="flex flex-wrap gap-1">
-                    {e.reasons.slice(0, 3).map((r, ri) => (
+                    {e.reasons.slice(0, 2).map((r, ri) => (
                       <span key={ri} className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs border border-purple-200">
                         {r}
                       </span>
@@ -356,14 +421,17 @@ function TodayPickSection({ data }: { data: RecommendationDebugResult }) {
             ))}
           </div>
           {sim.selected.length > 3 && (
-            <p className="text-xs text-purple-400 mt-3 pl-9">
-              외 {sim.selected.length - 3}개 더 → 아래 "노출 우선" 상세 목록 참고
-            </p>
+            <button
+              className="text-xs text-purple-400 mt-2 pl-9 hover:text-purple-600 transition-colors block"
+              onClick={() => document.getElementById('pool-detail')?.scrollIntoView({ behavior: 'smooth' })}
+            >
+              외 {sim.selected.length - 3}개 더 → 전체 목록 보기 ↓
+            </button>
           )}
         </div>
       )}
 
-      <p className="text-xs text-gray-400 mb-5">─ 아래는 후보 풀 전체 분류 ─</p>
+      <p id="pool-detail" className="text-xs text-gray-400 mb-5 scroll-mt-6">─ 아래는 후보 풀 전체 분류 ─</p>
 
       {/* 노출 우선 */}
       <div className="mb-6">
@@ -536,6 +604,7 @@ function HomeSectionsSummary({ data }: { data: RecommendationDebugResult }) {
 
 export default function RecommendationDebugPage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const urlUserId = searchParams.get('userId') ?? '';
 
   const [inputValue, setInputValue] = useState(urlUserId);
@@ -563,6 +632,21 @@ export default function RecommendationDebugPage() {
     <div className="max-w-5xl mx-auto space-y-6">
       {/* 헤더 */}
       <div>
+        <button
+          onClick={() =>
+            navigate(
+              queryUserId
+                ? `/personalization?userId=${encodeURIComponent(queryUserId)}`
+                : '/personalization'
+            )
+          }
+          className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-gray-700 mb-2 transition-colors"
+        >
+          ← 개인화 관제로 돌아가기
+          {queryUserId && (
+            <span className="ml-1 font-mono text-gray-300">(userId 필터 유지)</span>
+          )}
+        </button>
         <h1 className="text-2xl font-bold text-gray-900">추천 디버그</h1>
         <p className="text-gray-500 text-sm mt-1">
           특정 유저의 취향 신호와 today_pick 반영 상태를 확인합니다.
