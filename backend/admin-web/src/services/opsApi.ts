@@ -1,6 +1,7 @@
 import api from './api';
 import type { CollectionLog } from '../types';
 import type { JobExecution, JobStatus, OpsSystemStatus, RunJobResult, SchedulerJob } from '../types/ops';
+import { toUtcMs } from '../utils/time';
 
 // ──────────────────────────────────────────────────────────────
 // Static scheduler job definitions (mirrors backend/src/scheduler.ts)
@@ -24,8 +25,8 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     name: 'cleanup',
     label: '정리 작업',
     description: 'Auto-unfeature · Soft delete',
-    schedule: '매일 01:00',
-    scheduleHour: 1,
+    schedule: '매일 00:00',
+    scheduleHour: 0,
     scheduleMinute: 0,
     scheduleDayOfWeek: null,
     expectedIntervalHours: 24,
@@ -151,9 +152,7 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
 function deriveJobStatus(log: CollectionLog): JobStatus {
   if (log.status === 'running') {
     // 2시간 이상 running이면 좀비 상태로 판단 (서버 재시작 등으로 미완료된 로그)
-    const normalized = log.started_at.replace(' ', 'T');
-    const utcIso = /[Z+]/.test(normalized.slice(-6)) ? normalized : normalized + 'Z';
-    const elapsedMs = Date.now() - new Date(utcIso).getTime();
+    const elapsedMs = Date.now() - toUtcMs(log.started_at);
     if (elapsedMs > 2 * 60 * 60 * 1000) return 'stale';
     return 'running';
   }
@@ -169,7 +168,7 @@ export function mapLogToExecution(log: CollectionLog): JobExecution {
   const endedAt = log.completed_at ?? null;
   const durationMs =
     endedAt
-      ? new Date(endedAt).getTime() - new Date(log.started_at).getTime()
+      ? toUtcMs(endedAt) - toUtcMs(log.started_at)
       : null;
 
   const jobName = log.scheduler_job_name ?? log.source ?? log.type ?? 'unknown';
@@ -202,7 +201,7 @@ function findLatestLogForJob(
   logs: CollectionLog[]
 ): CollectionLog | null {
   const byTime = (a: CollectionLog, b: CollectionLog) =>
-    new Date(b.started_at).getTime() - new Date(a.started_at).getTime();
+    toUtcMs(b.started_at) - toUtcMs(a.started_at);
 
   // 1순위: scheduler_job_name exact match (geo-refresh-03/collect-15 충돌 방지)
   const byName = logs.filter((log) => log.scheduler_job_name === jobDef.name);
@@ -228,7 +227,7 @@ function resolveEffectiveStatus(
   if (!lastLog) return 'never_run';
   if (lastLog.status === 'running') return 'running';
 
-  const ageMs = Date.now() - new Date(lastLog.started_at).getTime();
+  const ageMs = Date.now() - toUtcMs(lastLog.started_at);
   const thresholdMs = jobDef.expectedIntervalHours * 2 * 60 * 60 * 1000;
   if (ageMs > thresholdMs) return 'stale';
 

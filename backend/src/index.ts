@@ -1222,7 +1222,9 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
            WHERE is_deleted = false AND (overview IS NULL OR overview = ''))
            AS "incompleteEvents",
           (SELECT COUNT(*) FROM collection_logs
-           WHERE status = 'success' AND started_at::date = CURRENT_DATE)
+           WHERE status = 'success'
+             AND (started_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date
+               = (NOW() AT TIME ZONE 'Asia/Seoul')::date)
            AS "collectedToday",
           (SELECT COUNT(DISTINCT COALESCE(scheduler_job_name, type)) FROM collection_logs
            WHERE status = 'failed' AND started_at >= NOW() - INTERVAL '24 hours')

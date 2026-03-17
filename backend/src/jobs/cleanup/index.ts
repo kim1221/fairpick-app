@@ -161,22 +161,27 @@ export async function runCleanupJob(): Promise<void> {
     deletedCount = result.rowCount || 0;
     console.log(`[CleanupJob] Soft deleted ${deletedCount} expired events`);
 
-    // event_change_logs 기록 (최대 200개)
+    // event_change_logs 기록 (최대 200개) - bulk INSERT
     if (deletedCount > 0) {
       const eventIds = result.rows.slice(0, 200).map((row: any) => row.id);
-      
-      for (const eventId of eventIds) {
-        try {
-          await pool.query(`
-            INSERT INTO event_change_logs (id, event_id, action, new_data, created_at)
-            VALUES ($1, $2, 'deleted', $3, NOW())
-          `, [crypto.randomUUID(), eventId, JSON.stringify({ deleted_reason: 'expired' })]);
-        } catch (error) {
-          console.error(`[CleanupJob] Failed to log change for event ${eventId}:`, error);
-        }
-      }
 
-      console.log(`[CleanupJob] Logged changes for ${Math.min(eventIds.length, 200)} events`);
+      try {
+        const placeholders = eventIds.map((_: any, i: number) =>
+          `($${i * 3 + 1}, $${i * 3 + 2}, 'deleted', $${i * 3 + 3}, NOW())`
+        ).join(', ');
+        const values = eventIds.flatMap((eventId: string) => [
+          crypto.randomUUID(),
+          eventId,
+          JSON.stringify({ deleted_reason: 'expired' }),
+        ]);
+        await pool.query(
+          `INSERT INTO event_change_logs (id, event_id, action, new_data, created_at) VALUES ${placeholders}`,
+          values,
+        );
+        console.log(`[CleanupJob] Logged changes for ${eventIds.length} events (bulk)`);
+      } catch (error) {
+        console.error(`[CleanupJob] Failed to bulk log event_change_logs:`, error);
+      }
     }
 
     // Hard delete: soft delete 후 30일 이상 지난 이벤트 완전 삭제
@@ -212,30 +217,29 @@ export async function runCleanupJob(): Promise<void> {
         `, [imageKeys, ids]);
 
         const sharedKeys = new Set<string>(sharedResult.rows.map(r => r.image_key));
-        let r2SkippedCount = 0;
+        const toDelete = imageRows.rows.filter(r => !sharedKeys.has(r.image_key));
+        const r2SkippedCount = imageRows.rows.length - toDelete.length;
 
-        for (const row of imageRows.rows) {
-          if (sharedKeys.has(row.image_key)) {
-            r2SkippedCount++;
-            continue;  // 다른 이벤트가 참조 중 → 삭제 건너뜀
-          }
-
-          try {
-            await deleteEventImage(row.image_key);
-            r2DeletedCount++;
-
-            // image_audit_log 기록 (fire-and-forget)
-            pool.query(`
-              INSERT INTO image_audit_log
-                (event_id, action, image_key, deleted_at, deletion_reason)
-              VALUES ($1, 'delete', $2, NOW(), 'hard_delete_cleanup')
-            `, [row.id, row.image_key]).catch(() => {});
-          } catch (err: any) {
-            console.error(
-              `[CleanupJob] R2 delete failed for key ${row.image_key}:`, err?.message,
-            );
-            // R2 실패해도 DB hard-delete는 계속 진행
-          }
+        // 병렬 삭제 (최대 10개 동시)
+        const BATCH = 10;
+        for (let i = 0; i < toDelete.length; i += BATCH) {
+          const batch = toDelete.slice(i, i + BATCH);
+          const results = await Promise.allSettled(
+            batch.map(row => deleteEventImage(row.image_key)),
+          );
+          results.forEach((res, idx) => {
+            const row = batch[idx];
+            if (res.status === 'fulfilled') {
+              r2DeletedCount++;
+              pool.query(`
+                INSERT INTO image_audit_log
+                  (event_id, action, image_key, deleted_at, deletion_reason)
+                VALUES ($1, 'delete', $2, NOW(), 'hard_delete_cleanup')
+              `, [row.id, row.image_key]).catch(() => {});
+            } else {
+              console.error(`[CleanupJob] R2 delete failed for key ${row.image_key}:`, (res.reason as any)?.message);
+            }
+          });
         }
 
         console.log(

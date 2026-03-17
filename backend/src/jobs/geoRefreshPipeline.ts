@@ -136,14 +136,15 @@ export async function runGeoRefreshPipeline(options: { lightMode?: boolean; sche
     }
 
     // STEP 2: GeoBackfill (Address-based)
-    console.log('[GeoRefreshPipeline][STEP2] geoBackfill START (address-based, live-only, limit=2000)');
+    // limit=300: 매일 신규 수집 이벤트 기준. 대규모 백필은 수동 스크립트로 처리.
+    console.log('[GeoRefreshPipeline][STEP2] geoBackfill START (address-based, live-only, limit=300)');
     const step2Start = Date.now();
     const step2MemStart = Math.round(process.memoryUsage().rss / 1024 / 1024);
     console.log(`[INSTRUMENT][PIPELINE][STEP2] START ts=${new Date().toISOString()} mem=${step2MemStart}MB`);
     try {
       await runGeoBackfill({
         liveOnly: true,
-        limit: 2000,
+        limit: 300,
       });
       const elapsed = ((Date.now() - step2Start) / 1000).toFixed(1);
       const elapsedMs = Date.now() - step2Start;
@@ -165,14 +166,15 @@ export async function runGeoRefreshPipeline(options: { lightMode?: boolean; sche
     console.log();
 
     // STEP 3: GeoVenueBackfill (Venue Name-based)
-    console.log('[GeoRefreshPipeline][STEP3] geoVenueBackfill START (venue-based, live-only, limit=1500, minConf=0.5)');
+    // limit=200: STEP2와 합산 500건/일로 제한. 대규모 백필은 수동 스크립트로 처리.
+    console.log('[GeoRefreshPipeline][STEP3] geoVenueBackfill START (venue-based, live-only, limit=200, minConf=0.5)');
     const step3Start = Date.now();
     const step3MemStart = Math.round(process.memoryUsage().rss / 1024 / 1024);
     console.log(`[INSTRUMENT][PIPELINE][STEP3] START ts=${new Date().toISOString()} mem=${step3MemStart}MB`);
     try {
       await runGeoVenueBackfill({
         liveOnly: true,
-        limit: 1500,
+        limit: 200,
         minConfidence: 0.5,
       });
       const elapsed = ((Date.now() - step3Start) / 1000).toFixed(1);
@@ -228,13 +230,13 @@ export async function runGeoRefreshPipeline(options: { lightMode?: boolean; sche
     let step5Status: 'OK' | 'FAILED' = 'OK';
     
     try {
-      // AI Enrichment 실행 (최근 24시간 생성/업데이트 이벤트만)
+      // AI Enrichment 실행 (미처리 이벤트 중 최신 200개/일로 제한)
+      // 대규모 백필은 수동: ts-node aiEnrichmentBackfill.ts --limit 1000
       const { aiEnrichmentBackfill } = await import('./aiEnrichmentBackfill');
       await aiEnrichmentBackfill({
-        limit: null,
+        limit: 200,
         testMode: false,
         useNaverSearch: true,
-        // ai_enriched_at IS NULL 필터로 미처리 이벤트만 자동 선택됨
       });
       
       const step5End = Date.now();

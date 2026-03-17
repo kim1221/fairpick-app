@@ -1,6 +1,7 @@
 import type { SchedulerJob } from '../../types/ops';
 import JobStatusBadge from './JobStatusBadge';
 import RunNowButton from './RunNowButton';
+import { fmtRelative } from '../../utils/time';
 
 const BORDER_LEFT: Record<string, string> = {
   success:         'border-l-green-500',
@@ -23,15 +24,6 @@ function fmtDuration(ms: number | null): string {
   return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
 }
 
-function fmtRelative(iso: string | null): string {
-  if (!iso) return '—';
-  const diff = Date.now() - new Date(iso).getTime();
-  const h = Math.floor(diff / 3_600_000);
-  const m = Math.floor((diff % 3_600_000) / 60_000);
-  if (h >= 24) return `${Math.floor(h / 24)}일 전`;
-  if (h > 0) return `${h}시간 전`;
-  return `${m}분 전`;
-}
 
 interface JobCardProps {
   job: SchedulerJob;

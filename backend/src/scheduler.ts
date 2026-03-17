@@ -151,13 +151,13 @@ export function initScheduler() {
     });
     console.log('[Scheduler] registered: Light collect pipeline @ 15:00 KST (collect+dedupe only)');
 
-    // 매일 01:00 KST - 정리 작업
-    cron.schedule('0 1 * * *', async () => {
+    // 매일 00:00 KST - 정리 작업 (geo-refresh 03:00 시작 전 완료 목표)
+    cron.schedule('0 0 * * *', async () => {
       await runJobSafely('cleanup', runCleanupJob);
     }, {
       timezone: 'Asia/Seoul'
     });
-    console.log('[Scheduler] registered: Cleanup job @ 01:00 KST');
+    console.log('[Scheduler] registered: Cleanup job @ 00:00 KST');
 
     // 매일 02:00 KST - 메타데이터 업데이트
     cron.schedule('0 2 * * *', async () => {
@@ -267,7 +267,7 @@ export function initScheduler() {
 
     console.log('[Scheduler] ✓ Scheduler initialized successfully');
     console.log('[Scheduler] Scheduled jobs:');
-    console.log('  - 01:00 KST: Cleanup (auto-unfeature, soft delete)');
+    console.log('  - 00:00 KST: Cleanup (auto-unfeature, soft delete)');
     console.log('  - 02:00 KST: Metadata update (is_ending_soon, popularity_score)');
     console.log('  - 02:15 KST: Auto featured score (featured_score 자동 계산)');
     console.log('  - 02:30 KST: Buzz score update (Hot Score calculation)');

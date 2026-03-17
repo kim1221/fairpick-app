@@ -1,4 +1,5 @@
 import type { OpsSystemStatus } from '../../types/ops';
+import { fmtRelative, fmtDateTime } from '../../utils/time';
 
 const BANNER_CONFIG = {
   healthy: {
@@ -27,15 +28,6 @@ const BANNER_CONFIG = {
   },
 } as const;
 
-function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const h = Math.floor(diff / 3_600_000);
-  const m = Math.floor((diff % 3_600_000) / 60_000);
-  if (h >= 24) return `${Math.floor(h / 24)}일 전`;
-  if (h > 0) return `${h}시간 ${m}분 전`;
-  return `${m}분 전`;
-}
-
 interface SystemStatusBannerProps {
   status: OpsSystemStatus;
 }
@@ -55,7 +47,7 @@ export default function SystemStatusBanner({ status }: SystemStatusBannerProps) 
             {status.warningJobs > 0 && <span> · {status.warningJobs} 주의</span>}
             {status.failedJobs > 0 && <span> · {status.failedJobs} 실패</span>}
             {status.lastPipelineRun ? (
-              <span> · 마지막 파이프라인 {formatRelativeTime(status.lastPipelineRun)}</span>
+              <span> · 마지막 파이프라인 {fmtRelative(status.lastPipelineRun)}</span>
             ) : (
               <span> · 파이프라인 실행 기록 없음</span>
             )}
@@ -64,7 +56,7 @@ export default function SystemStatusBanner({ status }: SystemStatusBannerProps) 
       </div>
       {status.lastPipelineRun && (
         <div className={`text-xs font-mono shrink-0 ${cfg.monoColor}`}>
-          {new Date(status.lastPipelineRun).toLocaleString('ko-KR')}
+          {fmtDateTime(status.lastPipelineRun, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
         </div>
       )}
     </div>
