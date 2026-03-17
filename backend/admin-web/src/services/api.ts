@@ -566,5 +566,15 @@ export const personalizationApi = {
     api.get('/admin/personalization/trend', { params: { granularity } }).then((r) => r.data),
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 추천 디버그 API
+// ─────────────────────────────────────────────────────────────────────────────
+import type { RecommendationDebugResult } from '../types/recommendationDebug';
+
+export const debugApi = {
+  getRecommendation: (userId: string): Promise<RecommendationDebugResult> =>
+    api.get('/admin/debug/recommendation', { params: { userId } }).then((r) => r.data),
+};
+
 export default api;
 

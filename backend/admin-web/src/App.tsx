@@ -9,6 +9,7 @@ import HotSuggestionsPage from './pages/HotSuggestionsPage';
 import CurationThemesPage from './pages/CurationThemesPage';
 import OpsPage from './pages/OpsPage';
 import PersonalizationPage from './pages/PersonalizationPage';
+import RecommendationDebugPage from './pages/RecommendationDebugPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -105,6 +106,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <PersonalizationPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/debug/recommendation"
+            element={
+              <ProtectedRoute>
+                <RecommendationDebugPage />
               </ProtectedRoute>
             }
           />

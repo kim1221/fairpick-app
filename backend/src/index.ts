@@ -1600,6 +1600,225 @@ app.get('/admin/personalization/trend', requireAdminAuth, async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Admin: 추천 디버그 — 특정 유저의 추천 반영 상태 조회 (읽기 전용)
+// userId는 internal users.id / anonymous_id / toss_user_key 중 어느 값이든 가능
+app.get('/admin/debug/recommendation', requireAdminAuth, async (req, res) => {
+  try {
+    const inputValue = ((req.query.userId as string) || '').trim();
+    if (!inputValue) {
+      return res.status(400).json({ message: 'userId is required' });
+    }
+
+    // ── 1. userId 해석 ──────────────────────────────────────────────────────
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(inputValue);
+    let userRow: any = null;
+    let resolvedBy = '';
+
+    if (isUuid) {
+      // UUID → internal id 우선, 없으면 anonymous_id
+      const r1 = await pool.query(
+        'SELECT id, anonymous_id, toss_user_key FROM users WHERE id = $1',
+        [inputValue],
+      );
+      if (r1.rows.length > 0) {
+        userRow = r1.rows[0];
+        resolvedBy = 'internal_id';
+      } else {
+        const r2 = await pool.query(
+          'SELECT id, anonymous_id, toss_user_key FROM users WHERE anonymous_id = $1',
+          [inputValue],
+        );
+        if (r2.rows.length > 0) {
+          userRow = r2.rows[0];
+          resolvedBy = 'anonymous_id';
+        }
+      }
+    } else {
+      const r = await pool.query(
+        'SELECT id, anonymous_id, toss_user_key FROM users WHERE toss_user_key = $1',
+        [inputValue],
+      );
+      if (r.rows.length > 0) {
+        userRow = r.rows[0];
+        resolvedBy = 'toss_user_key';
+      }
+    }
+
+    if (!userRow) {
+      return res.json({
+        user: { inputValue, found: false, resolvedBy: null, internalUserId: null, userType: null },
+      });
+    }
+
+    const internalUserId: string = userRow.id;
+    const userType = userRow.toss_user_key ? 'logged_in' : 'anonymous';
+
+    // ── 2. 유저 신호 (getUserClickHistory 재사용, 1분 캐시 포함) ────────────
+    const history = await getUserClickHistory(internalUserId);
+
+    // ── 3. 최근 행동 20건 ───────────────────────────────────────────────────
+    const recentActionsResult = await pool.query(
+      `SELECT
+         ue.action_type, ue.event_id, ue.section_slug, ue.rank_position, ue.created_at,
+         ce.title AS event_title, ce.main_category
+       FROM user_events ue
+       LEFT JOIN canonical_events ce ON ue.event_id IS NOT NULL AND ue.event_id = ce.id
+       WHERE ue.user_id = $1
+       ORDER BY ue.created_at DESC
+       LIMIT 20`,
+      [internalUserId],
+    );
+
+    // ── 4. 카테고리 친화도 (boost 0/2/3 매핑) ──────────────────────────────
+    const categoryAffinity = Array.from(history.categoryClickCounts.entries())
+      .map(([category, clickCount]) => ({
+        category,
+        clickCount,
+        boost: clickCount >= 3 ? 3 : clickCount >= 1 ? 2 : 0,
+      }))
+      .sort((a, b) => b.clickCount - a.clickCount);
+
+    // ── 5. today_pick 시뮬레이션 ─────────────────────────────────────────────
+    // 현재 활성 이벤트 풀 상위 40개를 대상으로 유저 신호 적용
+    const poolResult = await pool.query(
+      `SELECT ce.id, ce.title, ce.main_category, ce.region
+       FROM canonical_events ce
+       WHERE ce.is_deleted = false
+         AND ce.start_at <= NOW() + INTERVAL '30 days'
+         AND ce.end_at >= NOW()
+         AND ce.image_url IS NOT NULL
+       ORDER BY ce.buzz_score DESC NULLS LAST, ce.view_count DESC
+       LIMIT 40`,
+    );
+
+    const todayPickSelected: any[] = [];
+    const todayPickDownranked: any[] = [];
+    const todayPickSkipped: any[] = [];
+
+    for (const event of poolResult.rows) {
+      const catCount = history.categoryClickCounts.get(event.main_category) ?? 0;
+      const boost = catCount >= 3 ? 3 : catCount >= 1 ? 2 : 0;
+      const isSaved = history.savedIds.has(event.id);
+      const reasons: string[] = [];
+
+      if (boost > 0) reasons.push(`카테고리 친화도 +${boost} (${event.main_category} ${catCount}회)`);
+      if (isSaved) reasons.push('저장한 이벤트');
+
+      if (history.todayPickImpressionIds.has(event.id)) {
+        todayPickSkipped.push({
+          id: event.id, title: event.title, category: event.main_category,
+          skipType: 'today_pick_impression',
+          reason: 'today_pick 최근 3일 노출 이력 — 풀에서 완전 제외 (hard dedup)',
+        });
+      } else if (history.recentClickedIds.has(event.id)) {
+        todayPickDownranked.push({
+          id: event.id, title: event.title, category: event.main_category,
+          downrankType: 'recent_click',
+          reason: '최근 3일 클릭 이력 → 후순위 배치 (fresh 이벤트 소진 시 등장)',
+          categoryBoost: boost > 0 ? `+${boost}` : null,
+        });
+      } else if (history.recentImpressionIds.has(event.id)) {
+        todayPickDownranked.push({
+          id: event.id, title: event.title, category: event.main_category,
+          downrankType: 'recent_impression',
+          reason: '최근 24h 다른 섹션 노출 이력 → 후순위 배치',
+          categoryBoost: boost > 0 ? `+${boost}` : null,
+        });
+      } else {
+        if (reasons.length === 0) reasons.push('카테고리 친화도 없음');
+        reasons.push('최근 3일 노출·클릭 없음 (fresh)');
+        todayPickSelected.push({
+          id: event.id, title: event.title, category: event.main_category, reasons,
+        });
+      }
+    }
+
+    // ── 6. 섹션별 최근 7일 실제 노출 이력 (homeSectionsSummary) ─────────────
+    const SUMMARY_SECTIONS = ['trending', 'date_pick', 'beginner', 'discovery', 'budget_pick'];
+    const sectionHistoryResult = await pool.query(
+      `SELECT
+         ue.section_slug, ue.event_id,
+         ce.title, ce.main_category,
+         COUNT(*) AS impression_count,
+         MAX(ue.created_at) AS last_shown_at
+       FROM user_events ue
+       LEFT JOIN canonical_events ce ON ue.event_id IS NOT NULL AND ue.event_id = ce.id
+       WHERE ue.user_id = $1
+         AND ue.action_type = 'impression'
+         AND ue.section_slug = ANY($2)
+         AND ue.created_at > NOW() - INTERVAL '7 days'
+       GROUP BY ue.section_slug, ue.event_id, ce.title, ce.main_category
+       ORDER BY ue.section_slug, last_shown_at DESC`,
+      [internalUserId, SUMMARY_SECTIONS],
+    );
+
+    const sectionMap: Record<string, any[]> = Object.fromEntries(SUMMARY_SECTIONS.map(s => [s, []]));
+    for (const row of sectionHistoryResult.rows) {
+      if (!sectionMap[row.section_slug] || sectionMap[row.section_slug].length >= 5) continue;
+      const catCount = history.categoryClickCounts.get(row.main_category) ?? 0;
+      const boost = catCount >= 3 ? 3 : catCount >= 1 ? 2 : 0;
+      const representativeReasons: string[] = [];
+      if (boost > 0) {
+        representativeReasons.push(`카테고리 친화도 +${boost} (${row.main_category} ${catCount}회 클릭)`);
+      } else {
+        representativeReasons.push('카테고리 친화도 없음 (클릭 이력 없음)');
+      }
+      if (history.savedIds.has(row.event_id)) representativeReasons.push('저장한 이벤트');
+      sectionMap[row.section_slug].push({
+        id: row.event_id, title: row.title, category: row.main_category,
+        lastShownAt: row.last_shown_at,
+        impressionCount: parseInt(row.impression_count, 10),
+        representativeReasons,
+      });
+    }
+
+    res.json({
+      user: {
+        inputValue, resolvedBy, internalUserId, userType,
+        anonymousId: userRow.anonymous_id,
+        tossUserKey: userRow.toss_user_key,
+        found: true,
+      },
+      signals: {
+        categoryClickCounts: Object.fromEntries(history.categoryClickCounts),
+        sectionClickCounts: Object.fromEntries(history.sectionClickCounts),
+        summary: {
+          totalClicks14d: history.clickedIds.size,
+          recentClicks3d: history.recentClickedIds.size,
+          totalSaved: history.savedIds.size,
+          todayPickImpressionBlocked: history.todayPickImpressionIds.size,
+          recentImpressionBlocked: history.recentImpressionIds.size,
+        },
+      },
+      categoryAffinity,
+      recentActions: recentActionsResult.rows.map((r: any) => ({
+        actionType: r.action_type,
+        eventId: r.event_id,
+        eventTitle: r.event_title,
+        mainCategory: r.main_category,
+        sectionSlug: r.section_slug,
+        rankPosition: r.rank_position,
+        createdAt: r.created_at,
+      })),
+      todayPickSimulation: {
+        poolSize: poolResult.rows.length,
+        selected: todayPickSelected,
+        downranked: todayPickDownranked,
+        skipped: todayPickSkipped,
+      },
+      homeSectionsSummary: SUMMARY_SECTIONS.map(slug => ({
+        sectionSlug: slug,
+        recentlyShown: sectionMap[slug],
+      })),
+    });
+  } catch (err) {
+    console.error('[Admin] debug/recommendation failed:', err);
+    res.status(500).json({ message: 'Failed to load recommendation debug' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Admin: 이미지 통계 (디버깅용)
 app.get('/admin/image-stats', requireAdminAuth, async (req, res) => {
   try {
