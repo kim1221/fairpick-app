@@ -486,13 +486,13 @@ export async function updateBuzzScore(): Promise<void> {
       ? (totalBuzzScore / totalEventsProcessed).toFixed(2)
       : 0;
 
-    // 4. collection_logs에 기록
+    // 4. collection_logs에 기록 (started_at = toISOString() — UTC 명시로 타임존 버그 방지)
     await pool.query(
       `
       INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, completed_at, items_count, success_count, failed_count)
       VALUES ($1, 'buzz-score', 'system', 'buzz_score_update', 'success', $2, NOW(), $3, 1, 0)
       `,
-      [logId, startTime, totalEventsProcessed]
+      [logId, startTime.toISOString(), totalEventsProcessed]
     );
 
     // 5. 통계 출력
@@ -526,7 +526,7 @@ export async function updateBuzzScore(): Promise<void> {
         INSERT INTO collection_logs (id, scheduler_job_name, source, type, status, started_at, completed_at, items_count, success_count, failed_count, error_message)
         VALUES ($1, 'buzz-score', 'system', 'buzz_score_update', 'failed', $2, NOW(), 0, 0, 1, $3)
         `,
-        [logId, startTime, error.message]
+        [logId, startTime.toISOString(), error.message]
       );
     } catch (logError) {
       console.error('[UpdateBuzzScore] Failed to log error:', logError);

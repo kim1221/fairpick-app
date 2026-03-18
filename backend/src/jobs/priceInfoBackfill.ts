@@ -12,6 +12,7 @@
 
 import { pool } from '../db';
 import he from 'he'; // HTML entity decode
+import { deriveIsFree } from '../utils/priceUtils';
 
 // ============================================
 // 설정
@@ -221,13 +222,23 @@ async function updatePriceInfo(id: string, priceInfo: string, source: string): P
     }
   };
   
+  // price_info가 유료임을 나타내는데 is_free=true이면 교정
+  // manually_edited_fields->>'is_free' 보호 플래그가 있는 이벤트는 건드리지 않음
+  const derivedIsFree = deriveIsFree(priceInfo);
+
   await pool.query(
-    `UPDATE canonical_events 
-     SET price_info = $1, 
+    `UPDATE canonical_events
+     SET price_info = $1,
          field_sources = COALESCE(field_sources, '{}'::jsonb) || $2::jsonb,
-         updated_at = NOW() 
-     WHERE id = $3`,
-    [priceInfo, JSON.stringify(fieldSources), id]
+         is_free = CASE
+           WHEN $3 = false AND is_free = true
+                AND (manually_edited_fields->>'is_free') IS NULL
+           THEN false
+           ELSE is_free
+         END,
+         updated_at = NOW()
+     WHERE id = $4`,
+    [priceInfo, JSON.stringify(fieldSources), derivedIsFree, id]
   );
 }
 

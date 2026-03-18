@@ -142,19 +142,19 @@ export async function runCollectionJob(options?: { schedulerJobName?: string }):
   }
   console.log('='.repeat(80));
 
-  // collection_logs 종료 기록
+  // collection_logs 종료 기록 (completed_at = NOW() — JS Date 타임존 버그 방지)
   try {
     await pool.query(`
       UPDATE collection_logs
-      SET 
-        completed_at = $1,
-        status = $2,
-        items_count = $3,
-        success_count = $4,
-        failed_count = $5,
-        error_message = $6
-      WHERE id = $7
-    `, [completedAt, finalStatus, totalExecuted, successCount, failedCount, errorMessage, logId]);
+      SET
+        completed_at = NOW(),
+        status = $1,
+        items_count = $2,
+        success_count = $3,
+        failed_count = $4,
+        error_message = $5
+      WHERE id = $6
+    `, [finalStatus, totalExecuted, successCount, failedCount, errorMessage, logId]);
   } catch (error) {
     console.error('[CollectJob] Failed to update collection log:', error);
   }

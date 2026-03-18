@@ -45,6 +45,24 @@ export async function updateMetadata(): Promise<void> {
 
     console.log(`[UpdateMetadata] Updated is_ending_soon: ${endingSoonResult.rowCount} rows`);
 
+    // 2. is_free 동기화 — price_min/max가 0보다 크면 is_free를 false로 교정
+    //    (priceInfoBackfill이 is_free를 갱신하지 않아 발생하는 불일치를 매일 정리)
+    //    manually_edited_fields->>'is_free' 가 설정된 이벤트는 건드리지 않음
+    const isFreeFixResult = await pool.query(`
+      UPDATE canonical_events
+      SET is_free = false,
+          updated_at = NOW()
+      WHERE is_deleted = false
+        AND is_free = true
+        AND (price_min > 0 OR price_max > 0)
+        AND (manually_edited_fields->>'is_free') IS NULL
+      RETURNING id
+    `);
+
+    if (isFreeFixResult.rowCount && isFreeFixResult.rowCount > 0) {
+      console.log(`[UpdateMetadata] Fixed is_free mismatch: ${isFreeFixResult.rowCount} rows`);
+    }
+
     // 3. popularity_score 업데이트 (개선된 공식 - 임박 행사 강조)
     // 점수가 바뀔 수 있는 이벤트만 처리:
     //   - 최신성: 등록 후 30일 이내 (created_at 기반 점수가 매일 감소)

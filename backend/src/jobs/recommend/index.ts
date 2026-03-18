@@ -50,22 +50,19 @@ export async function updateAutoRecommend(): Promise<void> {
     console.error('[RecommendJob] Auto-recommend update failed:', error);
   }
 
-  const completedAt = new Date();
-
-  // collection_logs 종료 기록
+  // collection_logs 종료 기록 (completed_at = NOW() — JS Date 타임존 버그 방지)
   try {
     await pool.query(`
       UPDATE collection_logs
-      SET 
-        completed_at = $1,
-        status = $2,
-        items_count = $3,
-        success_count = $4,
-        failed_count = $5,
-        error_message = $6
-      WHERE id = $7
+      SET
+        completed_at = NOW(),
+        status = $1,
+        items_count = $2,
+        success_count = $3,
+        failed_count = $4,
+        error_message = $5
+      WHERE id = $6
     `, [
-      completedAt,
       finalStatus,
       0,  // items_count
       0,  // success_count
