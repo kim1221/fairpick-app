@@ -10,6 +10,7 @@ import CurationThemesPage from './pages/CurationThemesPage';
 import OpsPage from './pages/OpsPage';
 import PersonalizationPage from './pages/PersonalizationPage';
 import RecommendationDebugPage from './pages/RecommendationDebugPage';
+import CostPage from './pages/CostPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -115,6 +116,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <RecommendationDebugPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/cost"
+            element={
+              <ProtectedRoute>
+                <CostPage />
               </ProtectedRoute>
             }
           />

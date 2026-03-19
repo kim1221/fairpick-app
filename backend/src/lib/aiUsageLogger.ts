@@ -1,27 +1,33 @@
 /**
  * aiUsageLogger.ts
  *
- * Gemini API 사용량 추적 유틸리티.
- * generateContent / embedContent 호출 후 usageMetadata를 DB에 저장합니다.
+ * AI API(Gemini / OpenAI) 사용량 추적 유틸리티.
+ * generateContent / embedContent / chat.completions 호출 후 usage 정보를 DB에 저장합니다.
  *
  * 설계 원칙:
  * - fire-and-forget: 로깅 실패가 메인 플로우에 영향을 주지 않음
  * - DB 인서트를 setImmediate로 지연하여 응답 지연 최소화
+ * - 비용은 내부 usage 로그 기반 추정값 (provider 청구서 기준 아님)
  */
 
 import { pool } from '../db';
 
 // ─────────────────────────────────────────────────────────────
-// 비용 계산 (2026년 3월 Gemini 가격 기준, USD)
-// https://ai.google.dev/pricing
+// 비용 계산 (2026년 3월 기준 단가, USD)
+// Gemini: https://ai.google.dev/pricing
+// OpenAI: https://openai.com/pricing
 // ─────────────────────────────────────────────────────────────
 
-interface GeminiPricing {
+interface ModelPricing {
   inputPer1M: number;   // USD per 1M input tokens
   outputPer1M: number;  // USD per 1M output tokens
 }
 
-const PRICING: Record<string, GeminiPricing> = {
+// GeminiPricing은 하위 호환을 위해 유지
+type GeminiPricing = ModelPricing;
+
+const PRICING: Record<string, ModelPricing> = {
+  // ── Gemini ──────────────────────────────────────────────────
   // Gemini 2.5 Flash (최신)
   'gemini-2.5-flash':             { inputPer1M: 0.075,  outputPer1M: 0.30 },
   // Gemini 1.5 Pro
@@ -35,9 +41,13 @@ const PRICING: Record<string, GeminiPricing> = {
   // Embedding (입출력 구분 없음 — 입력만 계산)
   'gemini-embedding-001':         { inputPer1M: 0.00,   outputPer1M: 0.00 }, // 무료 (2026-03 기준)
   'text-embedding-004':           { inputPer1M: 0.00,   outputPer1M: 0.00 }, // 무료
+  // ── OpenAI ──────────────────────────────────────────────────
+  'gpt-4o-mini':                  { inputPer1M: 0.15,   outputPer1M: 0.60 },
+  'gpt-4o':                       { inputPer1M: 2.50,   outputPer1M: 10.00 },
+  'gpt-4o-2024-11-20':            { inputPer1M: 2.50,   outputPer1M: 10.00 },
 };
 
-const FALLBACK_PRICING: GeminiPricing = { inputPer1M: 0.50, outputPer1M: 1.50 };
+const FALLBACK_PRICING: ModelPricing = { inputPer1M: 0.50, outputPer1M: 1.50 };
 
 export function estimateGeminiCost(
   model: string,
@@ -62,12 +72,15 @@ export type AiUsageType =
   | 'tags'             // 태그 생성
   | 'seed'             // Hot Suggestion 시드 추출
   | 'normalize'        // 이벤트명 정규화
-  | 'curation_copy'    // 큐레이션 카피라이팅
+  | 'curation_copy'    // 큐레이션 카피라이팅 (Gemini) / 배너 카피 (OpenAI)
   | 'hot_rating'       // Hot 이벤트 평가
   | 'popup_discovery'  // 팝업 발견
   | 'other';
 
+export type AiProvider = 'gemini' | 'openai';
+
 export interface AiUsageInput {
+  provider?: AiProvider;  // 기본값: 'gemini'
   model: string;
   usageType: AiUsageType;
   promptTokens: number;
@@ -82,11 +95,13 @@ export interface AiUsageInput {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Gemini API 사용량을 DB에 fire-and-forget 방식으로 기록합니다.
+ * AI API(Gemini/OpenAI) 사용량을 DB에 fire-and-forget 방식으로 기록합니다.
  * 실패해도 에러를 throw하지 않습니다.
+ * 비용은 내부 usage 로그 기반 추정값 (provider 청구서 기준 아님).
  */
 export function logAiUsage(input: AiUsageInput): void {
   const {
+    provider = 'gemini',
     model,
     usageType,
     promptTokens,
@@ -107,7 +122,7 @@ export function logAiUsage(input: AiUsageInput): void {
          VALUES
            ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
-          'gemini',
+          provider,
           model,
           usageType,
           promptTokens,

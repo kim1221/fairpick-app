@@ -17,6 +17,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const opsItems = [
     { path: '/ops', label: '운영 센터', icon: '📡' },
     { path: '/', label: '대시보드', icon: '📊' },
+    { path: '/cost', label: '비용 관제', icon: '💰' },
     { path: '/personalization', label: '개인화 관제', icon: '📈' },
     { path: '/debug/recommendation', label: '추천 디버그', icon: '🔍' },
   ];

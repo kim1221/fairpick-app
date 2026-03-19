@@ -3,6 +3,7 @@ import cors from 'cors';
 import axios from 'axios';
 import crypto from 'crypto';
 import multer from 'multer';
+import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import rateLimit from 'express-rate-limit';
 import { pool } from './db';
 import { initScheduler } from './scheduler';
@@ -5385,7 +5386,13 @@ ${topTraits.length > 0 ? `- 특별한 점: ${topTraits.join(', ')}` : ''}
             completionTokens: completion.usage?.completion_tokens,
             totalTokens: completion.usage?.total_tokens,
           };
-          
+          logAiUsage({
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            usageType: 'curation_copy',
+            promptTokens: completion.usage?.prompt_tokens ?? 0,
+            responseTokens: completion.usage?.completion_tokens ?? 0,
+          });
           console.log('[AI] GPT-4o-mini success:', {
             copy: finalCopy,
             tokens: gptMetadata.totalTokens,
@@ -9355,6 +9362,536 @@ setInterval(() => {
 }, 10000); // 매 10초마다 체크
 
 console.log('[EventLoop] Monitoring started (check_interval=10s, warn_threshold=5s)');
+
+// ============================================================
+// Admin Cost API
+// ============================================================
+
+/**
+ * usage_type → CostItem 컨텍스트 정적 매핑
+ * 비용 주체, 원인, 기능 설명을 함께 제공합니다.
+ */
+const AI_USAGE_CONTEXT: Record<string, {
+  itemId: string;
+  name: string;
+  costDriver: string;
+  relatedFeature: string;
+  shortExplanation: string;
+}> = {
+  extraction: {
+    itemId: 'gemini-extraction',
+    name: 'Gemini — 이벤트 보강',
+    costDriver: 'AI 이벤트 보강 배치 (enrichInternalFields · 매일 04:15)',
+    relatedFeature: 'ai_enrichment',
+    shortExplanation: '신규 수집 이벤트의 태그·요약·가격 정보를 Gemini로 자동 보강합니다.',
+  },
+  embedding: {
+    itemId: 'gemini-embedding',
+    name: 'Gemini — 벡터 임베딩',
+    costDriver: '벡터 임베딩 생성 (embedNewEvents · 매일 05:00)',
+    relatedFeature: 'embedding',
+    shortExplanation: '이벤트 의미 검색을 위한 벡터 임베딩을 생성합니다. gemini-embedding-001은 현재 무료입니다.',
+  },
+  popup_discovery: {
+    itemId: 'gemini-popup-discovery',
+    name: 'Gemini — 팝업 발굴',
+    costDriver: 'AI 팝업 발굴 (runPopupDiscovery · 매일 08:00)',
+    relatedFeature: 'popup_discovery',
+    shortExplanation: '인터넷에서 팝업스토어를 자동 발굴하고 DB 중복을 검증합니다.',
+  },
+  hot_rating: {
+    itemId: 'gemini-hot-rating',
+    name: 'Gemini — Hot Rating',
+    costDriver: 'AI Hot Rating 평가 (runHotRating · 매주 월 09:00)',
+    relatedFeature: 'hot_rating',
+    shortExplanation: '전시·공연·축제의 핫함 점수를 Gemini로 평가합니다.',
+  },
+  curation_copy: {
+    itemId: 'ai-curation-copy',
+    name: 'AI — 배너 카피 생성',
+    costDriver: '추천 배너 문구 실시간 생성 (POST /api/ai/generate-banner-copy)',
+    relatedFeature: 'banner_copy',
+    shortExplanation: '앱 추천 카드의 맞춤 배너 문구를 GPT-4o-mini(OpenAI)로 실시간 생성합니다.',
+  },
+  grounding: {
+    itemId: 'gemini-grounding',
+    name: 'Gemini — 검색 그라운딩',
+    costDriver: 'Gemini Google Search 그라운딩',
+    relatedFeature: 'ai_enrichment',
+    shortExplanation: 'Gemini의 웹 검색 기반 이벤트 정보 보강입니다.',
+  },
+  seed: {
+    itemId: 'gemini-other',
+    name: 'Gemini — 기타',
+    costDriver: 'Hot Suggestion 시드 추출 / 정규화 / 태그 생성',
+    relatedFeature: 'ai_enrichment',
+    shortExplanation: '큐레이션 시드 추출, 이벤트명 정규화, 태그 자동 생성 등 보조 작업입니다.',
+  },
+  normalize: {
+    itemId: 'gemini-other',
+    name: 'Gemini — 기타',
+    costDriver: 'Hot Suggestion 시드 추출 / 정규화 / 태그 생성',
+    relatedFeature: 'ai_enrichment',
+    shortExplanation: '큐레이션 시드 추출, 이벤트명 정규화, 태그 자동 생성 등 보조 작업입니다.',
+  },
+  tags: {
+    itemId: 'gemini-other',
+    name: 'Gemini — 기타',
+    costDriver: 'Hot Suggestion 시드 추출 / 정규화 / 태그 생성',
+    relatedFeature: 'ai_enrichment',
+    shortExplanation: '큐레이션 시드 추출, 이벤트명 정규화, 태그 자동 생성 등 보조 작업입니다.',
+  },
+  caption: {
+    itemId: 'gemini-other',
+    name: 'Gemini — 기타',
+    costDriver: 'Hot Suggestion 시드 추출 / 정규화 / 태그 생성',
+    relatedFeature: 'ai_enrichment',
+    shortExplanation: '큐레이션 시드 추출, 이벤트명 정규화, 태그 자동 생성 등 보조 작업입니다.',
+  },
+  other: {
+    itemId: 'gemini-other',
+    name: 'Gemini — 기타',
+    costDriver: 'Hot Suggestion 시드 추출 / 정규화 / 태그 생성',
+    relatedFeature: 'ai_enrichment',
+    shortExplanation: '큐레이션 시드 추출, 이벤트명 정규화, 태그 자동 생성 등 보조 작업입니다.',
+  },
+};
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+  if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
+
+function formatNumber(n: number): string {
+  return n.toLocaleString('ko-KR');
+}
+
+/**
+ * GET /admin/cost/ai
+ * AI 사용량·비용 집계 (Gemini + OpenAI)
+ * 비용은 내부 ai_usage_logs 기반 집계값 (provider 청구서 기준 아님)
+ */
+app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
+  try {
+    const period = (req.query.period as string) || 'this_month';
+
+    let dateFilter: string;
+    if (period === 'today') {
+      dateFilter = `created_at >= DATE_TRUNC('day', NOW())`;
+    } else if (period === 'last_month') {
+      dateFilter = `created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month')
+                    AND created_at < DATE_TRUNC('month', NOW())`;
+    } else {
+      dateFilter = `created_at >= DATE_TRUNC('month', NOW())`;
+    }
+
+    // provider + usage_type 기준 집계
+    const { rows: byType } = await pool.query<{
+      provider: string;
+      usage_type: string;
+      models: string[];
+      requests: string;
+      prompt_tokens: string;
+      response_tokens: string;
+      total_tokens: string;
+      cost_usd: string;
+    }>(`
+      SELECT
+        provider,
+        usage_type,
+        ARRAY_AGG(DISTINCT model) AS models,
+        COUNT(*)::text              AS requests,
+        SUM(prompt_tokens)::text    AS prompt_tokens,
+        SUM(response_tokens)::text  AS response_tokens,
+        SUM(total_tokens)::text     AS total_tokens,
+        SUM(estimated_cost_usd)::text AS cost_usd
+      FROM ai_usage_logs
+      WHERE ${dateFilter} AND success = true
+      GROUP BY provider, usage_type
+      ORDER BY SUM(estimated_cost_usd) DESC
+    `);
+
+    // 최근 30일 일별 추이
+    const { rows: dailyTrend } = await pool.query<{
+      date: string;
+      cost_usd: string;
+      requests: string;
+    }>(`
+      SELECT
+        DATE_TRUNC('day', created_at AT TIME ZONE 'UTC')::date::text AS date,
+        SUM(estimated_cost_usd)::text AS cost_usd,
+        COUNT(*)::text                AS requests
+      FROM ai_usage_logs
+      WHERE created_at >= NOW() - INTERVAL '30 days'
+      GROUP BY DATE_TRUNC('day', created_at AT TIME ZONE 'UTC')::date
+      ORDER BY date ASC
+    `);
+
+    // byType → CostItems (같은 itemId는 merge)
+    const itemMap = new Map<string, {
+      id: string; category: string; provider: string; name: string;
+      costType: string; amount: number; currency: string;
+      costDriver: string; relatedFeature: string; shortExplanation: string;
+      sourceOfTruth: string; pricingRef: string | null;
+      models: Set<string>;
+      requests: number; promptTokens: number; responseTokens: number; totalTokens: number;
+    }>();
+
+    for (const row of byType) {
+      const ctx = AI_USAGE_CONTEXT[row.usage_type] ?? AI_USAGE_CONTEXT['other'];
+      const key = `${row.provider}-${ctx.itemId}`;
+      const costUsd = parseFloat(row.cost_usd) || 0;
+      const requests = parseInt(row.requests) || 0;
+      const prompt = parseInt(row.prompt_tokens) || 0;
+      const response = parseInt(row.response_tokens) || 0;
+      const total = parseInt(row.total_tokens) || 0;
+
+      if (itemMap.has(key)) {
+        const existing = itemMap.get(key)!;
+        existing.amount += costUsd;
+        existing.requests += requests;
+        existing.promptTokens += prompt;
+        existing.responseTokens += response;
+        existing.totalTokens += total;
+        row.models.forEach((m) => existing.models.add(m));
+      } else {
+        const providerLabel = row.provider === 'openai' ? 'OpenAI' : 'Google Gemini';
+        // embedding은 무료이므로 amount=0이어도 집계값으로 표시
+        itemMap.set(key, {
+          id: ctx.itemId,
+          category: 'ai',
+          provider: providerLabel,
+          name: ctx.name,
+          costType: 'aggregated',
+          amount: costUsd,
+          currency: 'USD',
+          costDriver: ctx.costDriver,
+          relatedFeature: ctx.relatedFeature,
+          shortExplanation: ctx.shortExplanation,
+          sourceOfTruth: 'DB ai_usage_logs 기반 집계 (usage × 단가) — provider 청구서 기준 아님',
+          pricingRef: row.provider === 'openai'
+            ? '$0.15/1M input · $0.60/1M output (gpt-4o-mini 기준)'
+            : row.models.some((m) => m.includes('embedding'))
+              ? '무료 (gemini-embedding-001 기준)'
+              : '$0.075/1M input · $0.30/1M output (gemini-2.5-flash 기준)',
+          models: new Set(row.models),
+          requests,
+          promptTokens: prompt,
+          responseTokens: response,
+          totalTokens: total,
+        });
+      }
+    }
+
+    const items = Array.from(itemMap.values())
+      .sort((a, b) => b.amount - a.amount)
+      .map(({ models, requests, promptTokens, responseTokens, totalTokens, ...item }) => ({
+        ...item,
+        usageMetrics: [
+          { label: '요청 수',     value: requests,       unit: '건',    formatted: `${formatNumber(requests)}건` },
+          { label: '입력 토큰',   value: promptTokens,   unit: 'tokens', formatted: formatNumber(promptTokens) },
+          { label: '출력 토큰',   value: responseTokens, unit: 'tokens', formatted: formatNumber(responseTokens) },
+          { label: '추정 비용',   value: item.amount,    unit: 'USD',   formatted: `$${item.amount.toFixed(4)}` },
+        ],
+        models: Array.from(models),
+      }));
+
+    const totalUsd = items.reduce((s, i) => s + i.amount, 0);
+    res.json({
+      period,
+      items,
+      dailyTrend: dailyTrend.map((r) => ({
+        date: r.date,
+        costUsd: parseFloat(r.cost_usd) || 0,
+        requests: parseInt(r.requests) || 0,
+      })),
+      summary: {
+        totalUsd,
+        totalExactUsd: totalUsd,
+        totalEstimatedUsd: 0,
+        usageOnlyCount: 0,
+        costTypeNote: '내부 usage 로그 기반 집계값입니다. provider 실제 청구액과 차이가 있을 수 있습니다.',
+      },
+    });
+  } catch (error) {
+    console.error('[Admin] GET /admin/cost/ai failed:', error);
+    res.status(500).json({ message: 'Failed to load AI cost data' });
+  }
+});
+
+/**
+ * GET /admin/cost/db
+ * PostgreSQL 테이블별 용량 조회 (pg_total_relation_size 직접 쿼리)
+ */
+app.get('/admin/cost/db', requireAdminAuth, async (_req, res) => {
+  try {
+    const { rows: tables } = await pool.query<{
+      name: string;
+      bytes: string;
+      row_estimate: string;
+    }>(`
+      SELECT
+        tablename                                    AS name,
+        pg_total_relation_size(quote_ident(tablename))::text AS bytes,
+        reltuples::bigint::text                      AS row_estimate
+      FROM pg_tables
+      JOIN pg_class ON pg_class.relname = pg_tables.tablename
+      WHERE schemaname = 'public'
+      ORDER BY pg_total_relation_size(quote_ident(tablename)) DESC
+      LIMIT 15
+    `);
+
+    const { rows: totalRow } = await pool.query<{ total: string }>(`
+      SELECT SUM(pg_total_relation_size(quote_ident(tablename)))::text AS total
+      FROM pg_tables
+      WHERE schemaname = 'public'
+    `);
+
+    const totalBytes = parseInt(totalRow[0]?.total || '0');
+    const tableList = tables.map((t) => ({
+      name: t.name,
+      bytes: parseInt(t.bytes),
+      sizeFormatted: formatBytes(parseInt(t.bytes)),
+      rowEstimate: parseInt(t.row_estimate),
+    }));
+
+    res.json({
+      items: [{
+        id: 'db-postgresql',
+        category: 'database',
+        provider: 'Supabase PostgreSQL',
+        name: 'PostgreSQL 스토리지',
+        costType: 'usage-only',
+        amount: null,
+        currency: 'USD',
+        costDriver: 'user_events · canonical_events · ai_usage_logs 등 테이블 데이터 누적',
+        relatedFeature: 'all',
+        shortExplanation: 'PostgreSQL 전체 저장 용량입니다. Supabase 플랜 포함 범위이며 현재 별도 추가 과금이 없습니다. (Free: 500MB, Pro: 8GB)',
+        sourceOfTruth: 'pg_total_relation_size() 직접 조회 — 실시간 측정값',
+        pricingRef: null,
+        noAmountReason: 'Supabase 플랜 포함 범위 — provider 청구 데이터 연동 전',
+        usageMetrics: [
+          { label: '전체 용량',   value: totalBytes,     unit: 'bytes', formatted: formatBytes(totalBytes) },
+          { label: '테이블 수',   value: tableList.length, unit: '개',   formatted: `${tableList.length}개` },
+        ],
+        tables: tableList,
+      }],
+    });
+  } catch (error) {
+    console.error('[Admin] GET /admin/cost/db failed:', error);
+    res.status(500).json({ message: 'Failed to load DB stats' });
+  }
+});
+
+/**
+ * GET /admin/cost/storage
+ * Cloudflare R2 이미지 수·용량 조회 (S3 ListObjectsV2)
+ * 결과를 cost_cache 테이블에 1시간 캐시
+ */
+app.get('/admin/cost/storage', requireAdminAuth, async (_req, res) => {
+  const CACHE_KEY = 'r2_stats';
+  const CACHE_TTL_MS = 60 * 60 * 1000; // 1시간
+
+  try {
+    // 캐시 확인
+    const { rows: cacheRows } = await pool.query<{ value: any; updated_at: string }>(
+      `SELECT value, updated_at FROM cost_cache WHERE key = $1`, [CACHE_KEY]
+    );
+    if (cacheRows.length > 0) {
+      const ageMs = Date.now() - new Date(cacheRows[0].updated_at).getTime();
+      if (ageMs < CACHE_TTL_MS) {
+        return res.json({ ...cacheRows[0].value, cachedAt: cacheRows[0].updated_at, fromCache: true });
+      }
+    }
+
+    // R2 스캔
+    if (!config.s3.endpoint || !config.s3.accessKeyId || !config.s3.bucket) {
+      return res.json({
+        items: [{
+          id: 'r2-storage',
+          category: 'storage',
+          provider: 'Cloudflare R2',
+          name: 'R2 이미지 스토리지',
+          costType: 'estimated',
+          amount: null,
+          currency: 'USD',
+          costDriver: '이벤트 이미지 자동 수집 및 WebP 변환 저장',
+          relatedFeature: 'image_storage',
+          shortExplanation: 'S3 환경변수가 설정되지 않아 스캔을 건너뜁니다.',
+          sourceOfTruth: 'S3 ListObjectsV2 (미설정)',
+          pricingRef: '$0.015/GB/월 저장 · $0.36/1M 읽기 요청',
+          usageMetrics: [],
+        }],
+        cachedAt: null,
+        fromCache: false,
+      });
+    }
+
+    const r2Client = new S3Client({
+      region: config.s3.region || 'auto',
+      endpoint: config.s3.endpoint,
+      credentials: {
+        accessKeyId: config.s3.accessKeyId,
+        secretAccessKey: config.s3.secretAccessKey,
+      },
+      forcePathStyle: true,
+    });
+
+    let objectCount = 0;
+    let totalBytes = 0;
+    let continuationToken: string | undefined;
+
+    do {
+      const cmd = new ListObjectsV2Command({
+        Bucket: config.s3.bucket,
+        ContinuationToken: continuationToken,
+        MaxKeys: 1000,
+      });
+      const resp = await r2Client.send(cmd);
+      objectCount += resp.KeyCount ?? 0;
+      for (const obj of resp.Contents ?? []) {
+        totalBytes += obj.Size ?? 0;
+      }
+      continuationToken = resp.NextContinuationToken;
+    } while (continuationToken);
+
+    // R2 비용 추정: $0.015/GB/월 저장
+    const storageGb = totalBytes / 1e9;
+    const estimatedStorageCost = storageGb * 0.015;
+
+    const payload = {
+      items: [{
+        id: 'r2-storage',
+        category: 'storage',
+        provider: 'Cloudflare R2',
+        name: 'R2 이미지 스토리지',
+        costType: 'estimated',
+        amount: estimatedStorageCost,
+        currency: 'USD',
+        costDriver: '이벤트 이미지 자동 수집 및 WebP 변환 저장 (geoRefreshPipeline 실행 시)',
+        relatedFeature: 'image_storage',
+        shortExplanation: '수집된 이벤트 이미지를 WebP로 최적화하여 R2에 저장합니다. 저장 비용은 용량 × 단가로 추정합니다. CDN 읽기 요청 비용은 현재 측정 불가입니다.',
+        sourceOfTruth: 'S3 ListObjectsV2 용량 측정 × $0.015/GB/월 — CDN 요청 비용 제외',
+        pricingRef: '$0.015/GB/월 저장 · $0.36/1M 읽기 요청 (CDN은 2차 연동)',
+        usageMetrics: [
+          { label: '이미지 수',      value: objectCount,    unit: '개',   formatted: `${formatNumber(objectCount)}개` },
+          { label: '총 용량',        value: totalBytes,     unit: 'bytes', formatted: formatBytes(totalBytes) },
+          { label: '저장 비용 추정', value: estimatedStorageCost, unit: 'USD', formatted: `$${estimatedStorageCost.toFixed(4)}` },
+        ],
+      }],
+    };
+
+    // 캐시 저장
+    await pool.query(
+      `INSERT INTO cost_cache (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [CACHE_KEY, JSON.stringify(payload)]
+    );
+
+    res.json({ ...payload, cachedAt: new Date().toISOString(), fromCache: false });
+  } catch (error) {
+    console.error('[Admin] GET /admin/cost/storage failed:', error);
+    res.status(500).json({ message: 'Failed to load storage stats' });
+  }
+});
+
+/**
+ * GET /admin/cost/api-usage
+ * collection_logs 기반 외부 API 호출량 집계 (최근 30일)
+ */
+app.get('/admin/cost/api-usage', requireAdminAuth, async (_req, res) => {
+  try {
+    const { rows } = await pool.query<{
+      scheduler_job_name: string;
+      run_count: string;
+      total_items: string;
+      success_count: string;
+      last_run_at: string | null;
+    }>(`
+      SELECT
+        scheduler_job_name,
+        COUNT(*)::text              AS run_count,
+        SUM(items_count)::text      AS total_items,
+        SUM(success_count)::text    AS success_count,
+        MAX(started_at)::text       AS last_run_at
+      FROM collection_logs
+      WHERE started_at >= NOW() - INTERVAL '30 days'
+        AND scheduler_job_name IS NOT NULL
+        AND status IN ('success', 'partial', 'partial_success')
+      GROUP BY scheduler_job_name
+      ORDER BY run_count DESC
+    `);
+
+    const JOB_CONTEXT: Record<string, {
+      label: string;
+      sources: string;
+      costDriver: string;
+      shortExplanation: string;
+    }> = {
+      'geo-refresh-03': {
+        label: '데이터 수집 파이프라인',
+        sources: 'KOPIS · TourAPI · 문화포털',
+        costDriver: '공연·축제·전시 데이터 자동 수집 (매일 03:00)',
+        shortExplanation: '정부 개방 API(KOPIS·TourAPI·문화포털)를 사용합니다. 현재 모두 무료 API입니다.',
+      },
+      'collect-15': {
+        label: '오후 경량 수집',
+        sources: 'KOPIS · TourAPI',
+        costDriver: '오후 증분 수집 (매일 15:00)',
+        shortExplanation: '정부 개방 API를 이용한 오후 증분 수집입니다. 현재 무료입니다.',
+      },
+      'ai-popup-discovery': {
+        label: 'AI 팝업 발굴',
+        sources: 'Gemini + 웹 검색',
+        costDriver: 'AI 팝업 발굴 (매일 08:00)',
+        shortExplanation: 'AI로 팝업 이벤트를 발굴합니다. API 비용은 AI 비용 섹션에 포함됩니다.',
+      },
+    };
+
+    const items = rows.map((row) => {
+      const ctx = JOB_CONTEXT[row.scheduler_job_name] ?? {
+        label: row.scheduler_job_name,
+        sources: '—',
+        costDriver: row.scheduler_job_name,
+        shortExplanation: `${row.scheduler_job_name} 스케줄러 실행 기록입니다.`,
+      };
+      const runCount = parseInt(row.run_count) || 0;
+      const totalItems = parseInt(row.total_items) || 0;
+
+      return {
+        id: `api-${row.scheduler_job_name}`,
+        category: 'api',
+        provider: ctx.sources,
+        name: ctx.label,
+        costType: 'usage-only',
+        amount: null,
+        currency: 'USD',
+        costDriver: ctx.costDriver,
+        relatedFeature: 'data_collection',
+        shortExplanation: ctx.shortExplanation,
+        sourceOfTruth: 'collection_logs 집계 (최근 30일 성공 실행 기준)',
+        pricingRef: null,
+        noAmountReason: '정부 개방 API — 현재 사용량만 추적 중 (과금 없음)',
+        usageMetrics: [
+          { label: '실행 횟수',   value: runCount,    unit: '회',  formatted: `${formatNumber(runCount)}회` },
+          { label: '수집 건수',   value: totalItems,  unit: '건',  formatted: `${formatNumber(totalItems)}건` },
+          { label: '마지막 실행', value: 0, unit: '', formatted: row.last_run_at
+              ? new Date(row.last_run_at + 'Z').toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+              : '—' },
+        ],
+        jobName: row.scheduler_job_name,
+        lastRunAt: row.last_run_at,
+      };
+    });
+
+    res.json({ period: 'last_30d', items });
+  } catch (error) {
+    console.error('[Admin] GET /admin/cost/api-usage failed:', error);
+    res.status(500).json({ message: 'Failed to load API usage data' });
+  }
+});
 
 // ============================================================
 // Graceful Shutdown
