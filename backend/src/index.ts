@@ -9645,7 +9645,7 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
       })),
       embeddingToday: {
         count: embeddingTodayCount,
-        freeLimit: 1500, // gemini-embedding-001 무료 한도 (requests/day)
+        freeLimit: 1500000, // gemini-embedding-001 Tier 1 (결제 계정 연결) 기준 사실상 무제한
       },
       summary: {
         totalUsd,

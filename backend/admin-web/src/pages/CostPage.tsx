@@ -386,7 +386,7 @@ export default function CostPage() {
                 />
               </div>
               <p className="text-xs text-gray-400 mt-1">
-                무료 티어 한도 1,500건/일 · 초과 시 Billing 활성화 필요 ($0.15/1M tokens ≈ ₩200/월 @ DAU 1,000)
+                Tier 1 (결제 계정 연결) 기준 사실상 무제한 · $0.15/1M tokens ≈ ₩200/월 @ DAU 1,000
               </p>
             </div>
           );
