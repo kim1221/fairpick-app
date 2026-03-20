@@ -391,11 +391,30 @@ export default function CostPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cost/manual'] }),
   });
 
+  // 이번달 AI 비용은 forecast 계산용으로 별도 항상 조회
+  const thisMonthAiQuery = useQuery({
+    queryKey: ['cost/ai', 'this_month'],
+    queryFn: () => getAiCost('this_month'),
+    staleTime: 0,
+  });
+
   const totalAiUsd = aiQuery.data?.summary.totalUsd ?? 0;
   const totalStorageUsd =
     storageQuery.data?.items.reduce((s, i) => s + (i.amount ?? 0), 0) ?? 0;
   const totalInfraUsd =
     manualQuery.data?.items.reduce((s, i) => s + i.amount_usd, 0) ?? null;
+
+  // ── Forecast 계산 ───────────────────────────────────────────
+  const today = new Date();
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const daysPassed = today.getDate();
+  const forecastMultiplier = daysInMonth / daysPassed;
+  const thisMonthAi = thisMonthAiQuery.data?.summary.totalUsd ?? 0;
+  const forecastAi = thisMonthAi * forecastMultiplier;
+  const forecastInfra = totalInfraUsd ?? 0;
+  const forecastStorage = totalStorageUsd;
+  const forecastTotal = forecastAi + forecastInfra + forecastStorage;
+  const hasForecast = thisMonthAiQuery.isSuccess && manualQuery.isSuccess;
 
   return (
     <div className="space-y-8">
@@ -458,6 +477,42 @@ export default function CostPage() {
           <div className="text-xs text-gray-400 mt-1">Railway · Supabase · 도메인 / 월</div>
         </div>
       </div>
+
+      {/* ── 월 예산 Forecast ─────────────────────────────────────── */}
+      {hasForecast && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-sm font-semibold text-blue-900">이번달 예상 비용</h3>
+              <p className="text-xs text-blue-500 mt-0.5">
+                {today.getMonth() + 1}월 {daysPassed}일 기준 · {daysPassed}/{daysInMonth}일 경과
+                · 당월 누적 × {forecastMultiplier.toFixed(1)}배 추정
+              </p>
+            </div>
+            <div className="text-right">
+              <div className="text-2xl font-bold text-blue-900">${forecastTotal.toFixed(2)}</div>
+              <div className="text-xs text-blue-400">예상 월 합계</div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-white rounded-lg p-3">
+              <div className="text-xs text-gray-400 mb-1">AI 비용</div>
+              <div className="text-sm font-semibold text-gray-800">${forecastAi.toFixed(4)}</div>
+              <div className="text-xs text-gray-400">누적 ${thisMonthAi.toFixed(4)} × {forecastMultiplier.toFixed(1)}</div>
+            </div>
+            <div className="bg-white rounded-lg p-3">
+              <div className="text-xs text-gray-400 mb-1">인프라 비용</div>
+              <div className="text-sm font-semibold text-gray-800">${forecastInfra.toFixed(2)}</div>
+              <div className="text-xs text-gray-400">고정 (변동 없음)</div>
+            </div>
+            <div className="bg-white rounded-lg p-3">
+              <div className="text-xs text-gray-400 mb-1">스토리지 비용</div>
+              <div className="text-sm font-semibold text-gray-800">${forecastStorage.toFixed(4)}</div>
+              <div className="text-xs text-gray-400">현재 기준</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── AI 비용 ──────────────────────────────────────────────── */}
       <section>
