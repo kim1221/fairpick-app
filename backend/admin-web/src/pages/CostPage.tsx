@@ -478,41 +478,55 @@ export default function CostPage() {
         </div>
       </div>
 
-      {/* ── 월 예산 Forecast ─────────────────────────────────────── */}
-      {hasForecast && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="text-sm font-semibold text-blue-900">이번달 예상 비용</h3>
-              <p className="text-xs text-blue-500 mt-0.5">
-                {today.getMonth() + 1}월 {daysPassed}일 기준 · {daysPassed}/{daysInMonth}일 경과
-                · 당월 누적 × {forecastMultiplier.toFixed(1)}배 추정
-              </p>
+      {/* ── 월 누적 + Forecast ───────────────────────────────────── */}
+      {hasForecast && (() => {
+        const actualTotal = thisMonthAi + forecastInfra + forecastStorage;
+        return (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-4">
+            {/* 헤더: 누적 vs 예상 */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-xs text-blue-500 mb-1">이번달 누적 총액</div>
+                <div className="text-2xl font-bold text-blue-900">${actualTotal.toFixed(2)}</div>
+                <div className="text-xs text-blue-400 mt-0.5">
+                  AI ${thisMonthAi.toFixed(4)} + 인프라 ${forecastInfra.toFixed(2)} + 스토리지 ${forecastStorage.toFixed(4)}
+                </div>
+              </div>
+              <div className="border-l border-blue-200 pl-4">
+                <div className="text-xs text-blue-500 mb-1">
+                  월말 예상 비용
+                  <span className="ml-1 text-blue-300">({daysPassed}/{daysInMonth}일 경과 · AI 선형 추정)</span>
+                </div>
+                <div className="text-2xl font-bold text-blue-700">${forecastTotal.toFixed(2)}</div>
+                <div className="text-xs text-blue-300 mt-0.5">
+                  AI × {forecastMultiplier.toFixed(1)} 추정 — 배치 편중 시 실제와 다를 수 있음
+                </div>
+              </div>
             </div>
-            <div className="text-right">
-              <div className="text-2xl font-bold text-blue-900">${forecastTotal.toFixed(2)}</div>
-              <div className="text-xs text-blue-400">예상 월 합계</div>
+
+            {/* 항목별 breakdown */}
+            <div className="grid grid-cols-3 gap-3 border-t border-blue-200 pt-3">
+              <div className="bg-white rounded-lg p-3">
+                <div className="text-xs text-gray-400 mb-1">AI 비용</div>
+                <div className="text-sm font-semibold text-gray-800">
+                  ${thisMonthAi.toFixed(4)} <span className="text-gray-400 font-normal text-xs">누적</span>
+                </div>
+                <div className="text-xs text-gray-400">→ 예상 ${forecastAi.toFixed(4)}</div>
+              </div>
+              <div className="bg-white rounded-lg p-3">
+                <div className="text-xs text-gray-400 mb-1">인프라 비용</div>
+                <div className="text-sm font-semibold text-gray-800">${forecastInfra.toFixed(2)}</div>
+                <div className="text-xs text-gray-400">고정 (변동 없음)</div>
+              </div>
+              <div className="bg-white rounded-lg p-3">
+                <div className="text-xs text-gray-400 mb-1">스토리지 비용</div>
+                <div className="text-sm font-semibold text-gray-800">${forecastStorage.toFixed(4)}</div>
+                <div className="text-xs text-gray-400">현재 기준</div>
+              </div>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="bg-white rounded-lg p-3">
-              <div className="text-xs text-gray-400 mb-1">AI 비용</div>
-              <div className="text-sm font-semibold text-gray-800">${forecastAi.toFixed(4)}</div>
-              <div className="text-xs text-gray-400">누적 ${thisMonthAi.toFixed(4)} × {forecastMultiplier.toFixed(1)}</div>
-            </div>
-            <div className="bg-white rounded-lg p-3">
-              <div className="text-xs text-gray-400 mb-1">인프라 비용</div>
-              <div className="text-sm font-semibold text-gray-800">${forecastInfra.toFixed(2)}</div>
-              <div className="text-xs text-gray-400">고정 (변동 없음)</div>
-            </div>
-            <div className="bg-white rounded-lg p-3">
-              <div className="text-xs text-gray-400 mb-1">스토리지 비용</div>
-              <div className="text-sm font-semibold text-gray-800">${forecastStorage.toFixed(4)}</div>
-              <div className="text-xs text-gray-400">현재 기준</div>
-            </div>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── AI 비용 ──────────────────────────────────────────────── */}
       <section>
