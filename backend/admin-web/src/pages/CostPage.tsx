@@ -225,7 +225,7 @@ const EXTERNAL_CONSOLE_LINKS = [
     key: 'supabase',
     name: 'Supabase Billing',
     description: 'DB 플랜 · 스토리지 · API 사용량',
-    url: 'https://supabase.com/dashboard',
+    url: 'https://supabase.com/dashboard/org/niszxxiqgazckhcnvrjx/usage?projectRef=uxungcrcpsahwmrktmdd',
     icon: '🗄️',
   },
   {
