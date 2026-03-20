@@ -9591,8 +9591,8 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
             : isEmbedding
               ? '무료 (gemini-embedding-001 기준)'
               : isGrounding
-                ? '$0.075/1M input · $0.30/1M output + $0.035/grounding query (gemini-2.5-flash 기준)'
-                : '$0.075/1M input · $0.30/1M output (gemini-2.5-flash 기준)',
+                ? '$0.30/1M input · $2.50/1M output(non-thinking) + $0.035/grounding query (gemini-2.5-flash 실제 billing 기준)'
+                : '$0.30/1M input · $2.50/1M output(non-thinking) (gemini-2.5-flash 실제 billing 기준)',
           models: new Set(row.models),
           requests,
           promptTokens: prompt,

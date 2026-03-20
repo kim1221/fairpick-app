@@ -28,8 +28,9 @@ type GeminiPricing = ModelPricing;
 
 const PRICING: Record<string, ModelPricing> = {
   // ── Gemini ──────────────────────────────────────────────────
-  // Gemini 2.5 Flash (최신)
-  'gemini-2.5-flash':             { inputPer1M: 0.075,  outputPer1M: 0.30 },
+  // Gemini 2.5 Flash (최신) — 실제 Google Cloud Billing 역산 기준 (2026-03)
+  // Google Cloud SKU: input $0.30/1M · non-thinking output $2.50/1M
+  'gemini-2.5-flash':             { inputPer1M: 0.30,   outputPer1M: 2.50 },
   // Gemini 1.5 Pro
   'gemini-1.5-pro':               { inputPer1M: 1.25,   outputPer1M: 5.00 },
   'gemini-1.5-pro-002':           { inputPer1M: 1.25,   outputPer1M: 5.00 },

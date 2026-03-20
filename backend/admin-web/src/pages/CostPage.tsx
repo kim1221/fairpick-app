@@ -204,6 +204,46 @@ function DailyTrendChart({ data }: { data: AiDailyTrend[] }) {
   );
 }
 
+// ─── 외부 콘솔 링크 데이터 ───────────────────────────────────────────────────
+
+const EXTERNAL_CONSOLE_LINKS = [
+  {
+    key: 'google-cloud-billing',
+    name: 'Google Cloud Billing',
+    description: 'Gemini API 실제 청구 · SKU별 상세',
+    url: 'https://console.cloud.google.com/billing/018AA6-4B2C51-5B0B75/reports',
+    icon: '☁️',
+  },
+  {
+    key: 'google-ai-studio',
+    name: 'Google AI Studio',
+    description: 'API 키 · 프로젝트 사용량',
+    url: 'https://aistudio.google.com',
+    icon: '🤖',
+  },
+  {
+    key: 'railway',
+    name: 'Railway Billing',
+    description: '서버 월 청구 · 리소스 사용량',
+    url: 'https://railway.app/account/billing',
+    icon: '🚂',
+  },
+  {
+    key: 'supabase',
+    name: 'Supabase Billing',
+    description: 'DB 플랜 · 스토리지 · API 사용량',
+    url: 'https://app.supabase.com/project/uxungcrcpsahwmrktmdd/settings/billing',
+    icon: '🗄️',
+  },
+  {
+    key: 'cloudflare-r2',
+    name: 'Cloudflare R2',
+    description: 'R2 스토리지 · CDN 트래픽 사용량',
+    url: 'https://dash.cloudflare.com/?to=/:account/r2/overview',
+    icon: '🔶',
+  },
+] as const;
+
 // ─── CostPage ─────────────────────────────────────────────────────────────────
 
 const PERIOD_OPTIONS: { value: AiPeriod; label: string }[] = [
@@ -259,16 +299,8 @@ export default function CostPage() {
             현재 Fairpick 운영 비용 항목별 추적 — 코드/DB에서 직접 수집 가능한 항목 중심
           </p>
           {/* 로그 시작일 경고 */}
-          <p className="text-xs text-orange-600 mt-1.5 flex items-center gap-1">
-            <span>⚠</span>
-            <span>
-              내부 AI 로그 집계 시작일: <strong>2026-03-13</strong> — 그 이전 호출(~3/12)은 미포함.
-              실제 정산 기준은{' '}
-              <span className="underline decoration-dotted cursor-help" title="Google AI Studio 또는 Google Cloud Console → Billing에서 확인">
-                Google AI Studio / Cloud Billing
-              </span>
-              에서 확인하세요.
-            </span>
+          <p className="text-xs text-orange-600 mt-1.5">
+            ⚠ AI 로그 집계 시작: <strong>2026-03-13</strong> · 이전 비용 미포함 · 정확한 청구액은 아래 Google Cloud Billing에서 확인
           </p>
         </div>
         {/* 기간 탭 + 새로고침 */}
@@ -324,21 +356,10 @@ export default function CostPage() {
           subtitle={aiQuery.data?.summary.costTypeNote}
         />
         {/* 집계 범위 안내 */}
-        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-xs text-amber-800">
-          <p className="font-semibold mb-1.5">⚠️ 운영용 집계값 — 실제 provider 청구액과 차이가 있을 수 있습니다.</p>
-          <div className="flex gap-6">
-            <div className="space-y-0.5">
-              <p className="font-medium text-amber-700">포함되는 항목</p>
-              <p>✅ 입력/출력 토큰 비용 (usage × 단가)</p>
-              <p>✅ Grounding 쿼리 요금 ($0.035/건) — 해당 항목만</p>
-            </div>
-            <div className="space-y-0.5">
-              <p className="font-medium text-amber-700">포함되지 않는 항목</p>
-              <p>— Context caching 비용 (현재 미사용)</p>
-              <p>— Thinking token 비용 (thinkingBudget=0으로 비활성화)</p>
-              <p>— Provider 실제 청구액 (Gemini AI Studio 기준 아님)</p>
-            </div>
-          </div>
+        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-xs text-amber-800 space-y-1">
+          <p className="font-semibold">⚠️ 내부 로그 기반 추정값 — 단가는 Google Cloud Billing 역산 기준</p>
+          <p>단가: <span className="font-mono">$0.30/1M input · $2.50/1M output (gemini-2.5-flash non-thinking)</span></p>
+          <p className="text-amber-600">2026-03-13 이전 호출 미포함 · 실제 청구 확인은 위 Google Cloud Billing 링크에서</p>
         </div>
         {aiQuery.isLoading && <div className="text-sm text-gray-400">불러오는 중...</div>}
         {aiQuery.isError && (
@@ -406,6 +427,36 @@ export default function CostPage() {
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {apiUsageQuery.data?.items.map((item) => (
             <CostCard key={item.id} item={item} />
+          ))}
+        </div>
+      </section>
+
+      {/* ── 외부 콘솔 링크 ───────────────────────────────────────── */}
+      <section>
+        <SectionHeader
+          title="외부 콘솔"
+          subtitle="실제 청구 기준 확인 — provider 대시보드로 바로 이동"
+        />
+        <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+          {EXTERNAL_CONSOLE_LINKS.map((link) => (
+            <a
+              key={link.key}
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-start gap-3 bg-white border border-gray-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition-all group"
+            >
+              <span className="text-xl shrink-0 mt-0.5">{link.icon}</span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm font-semibold text-gray-800 group-hover:text-blue-600 transition-colors">
+                    {link.name}
+                  </span>
+                  <span className="text-gray-300 text-xs">↗</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">{link.description}</p>
+              </div>
+            </a>
           ))}
         </div>
       </section>
