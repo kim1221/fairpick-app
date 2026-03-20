@@ -9631,6 +9631,32 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
         };
       });
 
+    // vector_search 항목이 없으면 빈 카드로 항상 표시 (사용자 없어도 모니터링 가능)
+    if (!itemMap.has('gemini-gemini-vector-search')) {
+      const ctx = AI_USAGE_CONTEXT['vector_search'];
+      items.push({
+        id: ctx.itemId,
+        category: 'ai',
+        provider: 'Google Gemini',
+        name: ctx.name,
+        costType: 'aggregated',
+        amount: 0,
+        currency: 'USD',
+        costDriver: ctx.costDriver,
+        relatedFeature: ctx.relatedFeature,
+        shortExplanation: ctx.shortExplanation,
+        sourceOfTruth: 'DB ai_usage_logs 기반 집계 — 아직 검색 기록 없음',
+        pricingRef: '$0.15/1M input tokens (gemini-embedding-001 Tier 1 기준)',
+        noAmountReason: undefined,
+        usageMetrics: [
+          { label: '요청 수',   value: 0, unit: '건',    formatted: '0건' },
+          { label: '입력 토큰', value: 0, unit: 'tokens', formatted: '0' },
+          { label: '합계 비용', value: 0, unit: 'USD',    formatted: '$0.0000' },
+        ],
+        models: ['gemini-embedding-001'],
+      });
+    }
+
     // 오늘 임베딩 호출 수 (무료 한도 모니터링용 — 기간 필터와 무관하게 항상 오늘 기준)
     const { rows: embeddingTodayRows } = await pool.query<{ count: string }>(`
       SELECT COUNT(*)::text AS count
