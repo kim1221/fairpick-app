@@ -232,7 +232,7 @@ const EXTERNAL_CONSOLE_LINKS = [
     key: 'cloudflare-r2',
     name: 'Cloudflare R2',
     description: 'R2 스토리지 · CDN 트래픽 사용량',
-    url: 'https://dash.cloudflare.com/?to=/:account/r2/overview',
+    url: 'https://dash.cloudflare.com/a5492be37e1709c8bd848b7fda820789/r2/overview',
     icon: '🔶',
   },
 ] as const;
