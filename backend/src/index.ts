@@ -9390,7 +9390,7 @@ const AI_USAGE_CONTEXT: Record<string, {
     name: 'Gemini — 벡터 임베딩',
     costDriver: '벡터 임베딩 생성 (embedNewEvents · 매일 05:00)',
     relatedFeature: 'embedding',
-    shortExplanation: '이벤트 의미 검색을 위한 벡터 임베딩을 생성합니다. gemini-embedding-001은 현재 무료입니다.',
+    shortExplanation: '이벤트 의미 검색을 위한 벡터 임베딩을 생성합니다. $0.15/1M tokens — DAU 1,000 × 10회 기준 ≈ ₩200/월',
   },
   popup_discovery: {
     itemId: 'gemini-popup-discovery',

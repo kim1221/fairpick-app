@@ -40,8 +40,8 @@ const PRICING: Record<string, ModelPricing> = {
   // Gemini Pro (legacy)
   'gemini-pro':                   { inputPer1M: 0.50,   outputPer1M: 1.50 },
   // Embedding (입출력 구분 없음 — 입력만 계산)
-  'gemini-embedding-001':         { inputPer1M: 0.00,   outputPer1M: 0.00 }, // 무료 (2026-03 기준)
-  'text-embedding-004':           { inputPer1M: 0.00,   outputPer1M: 0.00 }, // 무료
+  'gemini-embedding-001':         { inputPer1M: 0.15,   outputPer1M: 0.00 }, // $0.15/1M input (유료 티어 기준, 2026-03)
+  'text-embedding-004':           { inputPer1M: 0.15,   outputPer1M: 0.00 }, // $0.15/1M input (유료 티어 기준)
   // ── OpenAI ──────────────────────────────────────────────────
   'gpt-4o-mini':                  { inputPer1M: 0.15,   outputPer1M: 0.60 },
   'gpt-4o':                       { inputPer1M: 2.50,   outputPer1M: 10.00 },

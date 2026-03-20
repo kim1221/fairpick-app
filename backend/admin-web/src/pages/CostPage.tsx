@@ -386,7 +386,7 @@ export default function CostPage() {
                 />
               </div>
               <p className="text-xs text-gray-400 mt-1">
-                gemini-embedding-001 무료 한도 1,500건/일 — 검색 쿼리 임베딩 (캐시 적용)
+                무료 티어 한도 1,500건/일 · 초과 시 Billing 활성화 필요 ($0.15/1M tokens ≈ ₩200/월 @ DAU 1,000)
               </p>
             </div>
           );
