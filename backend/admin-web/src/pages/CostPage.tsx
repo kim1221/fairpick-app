@@ -370,7 +370,7 @@ export default function CostPage() {
                          'bg-gray-50 border-gray-200'
             }`}>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="font-medium text-gray-700">임베딩 API 오늘 호출 수</span>
+                <span className="font-medium text-gray-700">검색 쿼리 임베딩 오늘 호출 수 (사용자 검색)</span>
                 <span className={`text-xs font-mono font-semibold ${
                   isDanger ? 'text-red-600' : isWarn ? 'text-yellow-700' : 'text-gray-600'
                 }`}>

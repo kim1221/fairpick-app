@@ -68,7 +68,8 @@ export function estimateGeminiCost(
 export type AiUsageType =
   | 'extraction'       // 이벤트 정보 추출 (주 엔리치)
   | 'grounding'        // Gemini Google Search 그라운딩
-  | 'embedding'        // 벡터 임베딩
+  | 'embedding'        // 이벤트 문서 벡터 임베딩 (스케줄러)
+  | 'vector_search'    // 사용자 검색어 벡터 임베딩 (실시간)
   | 'caption'          // 캡션 파싱
   | 'tags'             // 태그 생성
   | 'seed'             // Hot Suggestion 시드 추출

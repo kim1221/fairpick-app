@@ -129,7 +129,7 @@ export async function embedQuery(text: string): Promise<number[]> {
   });
 
   const approxTokens = Math.ceil(text.length / 4);
-  logAiUsage({ model: MODEL, usageType: 'embedding', promptTokens: approxTokens, responseTokens: 0 });
+  logAiUsage({ model: MODEL, usageType: 'vector_search', promptTokens: approxTokens, responseTokens: 0 });
 
   const embedding = result.embedding.values;
   cacheSet(key, embedding);

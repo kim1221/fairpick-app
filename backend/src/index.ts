@@ -9387,10 +9387,17 @@ const AI_USAGE_CONTEXT: Record<string, {
   },
   embedding: {
     itemId: 'gemini-embedding',
-    name: 'Gemini — 벡터 임베딩',
-    costDriver: '벡터 임베딩 생성 (embedNewEvents · 매일 05:00)',
+    name: 'Gemini — 이벤트 벡터 임베딩 (스케줄러)',
+    costDriver: '신규 이벤트 문서 벡터 생성 (embedNewEvents · 매일 05:00)',
     relatedFeature: 'embedding',
-    shortExplanation: '이벤트 의미 검색을 위한 벡터 임베딩을 생성합니다. $0.15/1M tokens — DAU 1,000 × 10회 기준 ≈ ₩200/월',
+    shortExplanation: '이벤트를 벡터로 변환해 의미 검색 인덱스를 구축합니다. $0.15/1M tokens',
+  },
+  vector_search: {
+    itemId: 'gemini-vector-search',
+    name: 'Gemini — 검색 쿼리 임베딩 (사용자)',
+    costDriver: '사용자 검색어 실시간 벡터 변환 (embedQuery · 검색 시마다)',
+    relatedFeature: 'vector_search',
+    shortExplanation: '검색어를 벡터로 변환해 의미 기반 검색에 사용합니다. 동일 쿼리는 캐시 재사용. $0.15/1M tokens',
   },
   popup_discovery: {
     itemId: 'gemini-popup-discovery',
@@ -9628,7 +9635,7 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
     const { rows: embeddingTodayRows } = await pool.query<{ count: string }>(`
       SELECT COUNT(*)::text AS count
       FROM ai_usage_logs
-      WHERE usage_type = 'embedding'
+      WHERE usage_type = 'vector_search'
         AND created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Seoul' AT TIME ZONE 'UTC')
         AND success = true
     `);
