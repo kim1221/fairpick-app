@@ -9589,7 +9589,7 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
           pricingRef: row.provider === 'openai'
             ? '$0.15/1M input · $0.60/1M output (gpt-4o-mini 기준)'
             : isEmbedding
-              ? '무료 (gemini-embedding-001 기준)'
+              ? '$0.15/1M input tokens (gemini-embedding-001 Tier 1 기준)'
               : isGrounding
                 ? '$0.30/1M input · $2.50/1M output(non-thinking) + $0.035/grounding query (gemini-2.5-flash 실제 billing 기준)'
                 : '$0.30/1M input · $2.50/1M output(non-thinking) (gemini-2.5-flash 실제 billing 기준)',
