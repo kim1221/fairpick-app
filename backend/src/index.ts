@@ -9416,9 +9416,9 @@ const AI_USAGE_CONTEXT: Record<string, {
   grounding: {
     itemId: 'gemini-grounding',
     name: 'Gemini — 검색 그라운딩',
-    costDriver: 'Gemini Google Search 그라운딩',
+    costDriver: 'Gemini Google Search 그라운딩 (sections 없는 이벤트 보강 + 어드민 직접 조회)',
     relatedFeature: 'ai_enrichment',
-    shortExplanation: 'Gemini의 웹 검색 기반 이벤트 정보 보강입니다.',
+    shortExplanation: '크롤링 데이터가 없는 이벤트를 Google Search로 직접 검색해 보강합니다. 토큰 비용 외 쿼리 요금($0.035/건)이 추가됩니다.',
   },
   seed: {
     itemId: 'gemini-other',
@@ -9530,6 +9530,11 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
     `);
 
     // byType → CostItems (같은 itemId는 merge)
+    // Grounding with Google Search 쿼리 요금: $35/1000 requests = $0.035/request
+    // 토큰 비용과 별도로 청구되는 항목 — 현재 estimated_cost_usd에 미포함
+    const GROUNDING_QUERY_FEE_USD = 0.035;
+    const GROUNDING_TYPES = new Set(['grounding', 'popup_discovery', 'hot_rating']);
+
     const itemMap = new Map<string, {
       id: string; category: string; provider: string; name: string;
       costType: string; amount: number; currency: string;
@@ -9537,13 +9542,18 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
       sourceOfTruth: string; pricingRef: string | null;
       models: Set<string>;
       requests: number; promptTokens: number; responseTokens: number; totalTokens: number;
+      groundingQueryCost: number;
     }>();
 
     for (const row of byType) {
       const ctx = AI_USAGE_CONTEXT[row.usage_type] ?? AI_USAGE_CONTEXT['other'];
       const key = `${row.provider}-${ctx.itemId}`;
-      const costUsd = parseFloat(row.cost_usd) || 0;
       const requests = parseInt(row.requests) || 0;
+      // 토큰 기반 비용 + grounding 쿼리 요금 합산
+      const groundingQueryCost = GROUNDING_TYPES.has(row.usage_type)
+        ? requests * GROUNDING_QUERY_FEE_USD
+        : 0;
+      const costUsd = (parseFloat(row.cost_usd) || 0) + groundingQueryCost;
       const prompt = parseInt(row.prompt_tokens) || 0;
       const response = parseInt(row.response_tokens) || 0;
       const total = parseInt(row.total_tokens) || 0;
@@ -9555,9 +9565,12 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
         existing.promptTokens += prompt;
         existing.responseTokens += response;
         existing.totalTokens += total;
+        existing.groundingQueryCost += groundingQueryCost;
         row.models.forEach((m) => existing.models.add(m));
       } else {
         const providerLabel = row.provider === 'openai' ? 'OpenAI' : 'Google Gemini';
+        const isGrounding = GROUNDING_TYPES.has(row.usage_type);
+        const isEmbedding = row.models.some((m) => m.includes('embedding'));
         // embedding은 무료이므로 amount=0이어도 집계값으로 표시
         itemMap.set(key, {
           id: ctx.itemId,
@@ -9570,33 +9583,46 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
           costDriver: ctx.costDriver,
           relatedFeature: ctx.relatedFeature,
           shortExplanation: ctx.shortExplanation,
-          sourceOfTruth: 'DB ai_usage_logs 기반 집계 (usage × 단가) — provider 청구서 기준 아님',
+          sourceOfTruth: isGrounding
+            ? 'DB ai_usage_logs 기반 집계 (토큰 비용 + grounding 쿼리 요금 $0.035/건 합산) — provider 청구서 기준 아님'
+            : 'DB ai_usage_logs 기반 집계 (usage × 단가) — provider 청구서 기준 아님',
           pricingRef: row.provider === 'openai'
             ? '$0.15/1M input · $0.60/1M output (gpt-4o-mini 기준)'
-            : row.models.some((m) => m.includes('embedding'))
+            : isEmbedding
               ? '무료 (gemini-embedding-001 기준)'
-              : '$0.075/1M input · $0.30/1M output (gemini-2.5-flash 기준)',
+              : isGrounding
+                ? '$0.075/1M input · $0.30/1M output + $0.035/grounding query (gemini-2.5-flash 기준)'
+                : '$0.075/1M input · $0.30/1M output (gemini-2.5-flash 기준)',
           models: new Set(row.models),
           requests,
           promptTokens: prompt,
           responseTokens: response,
           totalTokens: total,
+          groundingQueryCost,
         });
       }
     }
 
     const items = Array.from(itemMap.values())
       .sort((a, b) => b.amount - a.amount)
-      .map(({ models, requests, promptTokens, responseTokens, totalTokens, ...item }) => ({
-        ...item,
-        usageMetrics: [
+      .map(({ models, requests, promptTokens, responseTokens, totalTokens, groundingQueryCost, ...item }) => {
+        const tokenCost = item.amount - groundingQueryCost;
+        const metrics = [
           { label: '요청 수',     value: requests,       unit: '건',    formatted: `${formatNumber(requests)}건` },
           { label: '입력 토큰',   value: promptTokens,   unit: 'tokens', formatted: formatNumber(promptTokens) },
           { label: '출력 토큰',   value: responseTokens, unit: 'tokens', formatted: formatNumber(responseTokens) },
-          { label: '추정 비용',   value: item.amount,    unit: 'USD',   formatted: `$${item.amount.toFixed(4)}` },
-        ],
-        models: Array.from(models),
-      }));
+        ];
+        if (groundingQueryCost > 0) {
+          metrics.push({ label: '토큰 비용',          value: tokenCost,          unit: 'USD', formatted: `$${tokenCost.toFixed(4)}` });
+          metrics.push({ label: 'Grounding 쿼리 요금', value: groundingQueryCost, unit: 'USD', formatted: `$${groundingQueryCost.toFixed(4)} ($0.035×${requests}건)` });
+        }
+        metrics.push({ label: '합계 비용', value: item.amount, unit: 'USD', formatted: `$${item.amount.toFixed(4)}` });
+        return {
+          ...item,
+          usageMetrics: metrics,
+          models: Array.from(models),
+        };
+      });
 
     const totalUsd = items.reduce((s, i) => s + i.amount, 0);
     res.json({
@@ -9757,9 +9783,12 @@ app.get('/admin/cost/storage', requireAdminAuth, async (_req, res) => {
       continuationToken = resp.NextContinuationToken;
     } while (continuationToken);
 
-    // R2 비용 추정: $0.015/GB/월 저장
+    // R2 실제 요금: 무료 구간(10GB/월) 적용 후 초과분에만 $0.015/GB/월
+    const R2_FREE_TIER_GB = 10;
     const storageGb = totalBytes / 1e9;
-    const estimatedStorageCost = storageGb * 0.015;
+    const billableGb = Math.max(0, storageGb - R2_FREE_TIER_GB);
+    const actualStorageCost = billableGb * 0.015;
+    const inFreeTier = storageGb < R2_FREE_TIER_GB;
 
     const payload = {
       items: [{
@@ -9767,18 +9796,24 @@ app.get('/admin/cost/storage', requireAdminAuth, async (_req, res) => {
         category: 'storage',
         provider: 'Cloudflare R2',
         name: 'R2 이미지 스토리지',
-        costType: 'estimated',
-        amount: estimatedStorageCost,
+        costType: inFreeTier ? 'aggregated' : 'estimated',
+        amount: actualStorageCost,  // 무료 구간 내면 $0.00
         currency: 'USD',
         costDriver: '이벤트 이미지 자동 수집 및 WebP 변환 저장 (geoRefreshPipeline 실행 시)',
         relatedFeature: 'image_storage',
-        shortExplanation: '수집된 이벤트 이미지를 WebP로 최적화하여 R2에 저장합니다. 저장 비용은 용량 × 단가로 추정합니다. CDN 읽기 요청 비용은 현재 측정 불가입니다.',
-        sourceOfTruth: 'S3 ListObjectsV2 용량 측정 × $0.015/GB/월 — CDN 요청 비용 제외',
-        pricingRef: '$0.015/GB/월 저장 · $0.36/1M 읽기 요청 (CDN은 2차 연동)',
+        shortExplanation: inFreeTier
+          ? `현재 ${formatBytes(totalBytes)}으로 Cloudflare R2 무료 구간(${R2_FREE_TIER_GB}GB/월) 이내입니다. 실제 저장 비용은 $0.00입니다.`
+          : `현재 ${formatBytes(totalBytes)}으로 무료 구간(${R2_FREE_TIER_GB}GB/월)을 초과했습니다. 초과분(${(billableGb).toFixed(3)}GB) × $0.015/GB로 계산됩니다.`,
+        sourceOfTruth: 'S3 ListObjectsV2 용량 측정 + Cloudflare R2 무료 구간(10GB/월) 적용 — CDN 읽기 요청 비용 제외',
+        pricingRef: '무료: 10GB 저장 · 1M Class A ops · 10M Class B ops / 월. 초과 시 $0.015/GB/월',
+        noAmountReason: inFreeTier
+          ? `현재 ${formatBytes(totalBytes)} — 무료 구간 ${R2_FREE_TIER_GB}GB/월 이내 (요금 없음)`
+          : undefined,
         usageMetrics: [
-          { label: '이미지 수',      value: objectCount,    unit: '개',   formatted: `${formatNumber(objectCount)}개` },
-          { label: '총 용량',        value: totalBytes,     unit: 'bytes', formatted: formatBytes(totalBytes) },
-          { label: '저장 비용 추정', value: estimatedStorageCost, unit: 'USD', formatted: `$${estimatedStorageCost.toFixed(4)}` },
+          { label: '이미지 수',  value: objectCount, unit: '개',   formatted: `${formatNumber(objectCount)}개` },
+          { label: '총 용량',    value: totalBytes,  unit: 'bytes', formatted: formatBytes(totalBytes) },
+          { label: '무료 구간',  value: R2_FREE_TIER_GB, unit: 'GB', formatted: `${R2_FREE_TIER_GB}GB/월 (현재 ${(storageGb * 1024).toFixed(1)}MB 사용)` },
+          { label: '실제 비용',  value: actualStorageCost, unit: 'USD', formatted: actualStorageCost === 0 ? '$0.00 (무료)' : `$${actualStorageCost.toFixed(4)}` },
         ],
       }],
     };

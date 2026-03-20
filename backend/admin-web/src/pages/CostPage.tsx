@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getAiCost, getDbCost, getStorageCost, getApiUsage } from '../services/costApi';
 import type { CostItem, CostType, AiPeriod, AiDailyTrend } from '../types/cost';
 
@@ -214,10 +214,19 @@ const PERIOD_OPTIONS: { value: AiPeriod; label: string }[] = [
 
 export default function CostPage() {
   const [period, setPeriod] = useState<AiPeriod>('this_month');
+  const queryClient = useQueryClient();
+
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['cost/ai'] });
+    queryClient.invalidateQueries({ queryKey: ['cost/db'] });
+    queryClient.invalidateQueries({ queryKey: ['cost/storage'] });
+    queryClient.invalidateQueries({ queryKey: ['cost/api-usage'] });
+  };
 
   const aiQuery = useQuery({
     queryKey: ['cost/ai', period],
     queryFn: () => getAiCost(period),
+    staleTime: 0,  // 항상 최신 데이터 조회
   });
 
   const dbQuery = useQuery({
@@ -249,22 +258,43 @@ export default function CostPage() {
           <p className="text-sm text-gray-500 mt-1">
             현재 Fairpick 운영 비용 항목별 추적 — 코드/DB에서 직접 수집 가능한 항목 중심
           </p>
+          {/* 로그 시작일 경고 */}
+          <p className="text-xs text-orange-600 mt-1.5 flex items-center gap-1">
+            <span>⚠</span>
+            <span>
+              내부 AI 로그 집계 시작일: <strong>2026-03-13</strong> — 그 이전 호출(~3/12)은 미포함.
+              실제 정산 기준은{' '}
+              <span className="underline decoration-dotted cursor-help" title="Google AI Studio 또는 Google Cloud Console → Billing에서 확인">
+                Google AI Studio / Cloud Billing
+              </span>
+              에서 확인하세요.
+            </span>
+          </p>
         </div>
-        {/* 기간 탭 */}
-        <div className="flex bg-gray-100 rounded-lg p-1 gap-1">
-          {PERIOD_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setPeriod(opt.value)}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                period === opt.value
-                  ? 'bg-white shadow text-gray-900'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+        {/* 기간 탭 + 새로고침 */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+            title="모든 비용 데이터 새로고침"
+          >
+            ↻ 새로고침
+          </button>
+          <div className="flex bg-gray-100 rounded-lg p-1 gap-1">
+            {PERIOD_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setPeriod(opt.value)}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  period === opt.value
+                    ? 'bg-white shadow text-gray-900'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -293,6 +323,23 @@ export default function CostPage() {
           title="AI 비용"
           subtitle={aiQuery.data?.summary.costTypeNote}
         />
+        {/* 집계 범위 안내 */}
+        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-xs text-amber-800">
+          <p className="font-semibold mb-1.5">⚠️ 운영용 집계값 — 실제 provider 청구액과 차이가 있을 수 있습니다.</p>
+          <div className="flex gap-6">
+            <div className="space-y-0.5">
+              <p className="font-medium text-amber-700">포함되는 항목</p>
+              <p>✅ 입력/출력 토큰 비용 (usage × 단가)</p>
+              <p>✅ Grounding 쿼리 요금 ($0.035/건) — 해당 항목만</p>
+            </div>
+            <div className="space-y-0.5">
+              <p className="font-medium text-amber-700">포함되지 않는 항목</p>
+              <p>— Context caching 비용 (현재 미사용)</p>
+              <p>— Thinking token 비용 (thinkingBudget=0으로 비활성화)</p>
+              <p>— Provider 실제 청구액 (Gemini AI Studio 기준 아님)</p>
+            </div>
+          </div>
+        </div>
         {aiQuery.isLoading && <div className="text-sm text-gray-400">불러오는 중...</div>}
         {aiQuery.isError && (
           <div className="text-sm text-red-500">데이터를 불러오지 못했습니다.</div>

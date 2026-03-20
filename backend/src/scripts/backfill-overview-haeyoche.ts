@@ -12,6 +12,7 @@
 
 import { pool } from '../db';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { logGeminiUsage } from '../lib/aiUsageLogger';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-pro';
@@ -66,6 +67,7 @@ ${overview}
 
   try {
     const result = await model.generateContent(prompt);
+    logGeminiUsage(result.response, GEMINI_MODEL, 'extraction');
     const text = result.response.text().trim();
 
     // 빈 응답 또는 너무 짧은 응답 거부

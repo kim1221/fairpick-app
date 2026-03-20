@@ -11,6 +11,7 @@
  */
 
 import { pool } from '../db';
+import { logAiUsage } from '../lib/aiUsageLogger';
 import * as dotenv from 'dotenv';
 
 // .env 파일 로드
@@ -61,9 +62,18 @@ async function callGeminiWithGrounding(prompt: string): Promise<string> {
     throw new Error(`Gemini API error: ${response.statusText}`);
   }
 
-  const data = await response.json();
+  const data = await response.json() as any;
   const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  
+
+  // AI 사용량 로깅 (grounding 쿼리 요금 포함)
+  logAiUsage({
+    model: 'gemini-2.5-flash',
+    usageType: 'hot_rating',
+    promptTokens:   data.usageMetadata?.promptTokenCount    ?? 0,
+    responseTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
+    totalTokens:    data.usageMetadata?.totalTokenCount      ?? undefined,
+  });
+
   if (!content) {
     throw new Error('No content in Gemini response');
   }
