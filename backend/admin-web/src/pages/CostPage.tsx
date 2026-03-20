@@ -222,13 +222,6 @@ const EXTERNAL_CONSOLE_LINKS = [
     icon: '🤖',
   },
   {
-    key: 'railway',
-    name: 'Railway Billing',
-    description: '서버 월 청구 · 리소스 사용량',
-    url: 'https://railway.app/account/billing',
-    icon: '🚂',
-  },
-  {
     key: 'supabase',
     name: 'Supabase Billing',
     description: 'DB 플랜 · 스토리지 · API 사용량',
@@ -465,7 +458,7 @@ export default function CostPage() {
       <div className="border border-dashed border-gray-200 rounded-xl p-5 text-sm text-gray-400 space-y-1">
         <p className="font-medium text-gray-500">2차 연동 예정 항목</p>
         <ul className="list-disc list-inside space-y-0.5 text-xs">
-          <li>Railway 서버 비용 — 수동 입력 UI</li>
+          <li>Railway 서버 비용 ($5/월 Hobby 고정) — 수동 입력 UI</li>
           <li>Supabase 플랜 / 스토리지 상세 — Management API 연동</li>
           <li>Cloudflare R2 CDN 트래픽 비용 — Cloudflare API 연동</li>
           <li>도메인 / 기타 고정비 — 수동 입력 UI</li>
