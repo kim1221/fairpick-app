@@ -52,6 +52,10 @@ export interface AiCostResponse {
   period: string;
   items: CostItem[];
   dailyTrend: AiDailyTrend[];
+  embeddingToday: {
+    count: number;
+    freeLimit: number;
+  };
   summary: {
     totalUsd: number;
     totalExactUsd: number;

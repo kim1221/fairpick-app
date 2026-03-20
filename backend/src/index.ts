@@ -9624,6 +9624,16 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
         };
       });
 
+    // 오늘 임베딩 호출 수 (무료 한도 모니터링용 — 기간 필터와 무관하게 항상 오늘 기준)
+    const { rows: embeddingTodayRows } = await pool.query<{ count: string }>(`
+      SELECT COUNT(*)::text AS count
+      FROM ai_usage_logs
+      WHERE usage_type = 'embedding'
+        AND created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Seoul' AT TIME ZONE 'UTC')
+        AND success = true
+    `);
+    const embeddingTodayCount = parseInt(embeddingTodayRows[0]?.count ?? '0') || 0;
+
     const totalUsd = items.reduce((s, i) => s + i.amount, 0);
     res.json({
       period,
@@ -9633,6 +9643,10 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
         costUsd: parseFloat(r.cost_usd) || 0,
         requests: parseInt(r.requests) || 0,
       })),
+      embeddingToday: {
+        count: embeddingTodayCount,
+        freeLimit: 1500, // gemini-embedding-001 무료 한도 (requests/day)
+      },
       summary: {
         totalUsd,
         totalExactUsd: totalUsd,

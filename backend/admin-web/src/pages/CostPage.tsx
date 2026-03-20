@@ -358,6 +358,39 @@ export default function CostPage() {
         {aiQuery.isError && (
           <div className="text-sm text-red-500">데이터를 불러오지 못했습니다.</div>
         )}
+        {aiQuery.data?.embeddingToday && (() => {
+          const { count, freeLimit } = aiQuery.data.embeddingToday;
+          const pct = Math.min(Math.round((count / freeLimit) * 100), 100);
+          const isWarn = pct >= 67;
+          const isDanger = pct >= 93;
+          return (
+            <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
+              isDanger ? 'bg-red-50 border-red-200' :
+              isWarn   ? 'bg-yellow-50 border-yellow-200' :
+                         'bg-gray-50 border-gray-200'
+            }`}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="font-medium text-gray-700">임베딩 API 오늘 호출 수</span>
+                <span className={`text-xs font-mono font-semibold ${
+                  isDanger ? 'text-red-600' : isWarn ? 'text-yellow-700' : 'text-gray-600'
+                }`}>
+                  {count.toLocaleString()} / {freeLimit.toLocaleString()} ({pct}%)
+                </span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full transition-all ${
+                    isDanger ? 'bg-red-500' : isWarn ? 'bg-yellow-400' : 'bg-green-400'
+                  }`}
+                  style={{ width: `${Math.max(pct, 1)}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                gemini-embedding-001 무료 한도 1,500건/일 — 검색 쿼리 임베딩 (캐시 적용)
+              </p>
+            </div>
+          );
+        })()}
         {aiQuery.data && (
           <div className="space-y-4">
             <DailyTrendChart data={aiQuery.data.dailyTrend} />
