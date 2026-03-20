@@ -480,26 +480,25 @@ export default function CostPage() {
 
       {/* ── 월 누적 + Forecast ───────────────────────────────────── */}
       {hasForecast && (() => {
+        const fmt = (v: number) => v === 0 ? '$0.00' : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
         const actualTotal = thisMonthAi + forecastInfra + forecastStorage;
+        const monthName = `${today.getMonth() + 1}월`;
         return (
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-4">
-            {/* 헤더: 누적 vs 예상 */}
+            {/* 상단: 누적 vs 예상 */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <div className="text-xs text-blue-500 mb-1">이번달 누적 총액</div>
-                <div className="text-2xl font-bold text-blue-900">${actualTotal.toFixed(2)}</div>
+                <div className="text-xs text-blue-500 mb-1">이번달 누적</div>
+                <div className="text-2xl font-bold text-blue-900">{fmt(actualTotal)}</div>
                 <div className="text-xs text-blue-400 mt-0.5">
-                  AI ${thisMonthAi.toFixed(4)} + 인프라 ${forecastInfra.toFixed(2)} + 스토리지 ${forecastStorage.toFixed(4)}
+                  AI {fmt(thisMonthAi)} · 인프라 {fmt(forecastInfra)} · 스토리지 {fmt(forecastStorage)}
                 </div>
               </div>
               <div className="border-l border-blue-200 pl-4">
-                <div className="text-xs text-blue-500 mb-1">
-                  월말 예상 비용
-                  <span className="ml-1 text-blue-300">({daysPassed}/{daysInMonth}일 경과 · AI 선형 추정)</span>
-                </div>
-                <div className="text-2xl font-bold text-blue-700">${forecastTotal.toFixed(2)}</div>
+                <div className="text-xs text-blue-500 mb-1">월말 예상</div>
+                <div className="text-2xl font-bold text-blue-700">{fmt(forecastTotal)}</div>
                 <div className="text-xs text-blue-300 mt-0.5">
-                  AI × {forecastMultiplier.toFixed(1)} 추정 — 배치 편중 시 실제와 다를 수 있음
+                  {monthName} {daysPassed}일 기준 · 남은 기간 동일 추세 가정
                 </div>
               </div>
             </div>
@@ -508,22 +507,28 @@ export default function CostPage() {
             <div className="grid grid-cols-3 gap-3 border-t border-blue-200 pt-3">
               <div className="bg-white rounded-lg p-3">
                 <div className="text-xs text-gray-400 mb-1">AI 비용</div>
-                <div className="text-sm font-semibold text-gray-800">
-                  ${thisMonthAi.toFixed(4)} <span className="text-gray-400 font-normal text-xs">누적</span>
-                </div>
-                <div className="text-xs text-gray-400">→ 예상 ${forecastAi.toFixed(4)}</div>
+                <div className="text-sm font-semibold text-gray-800">{fmt(thisMonthAi)}</div>
+                <div className="text-xs text-gray-400">누적 → 예상 {fmt(forecastAi)}</div>
               </div>
               <div className="bg-white rounded-lg p-3">
                 <div className="text-xs text-gray-400 mb-1">인프라 비용</div>
-                <div className="text-sm font-semibold text-gray-800">${forecastInfra.toFixed(2)}</div>
-                <div className="text-xs text-gray-400">고정 (변동 없음)</div>
+                <div className="text-sm font-semibold text-gray-800">{fmt(forecastInfra)}</div>
+                <div className="text-xs text-gray-400">
+                  {forecastInfra > 0 ? '수동 입력 기준' : '현재 입력값 없음'}
+                </div>
               </div>
               <div className="bg-white rounded-lg p-3">
                 <div className="text-xs text-gray-400 mb-1">스토리지 비용</div>
-                <div className="text-sm font-semibold text-gray-800">${forecastStorage.toFixed(4)}</div>
+                <div className="text-sm font-semibold text-gray-800">{fmt(forecastStorage)}</div>
                 <div className="text-xs text-gray-400">현재 기준</div>
               </div>
             </div>
+
+            {/* 포함/제외 안내 */}
+            <p className="text-xs text-blue-300 border-t border-blue-200 pt-2">
+              포함: AI API · 인프라 수동 입력값 · R2 스토리지 &nbsp;/&nbsp;
+              제외: Supabase · Railway 실제 청구서 (외부 콘솔에서 확인)
+            </p>
           </div>
         );
       })()}
