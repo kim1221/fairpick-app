@@ -350,13 +350,15 @@ async function normalizeCategories() {
   console.log(`  (2) SELECT main_category, COUNT(*) as total FROM canonical_events GROUP BY main_category ORDER BY main_category;`);
 }
 
-// 실행
-normalizeCategories()
-  .then(() => {
-    console.log('[NormalizeCategories] Job finished successfully');
-    process.exit(0);
-  })
-  .catch((err) => {
-    console.error('[NormalizeCategories] Fatal error:', err);
-    process.exit(1);
-  });
+// CLI 직접 실행 시에만 동작 (동적 import 시 process.exit 방지)
+if (require.main === module) {
+  normalizeCategories()
+    .then(() => {
+      console.log('[NormalizeCategories] Job finished successfully');
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error('[NormalizeCategories] Fatal error:', err);
+      process.exit(1);
+    });
+}
