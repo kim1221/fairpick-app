@@ -349,6 +349,18 @@ async function enrichSingleEvent(
       }
     }
 
+    // overview: 비어있는 경우에만 AI로 채움 (공공 API > AI 원칙)
+    if (
+      extractedInfo.overview &&
+      extractedInfo.overview.trim().length > 10 &&
+      !isManuallyEdited(event, 'overview', forceFields) &&
+      (!event.overview || event.overview.trim() === '')
+    ) {
+      updateFields.push(`overview = $${paramIndex++}`);
+      updateValues.push(extractedInfo.overview.trim());
+      console.log(`[Enrich] ✅ overview filled (${extractedInfo.overview.length}자)`);
+    }
+
     // external_links 업데이트 (공식 홈페이지, 티켓 링크 등)
     const externalLinks: any = { ...(extractedInfo.external_links || {}) };
     
