@@ -81,3 +81,16 @@ export interface ApiUsageResponse {
 }
 
 export type AiPeriod = 'today' | 'this_month' | 'last_month';
+
+export interface ManualCostItem {
+  key: string;
+  name: string;
+  amount_usd: number;
+  period: string;
+  note: string | null;
+  updated_at: string;
+}
+
+export interface ManualCostResponse {
+  items: ManualCostItem[];
+}

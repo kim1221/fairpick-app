@@ -9975,6 +9975,44 @@ app.get('/admin/cost/api-usage', requireAdminAuth, async (_req, res) => {
   }
 });
 
+/**
+ * GET /admin/cost/manual
+ * 수동 입력 고정비 목록 조회
+ */
+app.get('/admin/cost/manual', requireAdminAuth, async (_req, res) => {
+  try {
+    const { rows } = await pool.query<{
+      key: string; name: string; amount_usd: string;
+      period: string; note: string | null; updated_at: string;
+    }>(`SELECT key, name, amount_usd, period, note, updated_at FROM cost_manual_inputs ORDER BY key`);
+    res.json({ items: rows.map(r => ({ ...r, amount_usd: parseFloat(r.amount_usd) })) });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to load manual costs' });
+  }
+});
+
+/**
+ * PUT /admin/cost/manual/:key
+ * 수동 입력 고정비 수정
+ */
+app.put('/admin/cost/manual/:key', requireAdminAuth, async (req, res) => {
+  try {
+    const { key } = req.params;
+    const { amount_usd, note } = req.body as { amount_usd: number; note?: string };
+    if (typeof amount_usd !== 'number' || amount_usd < 0) {
+      return res.status(400).json({ message: 'amount_usd must be a non-negative number' });
+    }
+    const { rowCount } = await pool.query(
+      `UPDATE cost_manual_inputs SET amount_usd = $1, note = $2, updated_at = NOW() WHERE key = $3`,
+      [amount_usd, note ?? null, key],
+    );
+    if (rowCount === 0) return res.status(404).json({ message: 'Key not found' });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to update manual cost' });
+  }
+});
+
 // ============================================================
 // Graceful Shutdown
 // ============================================================

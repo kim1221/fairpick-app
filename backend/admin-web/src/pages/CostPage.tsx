@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getAiCost, getDbCost, getStorageCost, getApiUsage } from '../services/costApi';
-import type { CostItem, CostType, AiPeriod, AiDailyTrend } from '../types/cost';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { getAiCost, getDbCost, getStorageCost, getApiUsage, getManualCost, updateManualCost } from '../services/costApi';
+import type { CostItem, CostType, AiPeriod, AiDailyTrend, ManualCostItem } from '../types/cost';
 
 // ─── costType 배지 ────────────────────────────────────────────────────────────
 
@@ -204,6 +204,108 @@ function DailyTrendChart({ data }: { data: AiDailyTrend[] }) {
   );
 }
 
+// ─── ManualCostCard ───────────────────────────────────────────────────────────
+
+function ManualCostCard({
+  item,
+  onSave,
+  isSaving,
+}: {
+  item: ManualCostItem;
+  onSave: (key: string, amount_usd: number, note: string) => void;
+  isSaving: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount] = useState(String(item.amount_usd));
+  const [note, setNote] = useState(item.note ?? '');
+
+  const handleSave = () => {
+    const val = parseFloat(amount);
+    if (isNaN(val) || val < 0) return;
+    onSave(item.key, val, note);
+    setEditing(false);
+  };
+
+  const updatedAt = new Date(item.updated_at).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">수동 입력</span>
+          </div>
+          <h3 className="text-base font-semibold text-gray-900 mt-1">{item.name}</h3>
+        </div>
+        <div className="text-right shrink-0">
+          <span className="text-xl font-bold text-gray-900">${item.amount_usd.toFixed(2)}</span>
+          <div className="text-xs text-gray-400">USD / {item.period === 'monthly' ? '월' : item.period}</div>
+        </div>
+      </div>
+
+      {!editing ? (
+        <div className="space-y-1.5">
+          {item.note && (
+            <div className="flex gap-2 text-sm">
+              <span className="text-gray-400 shrink-0 w-14">메모</span>
+              <span className="text-gray-600">{item.note}</span>
+            </div>
+          )}
+          <div className="flex gap-2 text-sm">
+            <span className="text-gray-400 shrink-0 w-14">수정일</span>
+            <span className="text-gray-400 text-xs">{updatedAt}</span>
+          </div>
+          <button
+            onClick={() => { setAmount(String(item.amount_usd)); setNote(item.note ?? ''); setEditing(true); }}
+            className="mt-1 text-xs text-blue-500 hover:text-blue-700"
+          >
+            수정
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2 border-t border-gray-100 pt-3">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500 w-14 shrink-0">금액 (USD)</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500 w-14 shrink-0">메모</label>
+            <input
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="예: Hobby 플랜 고정"
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={handleSave}
+              disabled={isSaving}
+              className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              저장
+            </button>
+            <button
+              onClick={() => setEditing(false)}
+              className="px-4 py-1.5 text-sm text-gray-500 hover:text-gray-700"
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── 외부 콘솔 링크 데이터 ───────────────────────────────────────────────────
 
 const EXTERNAL_CONSOLE_LINKS = [
@@ -278,9 +380,22 @@ export default function CostPage() {
     queryFn: getApiUsage,
   });
 
+  const manualQuery = useQuery({
+    queryKey: ['cost/manual'],
+    queryFn: getManualCost,
+  });
+
+  const manualMutation = useMutation({
+    mutationFn: ({ key, amount_usd, note }: { key: string; amount_usd: number; note: string }) =>
+      updateManualCost(key, amount_usd, note),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cost/manual'] }),
+  });
+
   const totalAiUsd = aiQuery.data?.summary.totalUsd ?? 0;
   const totalStorageUsd =
     storageQuery.data?.items.reduce((s, i) => s + (i.amount ?? 0), 0) ?? 0;
+  const totalInfraUsd =
+    manualQuery.data?.items.reduce((s, i) => s + i.amount_usd, 0) ?? null;
 
   return (
     <div className="space-y-8">
@@ -336,9 +451,11 @@ export default function CostPage() {
           <div className="text-xs text-gray-400 mt-1">R2 저장 용량 × 단가</div>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <div className="text-xs text-gray-400 mb-1">인프라 비용</div>
-          <div className="text-lg font-semibold text-gray-400">—</div>
-          <div className="text-xs text-gray-400 mt-1">Railway · Supabase — 2차 연동 예정</div>
+          <div className="text-xs text-gray-400 mb-1">인프라 비용 (수동 입력)</div>
+          <div className="text-2xl font-bold text-gray-900">
+            {totalInfraUsd !== null ? `$${totalInfraUsd.toFixed(2)}` : '—'}
+          </div>
+          <div className="text-xs text-gray-400 mt-1">Railway · Supabase · 도메인 / 월</div>
         </div>
       </div>
 
@@ -407,6 +524,25 @@ export default function CostPage() {
             )}
           </div>
         )}
+      </section>
+
+      {/* ── 인프라 비용 (수동 입력) ──────────────────────────────── */}
+      <section>
+        <SectionHeader
+          title="인프라 비용"
+          subtitle="Railway · Supabase · 도메인 — 수동 입력 기준 월 고정비"
+        />
+        {manualQuery.isLoading && <div className="text-sm text-gray-400">불러오는 중...</div>}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          {manualQuery.data?.items.map((item) => (
+            <ManualCostCard
+              key={item.key}
+              item={item}
+              onSave={(key, amount_usd, note) => manualMutation.mutate({ key, amount_usd, note })}
+              isSaving={manualMutation.isPending}
+            />
+          ))}
+        </div>
       </section>
 
       {/* ── DB / 스토리지 ─────────────────────────────────────────── */}
@@ -491,10 +627,8 @@ export default function CostPage() {
       <div className="border border-dashed border-gray-200 rounded-xl p-5 text-sm text-gray-400 space-y-1">
         <p className="font-medium text-gray-500">2차 연동 예정 항목</p>
         <ul className="list-disc list-inside space-y-0.5 text-xs">
-          <li>Railway 서버 비용 ($5/월 Hobby 고정) — 수동 입력 UI</li>
-          <li>Supabase 플랜 / 스토리지 상세 — Management API 연동</li>
+          <li>Supabase 스토리지 상세 — Management API 연동</li>
           <li>Cloudflare R2 CDN 트래픽 비용 — Cloudflare API 연동</li>
-          <li>도메인 / 기타 고정비 — 수동 입력 UI</li>
           <li>월 예산 forecast — 당월 누적 × 일수 비율</li>
         </ul>
       </div>
