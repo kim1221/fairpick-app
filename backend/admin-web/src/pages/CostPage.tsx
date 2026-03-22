@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getAiCost, getDbCost, getStorageCost, getApiUsage, getManualCost, updateManualCost } from '../services/costApi';
+import { getAiCost, getDbCost, getStorageCost, getApiUsage, getManualCost, updateManualCost, getExternalApiUsage } from '../services/costApi';
 import type { CostItem, CostType, AiPeriod, AiDailyTrend, ManualCostItem } from '../types/cost';
 
 // ─── costType 배지 ────────────────────────────────────────────────────────────
@@ -380,6 +380,11 @@ export default function CostPage() {
     queryFn: getApiUsage,
   });
 
+  const externalApiQuery = useQuery({
+    queryKey: ['cost/external-api'],
+    queryFn: getExternalApiUsage,
+  });
+
   const manualQuery = useQuery({
     queryKey: ['cost/manual'],
     queryFn: getManualCost,
@@ -648,10 +653,10 @@ export default function CostPage() {
         </div>
       </section>
 
-      {/* ── 외부 API 호출량 ──────────────────────────────────────── */}
+      {/* ── 외부 API 호출량 (정부 API) ──────────────────────────── */}
       <section>
         <SectionHeader
-          title="외부 API 호출량"
+          title="외부 API 호출량 — 스케줄러"
           subtitle="최근 30일 · 정부 개방 API 사용량 모니터링 (현재 과금 없음)"
         />
         {apiUsageQuery.isLoading && (
@@ -662,6 +667,25 @@ export default function CostPage() {
         )}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {apiUsageQuery.data?.items.map((item) => (
+            <CostCard key={item.id} item={item} />
+          ))}
+        </div>
+      </section>
+
+      {/* ── 외부 API 호출량 (Kakao · Naver · R2 ops) ─────────────── */}
+      <section>
+        <SectionHeader
+          title="외부 API 호출량 — 파트너 API"
+          subtitle="Kakao 지오코딩 · Naver 검색 · Cloudflare R2 Class A 오퍼레이션 (현재 모두 무료 한도 이내)"
+        />
+        {externalApiQuery.isLoading && (
+          <div className="text-sm text-gray-400">불러오는 중...</div>
+        )}
+        {externalApiQuery.isError && (
+          <div className="text-sm text-red-500">데이터를 불러오지 못했습니다. (테이블 마이그레이션 필요)</div>
+        )}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {externalApiQuery.data?.items.map((item) => (
             <CostCard key={item.id} item={item} />
           ))}
         </div>

@@ -57,6 +57,13 @@ export async function runCleanupJob(): Promise<void> {
       DELETE FROM collection_logs
       WHERE started_at < NOW() - INTERVAL '30 days'
     `);
+
+    // external_api_logs: 30일 초과 삭제 (Kakao/Naver/R2 호출 로그)
+    const cleanedExternalLogs = await pool.query(`
+      DELETE FROM external_api_logs
+      WHERE created_at < NOW() - INTERVAL '30 days'
+    `);
+    console.log(`[CleanupJob] Deleted ${cleanedExternalLogs.rowCount || 0} old external_api_logs (>30d)`);
     console.log(`[CleanupJob] Deleted ${cleanedLogs.rowCount || 0} old collection_logs (>30d)`);
 
     // event_change_logs: 90일 초과 삭제

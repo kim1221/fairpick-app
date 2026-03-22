@@ -94,3 +94,7 @@ export interface ManualCostItem {
 export interface ManualCostResponse {
   items: ManualCostItem[];
 }
+
+export interface ExternalApiResponse {
+  items: CostItem[];
+}

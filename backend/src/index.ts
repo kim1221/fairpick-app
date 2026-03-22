@@ -9976,6 +9976,140 @@ app.get('/admin/cost/api-usage', requireAdminAuth, async (_req, res) => {
 });
 
 /**
+ * GET /admin/cost/external-api
+ * Kakao / Naver / Cloudflare R2 Class A 외부 API 호출량 집계
+ */
+app.get('/admin/cost/external-api', requireAdminAuth, async (_req, res) => {
+  try {
+    // 오늘 / 이번 달 / 이번 달 일자 계산
+    const { rows } = await pool.query<{
+      provider: string;
+      api_type: string;
+      today: string;
+      this_month: string;
+    }>(`
+      SELECT
+        provider,
+        api_type,
+        COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE)::text                                                  AS today,
+        COUNT(*) FILTER (WHERE created_at >= DATE_TRUNC('month', NOW()))::text                                    AS this_month
+      FROM external_api_logs
+      WHERE created_at >= DATE_TRUNC('month', NOW()) - INTERVAL '1 day'
+      GROUP BY provider, api_type
+      ORDER BY provider, api_type
+    `);
+
+    // 집계: provider별로 묶기
+    type ProviderStats = Record<string, { today: number; thisMonth: number }>;
+    const byProvider: Record<string, ProviderStats> = {};
+    for (const r of rows) {
+      if (!byProvider[r.provider]) byProvider[r.provider] = {};
+      byProvider[r.provider][r.api_type] = {
+        today: parseInt(r.today) || 0,
+        thisMonth: parseInt(r.this_month) || 0,
+      };
+    }
+
+    // Kakao 카드
+    const kakaoStats = byProvider['kakao'] ?? {};
+    const kakaoToday = (kakaoStats['geocode']?.today ?? 0);
+    const kakaoMonth = (kakaoStats['geocode']?.thisMonth ?? 0);
+    const KAKAO_FREE_DAY = 300_000;
+
+    // Naver 카드 (blog+web+place+cafe+buzz 합산)
+    const naverStats = byProvider['naver'] ?? {};
+    const naverTypes = ['blog', 'web', 'place', 'cafe', 'buzz'] as const;
+    const naverTodayTotal = naverTypes.reduce((s, t) => s + (naverStats[t]?.today ?? 0), 0);
+    const naverMonthTotal = naverTypes.reduce((s, t) => s + (naverStats[t]?.thisMonth ?? 0), 0);
+    const NAVER_FREE_DAY = 25_000; // API 타입별 (blog/web/place/cafe 각각 25,000)
+
+    // R2 Class A 카드 (put+delete+list)
+    const r2Stats = byProvider['r2'] ?? {};
+    const r2PutMonth = r2Stats['put']?.thisMonth ?? 0;
+    const r2DeleteMonth = r2Stats['delete']?.thisMonth ?? 0;
+    const r2ListMonth = r2Stats['list']?.thisMonth ?? 0;
+    const r2ClassATotal = r2PutMonth + r2DeleteMonth + r2ListMonth;
+    const R2_FREE_CLASS_A = 1_000_000;
+    const R2_FREE_CLASS_B = 10_000_000;
+
+    const items = [
+      {
+        id: 'kakao-geocoding',
+        category: 'api',
+        provider: 'Kakao Local API',
+        name: 'Kakao 지오코딩',
+        costType: 'usage-only',
+        amount: null,
+        currency: 'USD',
+        costDriver: 'geo-refresh 배치에서 주소→좌표 변환 (매일 03:00)',
+        relatedFeature: 'geocoding',
+        shortExplanation: `오늘 ${formatNumber(kakaoToday)}건 호출. Kakao Local API 무료 한도(${formatNumber(KAKAO_FREE_DAY)}건/일) 이내로 과금 없음.`,
+        sourceOfTruth: 'external_api_logs 집계 (이번 달)',
+        pricingRef: '무료 한도 300,000건/일 (KakaoAK)',
+        noAmountReason: `무료 한도(${formatNumber(KAKAO_FREE_DAY)}건/일) — 현재 ${formatNumber(kakaoToday)}건/오늘`,
+        usageMetrics: [
+          { label: '오늘 호출 수',    value: kakaoToday,  unit: '건', formatted: `${formatNumber(kakaoToday)}건` },
+          { label: '이번 달 호출 수', value: kakaoMonth,  unit: '건', formatted: `${formatNumber(kakaoMonth)}건` },
+          { label: '무료 한도',       value: KAKAO_FREE_DAY, unit: '건/일', formatted: `${formatNumber(KAKAO_FREE_DAY)}건/일` },
+        ],
+      },
+      {
+        id: 'naver-search',
+        category: 'api',
+        provider: 'Naver Search API',
+        name: 'Naver 검색',
+        costType: 'usage-only',
+        amount: null,
+        currency: 'USD',
+        costDriver: '이벤트 정보 보강, 팝업 검색, buzz 스코어링',
+        relatedFeature: 'event_enrichment',
+        shortExplanation: `오늘 ${formatNumber(naverTodayTotal)}건 호출 (블로그/웹/플레이스/카페/buzz 합산). 무료 한도(${formatNumber(NAVER_FREE_DAY)}건/일/타입) 이내.`,
+        sourceOfTruth: 'external_api_logs 집계 (이번 달)',
+        pricingRef: '무료 한도 25,000건/일 (API 타입별)',
+        noAmountReason: `무료 한도(${formatNumber(NAVER_FREE_DAY)}건/일/타입) — 현재 ${formatNumber(naverTodayTotal)}건/오늘 합산`,
+        usageMetrics: [
+          { label: '오늘 호출 수',    value: naverTodayTotal,  unit: '건', formatted: `${formatNumber(naverTodayTotal)}건` },
+          { label: '이번 달 호출 수', value: naverMonthTotal,  unit: '건', formatted: `${formatNumber(naverMonthTotal)}건` },
+          { label: '블로그',  value: (naverStats['blog']?.thisMonth ?? 0),  unit: '건', formatted: `${formatNumber(naverStats['blog']?.thisMonth ?? 0)}건/월` },
+          { label: '웹',      value: (naverStats['web']?.thisMonth ?? 0),   unit: '건', formatted: `${formatNumber(naverStats['web']?.thisMonth ?? 0)}건/월` },
+          { label: '플레이스',value: (naverStats['place']?.thisMonth ?? 0), unit: '건', formatted: `${formatNumber(naverStats['place']?.thisMonth ?? 0)}건/월` },
+          { label: '카페',    value: (naverStats['cafe']?.thisMonth ?? 0),  unit: '건', formatted: `${formatNumber(naverStats['cafe']?.thisMonth ?? 0)}건/월` },
+          { label: 'Buzz',   value: (naverStats['buzz']?.thisMonth ?? 0),  unit: '건', formatted: `${formatNumber(naverStats['buzz']?.thisMonth ?? 0)}건/월` },
+        ],
+      },
+      {
+        id: 'r2-class-a-ops',
+        category: 'storage',
+        provider: 'Cloudflare R2',
+        name: 'R2 Class A/B 오퍼레이션',
+        costType: 'usage-only',
+        amount: null,
+        currency: 'USD',
+        costDriver: '이미지 업로드(PUT) · 삭제(DELETE) · 목록 조회(LIST). Class B(GET)는 CDN 경유로 별도 추적 불가.',
+        relatedFeature: 'image_storage',
+        shortExplanation: `이번 달 Class A 총 ${formatNumber(r2ClassATotal)}건. 무료 한도(${formatNumber(R2_FREE_CLASS_A)}건/월) 이내. Class B(GET)는 Cloudflare CDN 서빙으로 별도 과금 없음.`,
+        sourceOfTruth: 'external_api_logs 집계 (이번 달) — Class B(GET)는 CDN 서빙으로 추적 불가',
+        pricingRef: '무료: Class A 1M/월 · Class B 10M/월. 초과 시 Class A $0.36/1M · Class B $0.036/1M',
+        noAmountReason: `무료 한도 내 (Class A ${formatNumber(r2ClassATotal)}/${formatNumber(R2_FREE_CLASS_A)}건)`,
+        usageMetrics: [
+          { label: 'Class A 합계 (이번 달)', value: r2ClassATotal,    unit: '건', formatted: `${formatNumber(r2ClassATotal)}건` },
+          { label: '업로드 (PUT)',            value: r2PutMonth,       unit: '건', formatted: `${formatNumber(r2PutMonth)}건` },
+          { label: '삭제 (DELETE)',           value: r2DeleteMonth,    unit: '건', formatted: `${formatNumber(r2DeleteMonth)}건` },
+          { label: '목록 조회 (LIST)',        value: r2ListMonth,      unit: '건', formatted: `${formatNumber(r2ListMonth)}건` },
+          { label: 'Class A 무료 한도',      value: R2_FREE_CLASS_A,  unit: '건/월', formatted: `${formatNumber(R2_FREE_CLASS_A)}건/월` },
+          { label: 'Class B (GET)',          value: R2_FREE_CLASS_B,  unit: '건/월', formatted: `CDN 서빙 — 별도 추적 불가` },
+        ],
+      },
+    ];
+
+    res.json({ items });
+  } catch (error) {
+    console.error('[Admin] GET /admin/cost/external-api failed:', error);
+    res.status(500).json({ message: 'Failed to load external API stats' });
+  }
+});
+
+/**
  * GET /admin/cost/manual
  * 수동 입력 고정비 목록 조회
  */

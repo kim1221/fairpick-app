@@ -5,6 +5,7 @@ import type {
   StorageCostResponse,
   ApiUsageResponse,
   ManualCostResponse,
+  ExternalApiResponse,
   AiPeriod,
 } from '../types/cost';
 
@@ -35,4 +36,9 @@ export async function getManualCost(): Promise<ManualCostResponse> {
 
 export async function updateManualCost(key: string, amount_usd: number, note?: string): Promise<void> {
   await api.put(`/admin/cost/manual/${key}`, { amount_usd, note });
+}
+
+export async function getExternalApiUsage(): Promise<ExternalApiResponse> {
+  const res = await api.get<ExternalApiResponse>('/admin/cost/external-api');
+  return res.data;
 }

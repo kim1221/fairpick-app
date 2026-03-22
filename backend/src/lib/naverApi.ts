@@ -7,6 +7,7 @@
  */
 
 import axios from 'axios';
+import { logExternalApi } from './externalApiLogger';
 
 /**
  * 네이버 API 인증 정보 조회
@@ -111,6 +112,7 @@ export async function searchNaverBlog(
       }
     );
 
+    logExternalApi('naver', 'blog');
     return response.data;
   } catch (error: any) {
     console.error('[NaverAPI] Blog search error:', {
@@ -159,6 +161,7 @@ export async function searchNaverWeb(
       }
     );
 
+    logExternalApi('naver', 'web');
     return response.data;
   } catch (error: any) {
     console.error('[NaverAPI] Web search error:', {
@@ -207,6 +210,7 @@ export async function searchNaverPlace(
       }
     );
 
+    logExternalApi('naver', 'place');
     return response.data;
   } catch (error: any) {
     console.error('[NaverAPI] Place search error:', {
@@ -256,6 +260,7 @@ export async function searchNaverCafe(
       }
     );
 
+    logExternalApi('naver', 'cafe');
     return response.data;
   } catch (error: any) {
     console.error('[NaverAPI] Cafe search error:', {
@@ -930,23 +935,26 @@ export async function getNaverBlogMentions(
         display: 100,  // 실제 블로그 확인
         sort: 'sim'
       });
-      
+      // searchNaverBlog 내부에서 'blog' 로그 → 여기선 buzz 용도 구분 로그 추가
+      logExternalApi('naver', 'buzz');
+
       // 실제 관련도 계산
       const accuracy = calculateRelevanceRatio(result.items, title);
       const correctedTotal = Math.round(result.total * accuracy);
-      
+
       return {
         total: correctedTotal,
         accuracy: accuracy
       };
     }
-    
+
     // 일반 모드: display=1 + 보정 계수 적용
     const result = await searchNaverBlog({
       query,
       display: 1,  // 비용 절감
       sort: 'sim'
     });
+    logExternalApi('naver', 'buzz');
     
     // 보정 계수가 있으면 적용
     const factor = correctionFactor || 1.0;

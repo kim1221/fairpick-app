@@ -4,6 +4,7 @@
 
 import axios from 'axios';
 import { config } from '../config';
+import { logExternalApi } from '../lib/externalApiLogger';
 
 /**
  * Bounding Box 계산 (대략적인 위/경도 범위)
@@ -74,6 +75,8 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string> 
       },
       timeout: 5000, // 5초 타임아웃
     });
+
+    logExternalApi('kakao', 'geocode');
 
     if (response.data.documents && response.data.documents.length > 0) {
       const address = response.data.documents[0].address;

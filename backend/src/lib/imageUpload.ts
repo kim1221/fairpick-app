@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { fromBuffer as fileTypeFromBuffer } from 'file-type';
 import crypto from 'crypto';
 import { config } from '../config';
+import { logExternalApi } from './externalApiLogger';
 
 // ============================================================================
 // S3/R2 클라이언트 설정
@@ -142,7 +143,8 @@ export async function uploadEventImage(
         uploadedAt: now.toISOString(),
       },
     }));
-    
+    logExternalApi('r2', 'put'); // Class A 오퍼레이션 추적
+
     console.log('[ImageUpload] S3/R2 upload complete:', { key });
     
     // 8. CDN URL 생성
@@ -198,7 +200,8 @@ export async function deleteEventImage(key: string): Promise<void> {
       Bucket: config.s3.bucket,
       Key: key,
     }));
-    
+    logExternalApi('r2', 'delete'); // Class A 오퍼레이션 추적
+
     console.log('[ImageUpload] Deleted from CDN:', key);
   } catch (error: any) {
     console.error('[ImageUpload] Delete failed:', error);
