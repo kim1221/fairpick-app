@@ -466,6 +466,26 @@ async function collectCultureEvents() {
       // 증분 체크: 이미 events 테이블에 있으면 상세 API 호출 스킵
       const exists = await existsInDB(item.seq);
       if (exists) {
+        // 기존 이벤트 날짜 업데이트 (list 응답 기준, 추가 API 호출 없음)
+        const startDateStr = formatDate(item.startDate);
+        const endDateStr = formatDate(item.endDate);
+        if (startDateStr && endDateStr) {
+          try {
+            await pool.query(
+              `UPDATE raw_culture_events SET start_at = $1, end_at = $2, updated_at = NOW()
+               WHERE source = 'culture' AND source_event_id = $3`,
+              [startDateStr, endDateStr, item.seq],
+            );
+            await pool.query(
+              `UPDATE canonical_events SET start_at = $1, end_at = $2, updated_at = NOW()
+               WHERE canonical_key = $3`,
+              [startDateStr, endDateStr, `culture:${item.seq}`],
+            );
+          } catch (err) {
+            console.error(`[Culture] Failed to update dates for ${item.seq}:`, err);
+          }
+        }
+
         consecutiveExistsCount++;
         totalSkipped++;
 

@@ -451,6 +451,26 @@ async function collectKopisEvents() {
       // 증분 체크: 이미 events 테이블에 있으면 상세 API 호출 스킵
       const exists = await existsInDB(item.mt20id);
       if (exists) {
+        // 기존 이벤트 날짜/상태 업데이트 (list 응답 기준, 추가 API 호출 없음)
+        const startDate = formatDate(item.prfpdfrom);
+        const endDate = formatDate(item.prfpdto);
+        if (startDate && endDate) {
+          try {
+            await pool.query(
+              `UPDATE raw_kopis_events SET start_at = $1, end_at = $2, updated_at = NOW()
+               WHERE source = 'kopis' AND source_event_id = $3`,
+              [startDate, endDate, item.mt20id],
+            );
+            await pool.query(
+              `UPDATE canonical_events SET start_at = $1, end_at = $2, status = $3, updated_at = NOW()
+               WHERE canonical_key = $4`,
+              [startDate, endDate, item.prfstate || null, `kopis:${item.mt20id}`],
+            );
+          } catch (err) {
+            console.error(`[KOPIS] Failed to update dates for ${item.mt20id}:`, err);
+          }
+        }
+
         consecutiveExistsCount++;
         totalSkipped++;
 

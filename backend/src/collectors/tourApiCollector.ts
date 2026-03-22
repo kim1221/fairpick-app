@@ -259,6 +259,24 @@ async function fetchTourApiEvents() {
         // (API 호출 비용이 크므로 신규 이벤트에만 상세 수집 적용)
         const exists = await existsInDB(item.contentid);
         if (exists) {
+          // 기존 이벤트 날짜 업데이트 (list 응답 기준, 추가 API 호출 없음)
+          if (mappedBeforeDetail.startDate && mappedBeforeDetail.endDate) {
+            try {
+              await pool.query(
+                `UPDATE raw_tour_events SET start_at = $1, end_at = $2, updated_at = NOW()
+                 WHERE source = 'tour' AND source_event_id = $3`,
+                [mappedBeforeDetail.startDate, mappedBeforeDetail.endDate, item.contentid],
+              );
+              await pool.query(
+                `UPDATE canonical_events SET start_at = $1, end_at = $2, updated_at = NOW()
+                 WHERE canonical_key = $3`,
+                [mappedBeforeDetail.startDate, mappedBeforeDetail.endDate, `tour:${item.contentid}`],
+              );
+            } catch (err) {
+              console.error(`[TourAPI] Failed to update dates for ${item.contentid}:`, err);
+            }
+          }
+
           consecutiveExistsCount++;
           skippedCount++;
 
