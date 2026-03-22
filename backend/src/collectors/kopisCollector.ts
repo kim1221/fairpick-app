@@ -3,6 +3,7 @@ import { parseStringPromise } from 'xml2js';
 import { pool, upsertEvent, upsertRawKopisEvent } from '../db';
 import http from '../lib/http';
 import { deriveIsFree, normalizePriceText } from '../utils/priceUtils';
+import { KOPIS_DAYS_BACK, KOPIS_DAYS_FORWARD } from '../config/collectionPolicy';
 
 // KOPIS API 설정
 const KOPIS_API_BASE = 'http://www.kopis.or.kr/openApi/restful';
@@ -403,9 +404,10 @@ async function collectKopisEvents() {
     throw error;
   }
 
-  // 기간 정책 통일: 오늘-PAST_BUFFER ~ 오늘+FUTURE_WINDOW
-  const PAST_BUFFER_DAYS = 90;
-  const FUTURE_WINDOW_DAYS = 730;
+  // 기간 정책: collectionPolicy.ts 에서 중앙 관리
+  // 변경 전: PAST_BUFFER=90, FUTURE=730(2년) → 균형형: 7/120
+  const PAST_BUFFER_DAYS = KOPIS_DAYS_BACK;
+  const FUTURE_WINDOW_DAYS = KOPIS_DAYS_FORWARD;
   const FULL_COLLECTION = false;
 
   const today = new Date();

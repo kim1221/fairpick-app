@@ -13,6 +13,7 @@ import { pool } from '../db';
 import { searchEventInfo, mergeSearchResults } from '../lib/naverApi';
 // @ts-ignore - extractEventInfo is deprecated but still used by this backfill job
 import { extractEventInfo, extractDerivedTagsOnly } from '../lib/aiExtractor';
+import { AI_ENRICH_MAX_DAYS_AHEAD } from '../config/collectionPolicy';
 import { DEFAULT_POLICY, AGGRESSIVE_POLICY, CONSERVATIVE_POLICY, EnrichmentPolicy } from '../lib/enrichmentPolicy';
 import { 
   decideFieldAction, 
@@ -630,6 +631,9 @@ export async function aiEnrichmentBackfill(options: {
   const startTime = Date.now();
 
   // 처리할 이벤트 조회 — ai_enriched_at IS NULL인 미처리 이벤트만
+  // AI_ENRICH_MAX_DAYS_AHEAD 이내 시작하는 이벤트만 보강 (비용 최적화)
+  // 변경 전: 날짜 필터 없음 → 2년 후 이벤트도 즉시 보강
+  // 수동으로 먼 미래 이벤트를 보강하려면: --no-date-filter 플래그 (미구현) 또는 직접 SQL
   let selectSQL = `
     SELECT id, title, main_category, sub_category, venue, overview,
            derived_tags, opening_hours, price_min, price_max,
@@ -638,6 +642,7 @@ export async function aiEnrichmentBackfill(options: {
     WHERE status IN ('scheduled', 'ongoing')
       AND ai_enriched_at IS NULL
       AND COALESCE(ai_enrichment_attempts, 0) < 3
+      AND (start_at IS NULL OR start_at <= NOW() + INTERVAL '${AI_ENRICH_MAX_DAYS_AHEAD} days')
   `;
 
   if (onlyMissingTags) {

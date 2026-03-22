@@ -3,6 +3,7 @@ import { parseStringPromise } from 'xml2js';
 import { config } from '../config';
 import { pool, upsertEvent, upsertRawCultureEvent } from '../db';
 import http from '../lib/http';
+import { CULTURE_DAYS_FORWARD } from '../config/collectionPolicy';
 
 // 문화포털 API 설정
 const CULTURE_API_BASE = 'https://apis.data.go.kr/B553457/cultureinfo';
@@ -147,12 +148,14 @@ async function fetchByPeriod(serviceTp: string, pageNo: number = 1): Promise<Cul
   }
 
   // 중요: cultureinfo/period2는 특정 날짜(from=YYYYMMDD)에 대해 <items/>만 내려주는 케이스가 있음.
-  // 그래서 요청 범위는 "이번 달 1일 ~ (1년 후) 해당 달의 말일"로 넓게 잡고,
-  // 최종 필터링(오늘~1년, 진행중/예정)은 아래 저장 단계에서 적용한다.
+  // 그래서 요청 범위는 "이번 달 1일 ~ (CULTURE_DAYS_FORWARD 후 말일)"로 잡고,
+  // 최종 필터링(오늘~CULTURE_DAYS_FORWARD, 진행중/예정)은 아래 저장 단계에서 적용한다.
+  // 변경 전: 1년 후까지 요청, collectionPolicy.ts 로 이관
   const today = new Date();
   const startOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  const oneYearLater = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
-  const endOfTargetMonth = new Date(oneYearLater.getFullYear(), oneYearLater.getMonth() + 1, 0);
+  const cultureLimit = new Date(today);
+  cultureLimit.setDate(cultureLimit.getDate() + CULTURE_DAYS_FORWARD + 30); // 30일 버퍼 (API 특성 대응)
+  const endOfTargetMonth = new Date(cultureLimit.getFullYear(), cultureLimit.getMonth() + 1, 0);
 
   const fromDate = `${startOfThisMonth.getFullYear()}${String(startOfThisMonth.getMonth() + 1).padStart(2, '0')}${String(
     startOfThisMonth.getDate(),
@@ -439,11 +442,13 @@ async function collectCultureEvents() {
         continue;
       }
 
-      // 오늘 기준: 진행중 + 예정(오늘~1년)만 저장
+      // 오늘 기준: 진행중 + 예정(오늘~CULTURE_DAYS_FORWARD)만 저장
+      // 변경 전: 1년 후까지, collectionPolicy.ts 로 이관
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const oneYearLater = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
-      oneYearLater.setHours(23, 59, 59, 999);
+      const cultureSaveLimit = new Date(today);
+      cultureSaveLimit.setDate(cultureSaveLimit.getDate() + CULTURE_DAYS_FORWARD);
+      cultureSaveLimit.setHours(23, 59, 59, 999);
 
       const startDate = new Date(formatDate(item.startDate));
       const endDate = new Date(formatDate(item.endDate));
@@ -454,8 +459,8 @@ async function collectCultureEvents() {
         continue;
       }
 
-      // 1년 이후에 시작하는 이벤트는 스킵
-      if (startDate > oneYearLater) {
+      // CULTURE_DAYS_FORWARD 이후에 시작하는 이벤트는 스킵 (변경 전: 1년)
+      if (startDate > cultureSaveLimit) {
         totalSkipped++;
         continue;
       }

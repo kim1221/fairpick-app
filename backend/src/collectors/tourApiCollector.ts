@@ -2,6 +2,7 @@ import { config } from '../config';
 import { mapTourApiItem, TourApiItem } from '../mappers/tourApiMapper';
 import { upsertEvent, pool, upsertRawTourEvent } from '../db';
 import http from '../lib/http';
+import { TOURAPI_DAYS_BACK, TOURAPI_DAYS_FORWARD } from '../config/collectionPolicy';
 
 const TOUR_API_URL = 'https://apis.data.go.kr/B551011/KorService2/searchFestival2';
 
@@ -202,12 +203,24 @@ async function fetchTourApiEvents() {
   }
 
   try {
+    // 수집 범위: collectionPolicy.ts 에서 중앙 관리
+    // 변경 전: eventStartDate='20250101' 고정, 미래 상한 없음
+    const tourToday = new Date();
+    tourToday.setHours(0, 0, 0, 0);
+    const tourStartDate = new Date(tourToday);
+    tourStartDate.setDate(tourStartDate.getDate() - TOURAPI_DAYS_BACK);
+    const tourFutureLimit = new Date(tourToday);
+    tourFutureLimit.setDate(tourFutureLimit.getDate() + TOURAPI_DAYS_FORWARD);
+
+    const fmt = (d: Date) =>
+      `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+
     const baseParams = {
       serviceKey: config.tourApiKey,
       MobileOS: 'ETC',
       MobileApp: 'FairpickCollector',
       _type: 'json',
-      eventStartDate: '20250101', // 2025년 시작부터
+      eventStartDate: fmt(tourStartDate), // 오늘-TOURAPI_DAYS_BACK (변경 전: '20250101')
       arrange: 'R', // 최신 수정순으로 정렬 (증분 수집용)
       numOfRows: 100, // 페이지당 100개
     };
@@ -252,6 +265,11 @@ async function fetchTourApiEvents() {
         // 기본 필터(기간/지역 등) 먼저 통과 여부 확인 (fast path)
         const mappedBeforeDetail = mapTourApiItem(item);
         if (!mappedBeforeDetail) {
+          continue;
+        }
+
+        // 미래 이벤트 범위 초과 스킵 (collectionPolicy.TOURAPI_DAYS_FORWARD)
+        if (mappedBeforeDetail.startDate && new Date(mappedBeforeDetail.startDate) > tourFutureLimit) {
           continue;
         }
 

@@ -10,6 +10,7 @@
 
 import { pool } from '../db';
 import { buildEventText, embedDocument, toVectorLiteral } from '../lib/embeddingService';
+import { EMBEDDING_MAX_DAYS_AHEAD } from '../config/collectionPolicy';
 
 const BATCH_SIZE = 20;
 const DELAY_MS = 300; // 배치 간 딜레이 (ms)
@@ -24,8 +25,13 @@ export async function embedNewEvents(): Promise<number> {
     return 0;
   }
 
+  // EMBEDDING_MAX_DAYS_AHEAD 이내 시작하는 이벤트만 임베딩 (비용 최적화)
+  // 변경 전: 날짜 필터 없음 → 먼 미래 이벤트도 즉시 임베딩
+  const embedFilter = `embedding IS NULL AND is_deleted = false
+    AND (start_at IS NULL OR start_at <= NOW() + INTERVAL '${EMBEDDING_MAX_DAYS_AHEAD} days')`;
+
   const countRes = await pool.query(
-    `SELECT COUNT(*) FROM canonical_events WHERE embedding IS NULL AND is_deleted = false`
+    `SELECT COUNT(*) FROM canonical_events WHERE ${embedFilter}`
   );
   const total = parseInt(countRes.rows[0].count, 10);
 
@@ -61,7 +67,7 @@ export async function embedNewEvents(): Promise<number> {
       `SELECT id, title, display_title, venue, address, overview,
               main_category, sub_category, derived_tags, region, price_info
        FROM canonical_events
-       WHERE embedding IS NULL AND is_deleted = false
+       WHERE ${embedFilter}
        ORDER BY created_at DESC
        LIMIT $1`,
       [BATCH_SIZE]
