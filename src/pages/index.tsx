@@ -224,9 +224,10 @@ function HomePage() {
         new Promise<undefined>(resolve => setTimeout(resolve, 5000)),
       ]);
 
-      // GPS 성공 시 위치 기반 섹션(nearby/walkable)을 스켈레톤 없이 조용히 갱신
+      // GPS 성공 시 nearby/walkable만 조용히 추가
+      // today_pick 등 나머지 섹션은 첫 번째 호출 결과를 유지 (불필요한 교체 방지)
       if (loc) {
-        await loadSections(loc, uid, { silent: true });
+        await injectLocationSections(loc, uid);
       }
       // locPromise 계속 백그라운드 실행 → setLocation/setCurrentAddress 자동 업데이트
     } catch (error) {
@@ -261,9 +262,8 @@ function HomePage() {
     }
   };
 
-  const loadSections = async (loc?: Location, uid?: string, opts?: { silent?: boolean }) => {
-    // silent: 위치 기반 섹션 추가 갱신 시 스켈레톤 없이 조용히 교체
-    if (!opts?.silent) setSections(null);
+  const loadSections = async (loc?: Location, uid?: string) => {
+    setSections(null);
     const networkStatus = await getNetworkStatus();
     if (networkStatus === 'OFFLINE') {
       setIsOffline(true);
@@ -283,6 +283,30 @@ function HomePage() {
         expiresAt: Date.now() + HOME_CACHE_TTL_MS,
       };
     }
+  };
+
+  // GPS 완료 후 nearby/walkable만 조용히 주입 — today_pick 등 기존 섹션은 유지
+  const injectLocationSections = async (loc: Location, uid?: string) => {
+    const currentUid = uid ?? userId;
+    const response = await recommendationService.getSections(loc, currentUid);
+    if (!response.success) return;
+
+    const locationSlugs = new Set(['nearby', 'walkable']);
+    const incoming = response.sections.filter((s) => locationSlugs.has(s.slug));
+    if (incoming.length === 0) return;
+
+    setSections((prev) => {
+      if (!prev) return prev;
+      const base = prev.filter((s) => !locationSlugs.has(s.slug));
+      const merged = [...base, ...incoming];
+      _homeCache = {
+        sections: merged,
+        location: loc,
+        userId: currentUid,
+        expiresAt: Date.now() + HOME_CACHE_TTL_MS,
+      };
+      return merged;
+    });
   };
 
   const handleEventPress = (eventId: string, sectionSlug?: string, rankPosition?: number) => {
