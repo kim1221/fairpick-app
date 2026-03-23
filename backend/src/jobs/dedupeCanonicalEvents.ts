@@ -730,7 +730,8 @@ export function computeNeedsReview(event: {
   }
 
   // no_price: price_info도 없고 is_free도 미결정
-  if (!event.priceInfo && event.isFree == null) {
+  // priceInfo가 undefined(미전달)이면 체크 스킵 — dedupe 단계에서는 price_info가 아직 없음
+  if (event.priceInfo !== undefined && !event.priceInfo && event.isFree == null) {
     reasons.push('no_price');
   }
 
@@ -740,7 +741,8 @@ export function computeNeedsReview(event: {
   }
 
   // short_overview: 설명 없거나 30자 미만
-  if (!event.overview || event.overview.length < 30) {
+  // overview가 undefined(미전달)이면 체크 스킵 — dedupe 단계에서는 overview가 AI 백필 전
+  if (event.overview !== undefined && (!event.overview || event.overview.length < 30)) {
     reasons.push('short_overview');
   }
 

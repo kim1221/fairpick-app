@@ -212,17 +212,23 @@ function HomePage() {
       const uid = await getCurrentUserId();
       setUserId(uid);
 
+      // GPS와 홈 섹션 API를 병렬로 시작
+      // - 홈 API: 위치 없이 즉시 호출 → today_pick, trending 등 바로 표시
+      // - GPS: 백그라운드에서 조회 → 완료 후 nearby/walkable 섹션 추가 갱신
       const locPromise = requestLocation();
+      await loadSections(undefined, uid);
 
-      // 최대 3초 위치 대기 → API 1회 호출
-      // timeout 후에도 locPromise는 백그라운드 실행 →
-      // 완료 시 setLocation/setCurrentAddress 업데이트 (API 재호출 없음)
+      // 홈 API 완료 후 GPS를 최대 5초 추가 대기
       const loc = await Promise.race([
         locPromise,
-        new Promise<undefined>(resolve => setTimeout(resolve, 3000)),
+        new Promise<undefined>(resolve => setTimeout(resolve, 5000)),
       ]);
 
-      await loadSections(loc, uid);
+      // GPS 성공 시 위치 기반 섹션(nearby/walkable)을 스켈레톤 없이 조용히 갱신
+      if (loc) {
+        await loadSections(loc, uid, { silent: true });
+      }
+      // locPromise 계속 백그라운드 실행 → setLocation/setCurrentAddress 자동 업데이트
     } catch (error) {
       console.error('[Home] init error:', error);
       await loadSections();
@@ -242,8 +248,10 @@ function HomePage() {
       const data = await getCurrentLocation({ accuracy: Accuracy.Balanced });
       const loc: Location = { lat: data.coords.latitude, lng: data.coords.longitude };
       setLocation(loc);
-      const geo = await reverseGeocode(loc.lat, loc.lng);
-      setCurrentAddress(geo.success && geo.address ? geo.address : '위치 정보');
+      // 역지오코딩은 주소 텍스트 표시용이므로 비블로킹 처리 — GPS 결과를 즉시 반환
+      reverseGeocode(loc.lat, loc.lng).then((geo) => {
+        setCurrentAddress(geo.success && geo.address ? geo.address : '위치 정보');
+      }).catch(() => {});
       return loc;
     } catch (error) {
       if (!(error instanceof GetCurrentLocationPermissionError)) {
@@ -253,8 +261,9 @@ function HomePage() {
     }
   };
 
-  const loadSections = async (loc?: Location, uid?: string) => {
-    setSections(null);
+  const loadSections = async (loc?: Location, uid?: string, opts?: { silent?: boolean }) => {
+    // silent: 위치 기반 섹션 추가 갱신 시 스켈레톤 없이 조용히 교체
+    if (!opts?.silent) setSections(null);
     const networkStatus = await getNetworkStatus();
     if (networkStatus === 'OFFLINE') {
       setIsOffline(true);
