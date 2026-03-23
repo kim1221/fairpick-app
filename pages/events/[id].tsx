@@ -784,22 +784,22 @@ function EventDetailPage() {
 
         </View>
 
-        {/* Bottom Spacer — 광고 로드 여부에 따라 동적 높이 */}
-        {/* ticket 링크일 때 힌트 텍스트만큼 추가 여백 */}
-        <View style={{ height: primaryCTALink ? (adRendered ? 186 : 90) + (primaryCTALink.label === '티켓 예매하기' ? 22 : 0) : 20 }} />
+        {/* 광고 — 스크롤 콘텐츠 하단, CTA 유무와 무관하게 항상 노출 */}
+        <View style={[styles.adBannerContainer, { height: adRendered ? 96 : 0 }]}>
+          <InlineAd
+            adGroupId="ait.v2.live.6526c6e693454a28"
+            impressFallbackOnMount={true}
+            onAdRendered={() => setAdRendered(true)}
+          />
+        </View>
+
+        {/* Bottom Spacer — CTA 높이만큼 여백 (광고는 스크롤 영역으로 이동) */}
+        <View style={{ height: primaryCTALink ? 90 + (primaryCTALink.label === '티켓 예매하기' ? 22 : 0) : 20 }} />
       </ScrollView>
 
-      {/* 하단 영역: 배너 광고 + Sticky Action Bar */}
+      {/* 하단 고정 영역: CTA만 */}
       {primaryCTALink && (
         <View style={styles.bottomArea}>
-          {/* 광고가 실제로 로드됐을 때만 96px 공간 차지 */}
-          <View style={[styles.adBannerContainer, { height: adRendered ? 96 : 0 }]}>
-            <InlineAd
-              adGroupId="ait.v2.live.6526c6e693454a28"
-              impressFallbackOnMount={true}
-              onAdRendered={() => setAdRendered(true)}
-            />
-          </View>
           <View style={[
             styles.stickyBar,
             { backgroundColor: adaptive.background },

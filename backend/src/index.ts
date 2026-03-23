@@ -8175,6 +8175,11 @@ const TRENDING_CACHE_TTL_MS   = 15 * 60 * 1000; // trending 별도 TTL
 const buildInFlightMap        = new Map<string, Promise<SectionsCache>>();
 const trendingRefreshInFlight = new Set<string>(); // trending 중복 갱신 방지
 
+// ─── today_pick 하루 고정 캐시 ───────────────────────────────────────────────
+// 유저(또는 위치)별로 하루 동안 동일한 today_pick 이벤트를 반환
+// 키: userId 또는 "anon:{location_key}", 값: { eventId, kstDate }
+const todayPickDailyCache = new Map<string, { eventId: string; kstDate: string }>();
+
 // 섹션별 stable 슬롯 수: 재빌드 후에도 이전 상위 이벤트가 우선 노출되도록 고정
 // rotation 슬롯(limit - stableCount개)은 나머지 후보에서 shuffle 채움
 const STABLE_SLOT_COUNTS: Record<string, number> = {
@@ -8604,18 +8609,42 @@ app.get('/api/home/sections', async (req, res) => {
 
       if (pool_.slug === 'today_pick') {
         let pickedEvent: any;
-        if (USE_TODAY_PICK_V2) {
-          const rawCandidates = pool_.rawEvents as ScoredTodayPickCandidate[];
-          const personalized = applyPersonalizationV2(rawCandidates, categoryClickCounts);
-          const picked = pickTodayPickCandidateV2(
-            personalized,
-            todayPickRecentIds,
-            todayPickClickedIds,
-            todayPickImpressionIds,
-          );
-          pickedEvent = picked?.event ?? null;
-        } else {
-          pickedEvent = pickTodayPickCandidate(pool_.rawEvents, recentClickedIds, clickedIds);
+        const todayKst = getKSTDateString(Date.now());
+        const dailyCacheKey = userId ? String(userId) : `anon:${getSectionsCacheKey(location)}`;
+        const dailyCached = todayPickDailyCache.get(dailyCacheKey);
+
+        // 하루 고정: 오늘 날짜 캐시가 있으면 해당 이벤트를 풀에서 찾아 반환
+        if (dailyCached && dailyCached.kstDate === todayKst) {
+          if (USE_TODAY_PICK_V2) {
+            const rawCandidates = pool_.rawEvents as ScoredTodayPickCandidate[];
+            pickedEvent = rawCandidates.find(c => c.event.id === dailyCached.eventId)?.event ?? null;
+          } else {
+            pickedEvent = pool_.rawEvents.find((e: any) => e.id === dailyCached.eventId) ?? null;
+          }
+          if (pickedEvent) {
+            console.log(`[today_pick] daily cache HIT (key=${dailyCacheKey}, event="${pickedEvent.title}")`);
+          }
+        }
+
+        // 캐시 미스 또는 이벤트가 풀에서 사라진 경우 → 정상 선택 후 캐시 저장
+        if (!pickedEvent) {
+          if (USE_TODAY_PICK_V2) {
+            const rawCandidates = pool_.rawEvents as ScoredTodayPickCandidate[];
+            const personalized = applyPersonalizationV2(rawCandidates, categoryClickCounts);
+            const picked = pickTodayPickCandidateV2(
+              personalized,
+              todayPickRecentIds,
+              todayPickClickedIds,
+              todayPickImpressionIds,
+            );
+            pickedEvent = picked?.event ?? null;
+          } else {
+            pickedEvent = pickTodayPickCandidate(pool_.rawEvents, recentClickedIds, clickedIds);
+          }
+          if (pickedEvent) {
+            todayPickDailyCache.set(dailyCacheKey, { eventId: pickedEvent.id, kstDate: todayKst });
+            console.log(`[today_pick] daily cache SET (key=${dailyCacheKey}, event="${pickedEvent.title}")`);
+          }
         }
 
         // impression 기록 (fire-and-forget, 응답 지연 없음)
