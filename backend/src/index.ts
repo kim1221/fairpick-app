@@ -1969,11 +1969,11 @@ app.get('/admin/events', requireAdminAuth, async (req, res) => {
     // last_collected_at은 dedupe가 돌 때마다 전체 이벤트에 갱신되므로 필터로 부적합.
     // "신규 수집"의 의미는 "이번 파이프라인에서 처음 수집된 이벤트"이므로 first_collected_at 사용.
     if (recentlyCollected === '24h') {
-      whereConditions.push(`first_collected_at IS NOT NULL AND first_collected_at >= NOW() - INTERVAL '24 hours'`);
+      whereConditions.push(`first_collected_at IS NOT NULL AND first_collected_at >= NOW() - INTERVAL '24 hours' AND end_at >= NOW()`);
     } else if (recentlyCollected === '7d') {
-      whereConditions.push(`first_collected_at IS NOT NULL AND first_collected_at >= NOW() - INTERVAL '7 days'`);
+      whereConditions.push(`first_collected_at IS NOT NULL AND first_collected_at >= NOW() - INTERVAL '7 days' AND end_at >= NOW()`);
     } else if (recentlyCollected === '30d') {
-      whereConditions.push(`first_collected_at IS NOT NULL AND first_collected_at >= NOW() - INTERVAL '30 days'`);
+      whereConditions.push(`first_collected_at IS NOT NULL AND first_collected_at >= NOW() - INTERVAL '30 days' AND end_at >= NOW()`);
     }
 
     // 검토 필요 필터

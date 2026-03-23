@@ -515,6 +515,14 @@ async function collectKopisEvents() {
         continue;
       }
 
+      // 이미 종료된 이벤트 스킵 (오늘 0시 기준)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (new Date(endDate) < today) {
+        totalSkipped++;
+        continue;
+      }
+
       // Raw 테이블 UPSERT (신규 이벤트만)
       try {
         const detailItem = finalItem as KopisDetailItem;
