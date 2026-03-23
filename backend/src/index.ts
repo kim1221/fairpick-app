@@ -1902,9 +1902,13 @@ app.get('/admin/events', requireAdminAuth, async (req, res) => {
     const isFeatured = req.query.isFeatured as string;
     const hasImage = req.query.hasImage as string;
     const isDeleted = req.query.isDeleted === 'true' ? true : req.query.isDeleted === 'false' ? false : null;
-    const recentlyCollected = req.query.recentlyCollected as string; // 🆕 최근 수집 필터
-    const completeness = req.query.completeness as string; // 🆕 데이터 완성도 필터
-    const sort = req.query.sort as string; // 🆕 정렬 기준 (예: 'start_at_desc', 'end_at_asc')
+    const recentlyCollected = req.query.recentlyCollected as string; // 최근 수집 필터
+    const completeness = req.query.completeness as string; // 데이터 완성도 필터
+    const sort = req.query.sort as string; // 정렬 기준 (예: 'start_at_desc', 'end_at_asc')
+    // 수집 메타데이터 필터 (1단계 MVP)
+    const needsReview = req.query.needsReview as string;   // 'true'
+    const createdSource = req.query.createdSource as string; // 'public_api' | 'admin_manual' | 'ai_discovery'
+    const ingestType = req.query.ingestType as string;     // 'new' | 'updated'
 
     console.log('[Admin] GET /admin/events - Filters:', {
       q,
@@ -1961,13 +1965,31 @@ app.get('/admin/events', requireAdminAuth, async (req, res) => {
       )`);
     }
     
-    // 🆕 최근 수집 필터 (created_at 기준)
+    // 최근 수집 필터 (last_collected_at 기준 — 운영/필터 로직)
+    // UI 표시용 fallback(created_at)과 분리: 필터는 last_collected_at IS NOT NULL 조건 필수
     if (recentlyCollected === '24h') {
-      whereConditions.push(`created_at >= NOW() - INTERVAL '24 hours'`);
+      whereConditions.push(`last_collected_at IS NOT NULL AND last_collected_at >= NOW() - INTERVAL '24 hours'`);
     } else if (recentlyCollected === '7d') {
-      whereConditions.push(`created_at >= NOW() - INTERVAL '7 days'`);
+      whereConditions.push(`last_collected_at IS NOT NULL AND last_collected_at >= NOW() - INTERVAL '7 days'`);
     } else if (recentlyCollected === '30d') {
-      whereConditions.push(`created_at >= NOW() - INTERVAL '30 days'`);
+      whereConditions.push(`last_collected_at IS NOT NULL AND last_collected_at >= NOW() - INTERVAL '30 days'`);
+    }
+
+    // 검토 필요 필터
+    if (needsReview === 'true') {
+      whereConditions.push(`needs_review = true`);
+    }
+
+    // 등록 경로 필터
+    if (createdSource && ['public_api', 'admin_manual', 'ai_discovery'].includes(createdSource)) {
+      whereConditions.push(`created_source = $${paramIndex++}`);
+      params.push(createdSource);
+    }
+
+    // 수집 변경 유형 필터
+    if (ingestType && ['new', 'updated'].includes(ingestType)) {
+      whereConditions.push(`ingest_change_type = $${paramIndex++}`);
+      params.push(ingestType);
     }
     
     // 데이터 완성도 필터 (dataQuality.ts computeOperationalScore와 동일 기준)
@@ -3069,6 +3091,14 @@ app.post('/admin/events', requireAdminAuth, async (req, res) => {
     // 7. DB 삽입
     const geoUpdatedAtValue = geoSource ? new Date() : null;
 
+    // 수집 메타데이터: needs_review 인라인 계산 (admin 수동 생성)
+    const adminReviewReasons: string[] = [];
+    if (!defaultValues.image_url || (defaultValues.image_url as string).includes('placeholder')) adminReviewReasons.push('no_image');
+    if (!defaultValues.price_info && defaultValues.is_free == null) adminReviewReasons.push('no_price');
+    if (lat == null || lng == null) adminReviewReasons.push('no_geo');
+    if (!defaultValues.overview || (defaultValues.overview as string).length < 30) adminReviewReasons.push('short_overview');
+    const adminNeedsReview = adminReviewReasons.length > 0;
+
     const result = await pool.query(
       `INSERT INTO canonical_events (
         id, content_key, title, display_title, start_at, end_at, venue, address,
@@ -3079,6 +3109,9 @@ app.post('/admin/events', requireAdminAuth, async (req, res) => {
         geo_source, geo_confidence, geo_reason, geo_updated_at,
         external_links, status, price_min, price_max, source_tags, derived_tags, opening_hours, parking_available, parking_info, quality_flags,
         metadata,
+        created_source, last_collector_source, ingest_change_type,
+        needs_review, review_reason,
+        first_collected_at, last_collected_at,
         created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
@@ -3087,6 +3120,9 @@ app.post('/admin/events', requireAdminAuth, async (req, res) => {
         $33, $34, $35, $36,
         $37::jsonb, $38, $39, $40, $41::jsonb, $42::jsonb, $43::jsonb, $44, $45, $46::jsonb,
         $47::jsonb,
+        'admin_manual', 'admin', 'new',
+        $48, $49::text[],
+        NOW(), NOW(),
         NOW(), NOW()
       ) RETURNING *`,
       [
@@ -3137,6 +3173,9 @@ app.post('/admin/events', requireAdminAuth, async (req, res) => {
         defaultValues.parking_info,
         JSON.stringify(defaultValues.quality_flags),
         metadata ? JSON.stringify(metadata) : null,
+        // 수집 메타데이터 ($48–$49)
+        adminNeedsReview,
+        adminReviewReasons.length > 0 ? adminReviewReasons : null,
       ]
     );
     
@@ -8126,6 +8165,7 @@ interface SectionsCache {
   cachedAt: number;
   trendingCachedAt?: number;                   // trending 별도 갱신 시각
   location?: { lat: number; lng: number };     // trending background refresh용
+  stableIds?: Record<string, string[]>;        // 섹션별 stable 슬롯 event_id 목록 (재빌드 후에도 유지)
 }
 const sectionsCacheMap = new Map<string, SectionsCache>();
 const SECTIONS_CACHE_TTL_MS   = 30 * 60 * 1000; // 30분 (session consistency)
@@ -8133,6 +8173,18 @@ const TRENDING_CACHE_TTL_MS   = 15 * 60 * 1000; // trending 별도 TTL
 // single-flight: 동일 캐시 키에 대한 중복 빌드 방지
 const buildInFlightMap        = new Map<string, Promise<SectionsCache>>();
 const trendingRefreshInFlight = new Set<string>(); // trending 중복 갱신 방지
+
+// 섹션별 stable 슬롯 수: 재빌드 후에도 이전 상위 이벤트가 우선 노출되도록 고정
+// rotation 슬롯(limit - stableCount개)은 나머지 후보에서 shuffle 채움
+const STABLE_SLOT_COUNTS: Record<string, number> = {
+  trending:     6,
+  date_pick:    6,
+  budget_pick:  4,
+  discovery:    4,
+  beginner:     4,
+  this_weekend: 4,
+  walkable:     4,
+};
 
 /**
  * KST 기준 날짜 문자열 반환 (YYYY-MM-DD)
@@ -8489,11 +8541,31 @@ app.get('/api/home/sections', async (req, res) => {
         // 첫 미스 요청: 빌드 시작 후 Promise를 맵에 등록
         buildPromise = buildSectionPools(location)
           .then(pools => {
+            // stable 슬롯 계산: 이전 캐시의 stableIds 중 새 풀에 존재하는 것 유지 → 나머지를 새 이벤트로 채움
+            const prevStableIds = sectionsCacheMap.get(cacheKey)?.stableIds ?? {};
+            const newStableIds: Record<string, string[]> = {};
+            for (const p of pools) {
+              const stableCount = STABLE_SLOT_COUNTS[p.slug] ?? 0;
+              if (stableCount === 0) continue;
+              const poolIdSet = new Set<string>(p.rawEvents.map((e: any) => e.id));
+              const surviving = (prevStableIds[p.slug] ?? []).filter(id => poolIdSet.has(id));
+              const survivingSet = new Set(surviving);
+              const needed = stableCount - surviving.length;
+              const newEntries = needed > 0
+                ? p.rawEvents.filter((e: any) => !survivingSet.has(e.id)).slice(0, needed).map((e: any) => e.id)
+                : [];
+              newStableIds[p.slug] = [...surviving, ...newEntries];
+              console.log(
+                `[home/sections] stable (${p.slug}): survived=${surviving.length}, new=${newEntries.length} → total=${newStableIds[p.slug].length}`,
+              );
+            }
+
             const newCache: SectionsCache = {
               pools,
               cachedAt: Date.now(),
               trendingCachedAt: Date.now(),
               location,
+              stableIds: newStableIds,
             };
             sectionsCacheMap.set(cacheKey, newCache);
             console.log(`[home/sections] cache MISS → built (key=${cacheKey})`);
@@ -8609,6 +8681,18 @@ app.get('/api/home/sections', async (req, res) => {
         events = sampleWithClickDownrank(pool_.rawEvents, pool_.limit, clickedIds)
           .map(mapEventForFrontend)
           .filter(Boolean);
+      }
+
+      // stable 슬롯 정렬: stableIds에 포함된 이벤트를 앞쪽 고정, 나머지(rotation)는 뒤쪽
+      // TODO: cooldownIds 적용 (middle-term — 최근 N회 노출 이벤트는 stable에서도 후순위)
+      // TODO: CTR sticky (middle-term — CTR 높은 이벤트를 stable 슬롯으로 자동 편입)
+      const slugStableIds = cached.stableIds?.[pool_.slug];
+      if (slugStableIds && slugStableIds.length > 0 && events.length > 0) {
+        const eventMap = new Map<string, any>(events.map((e: any) => [e.id, e]));
+        const stable   = slugStableIds.filter(id => eventMap.has(id)).map(id => eventMap.get(id)!);
+        const stableSet = new Set<string>(stable.map((e: any) => e.id));
+        const rotation = events.filter((e: any) => !stableSet.has(e.id));
+        events = [...stable, ...rotation];
       }
 
       // 노출 ID 수집 → 이후 섹션(date_pick 등) 중복 제거에 사용
