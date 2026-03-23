@@ -925,12 +925,13 @@ export default function EventsPage() {
                                 {SOURCE_BADGE[(event as any).created_source].label}
                               </span>
                             )}
-                            {/* 신규/갱신 배지 — 최근 7일만 */}
+                            {/* 신규/갱신 배지 — first_collected_at 기준 최근 7일만
+                                last_collected_at은 dedupe마다 갱신되므로 표시 기준으로 부적합 */}
                             {(() => {
-                              const lca = (event as any).last_collected_at;
+                              const fca = (event as any).first_collected_at;
                               const itype = (event as any).ingest_change_type;
                               const badge = itype && INGEST_BADGE[itype];
-                              const isRecent = lca && (Date.now() - new Date(lca).getTime()) < 7 * 24 * 3600 * 1000;
+                              const isRecent = fca && (Date.now() - new Date(fca).getTime()) < 7 * 24 * 3600 * 1000;
                               return badge && isRecent ? (
                                 <span className={`text-xs px-1.5 py-0.5 rounded font-medium w-fit ${badge.cls}`}>
                                   {badge.label}
@@ -946,9 +947,9 @@ export default function EventsPage() {
                                 ⚠️ 검토 필요
                               </span>
                             )}
-                            {/* 마지막 수집 시각 */}
+                            {/* 최초 수집 시각 (first_collected_at 기준) */}
                             <span className="text-xs text-gray-400">
-                              {formatRelativeTime((event as any).last_collected_at, (event as any).created_at)}
+                              {formatRelativeTime((event as any).first_collected_at, (event as any).created_at)}
                             </span>
                             {event.is_featured && (
                               <span className="badge badge-purple text-xs">Featured</span>

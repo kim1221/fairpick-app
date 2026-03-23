@@ -1965,14 +1965,15 @@ app.get('/admin/events', requireAdminAuth, async (req, res) => {
       )`);
     }
     
-    // 최근 수집 필터 (last_collected_at 기준 — 운영/필터 로직)
-    // UI 표시용 fallback(created_at)과 분리: 필터는 last_collected_at IS NOT NULL 조건 필수
+    // 최근 수집 필터 — first_collected_at 기준 (최초로 시스템에 들어온 시각)
+    // last_collected_at은 dedupe가 돌 때마다 전체 이벤트에 갱신되므로 필터로 부적합.
+    // "신규 수집"의 의미는 "이번 파이프라인에서 처음 수집된 이벤트"이므로 first_collected_at 사용.
     if (recentlyCollected === '24h') {
-      whereConditions.push(`last_collected_at IS NOT NULL AND last_collected_at >= NOW() - INTERVAL '24 hours'`);
+      whereConditions.push(`first_collected_at IS NOT NULL AND first_collected_at >= NOW() - INTERVAL '24 hours'`);
     } else if (recentlyCollected === '7d') {
-      whereConditions.push(`last_collected_at IS NOT NULL AND last_collected_at >= NOW() - INTERVAL '7 days'`);
+      whereConditions.push(`first_collected_at IS NOT NULL AND first_collected_at >= NOW() - INTERVAL '7 days'`);
     } else if (recentlyCollected === '30d') {
-      whereConditions.push(`last_collected_at IS NOT NULL AND last_collected_at >= NOW() - INTERVAL '30 days'`);
+      whereConditions.push(`first_collected_at IS NOT NULL AND first_collected_at >= NOW() - INTERVAL '30 days'`);
     }
 
     // 검토 필요 필터
