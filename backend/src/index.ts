@@ -9193,10 +9193,49 @@ app.post('/admin/ops/jobs/:jobName/run', requireAdminAuth, async (req, res) => {
 
 /**
  * POST /admin/ops/executions/:id/retry
- * 실행 재시도 (stub — 향후 구현)
+ * 실행 재시도 — collection_logs에서 scheduler_job_name을 조회하여 runOpsJob 호출
  */
 app.post('/admin/ops/executions/:id/retry', requireAdminAuth, async (req, res) => {
-  res.status(501).json({ message: 'Retry not yet implemented' });
+  const executionId = String(req.params.id);
+
+  let jobName: string | null = null;
+  try {
+    const { rows } = await pool.query<{ scheduler_job_name: string | null }>(
+      'SELECT scheduler_job_name FROM collection_logs WHERE id = $1',
+      [executionId],
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Execution not found' });
+    }
+    jobName = rows[0].scheduler_job_name;
+  } catch (err) {
+    console.error('[Admin] retry: DB query failed:', err);
+    return res.status(500).json({ message: 'DB error' });
+  }
+
+  if (!jobName) {
+    return res.status(422).json({ message: 'Cannot retry: execution has no scheduler_job_name' });
+  }
+
+  try {
+    const result = runOpsJob(jobName);
+    res.json({
+      success: true,
+      message: `Job '${jobName}' restarted`,
+      jobName: result.jobName,
+      startedAt: result.startedAt,
+    });
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ALREADY_RUNNING') {
+      return res.status(409).json({ message: `Job '${jobName}' is already running` });
+    }
+    if (code === 'NOT_FOUND') {
+      return res.status(404).json({ message: `Unknown job: ${jobName}` });
+    }
+    console.error(`[Admin] retry job '${jobName}' failed:`, err);
+    res.status(500).json({ message: 'Failed to retry job' });
+  }
 });
 
 /**
