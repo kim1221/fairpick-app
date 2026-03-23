@@ -8603,30 +8603,51 @@ app.get('/api/home/sections', async (req, res) => {
 
     // 3. 캐시된 풀에 사용자별 클릭 다운랭킹 적용 (DB 쿼리 없음)
     // shownIds: today_pick / ending_soon에서 노출된 event_id → this_weekend 중복 제거용
+
+    // today_pick daily cache: pool과 무관하게 하루 고정 이벤트 사전 조회
+    // 위치 있는 요청(nearby pool)과 없는 요청(national pool)이 섞여도 같은 이벤트를 반환하기 위해
+    // map 이전에 미리 DB에서 이벤트를 확보해둠
+    const todayKst = getKSTDateString(Date.now());
+    const dailyCacheKey = userId ? String(userId) : `anon:${getSectionsCacheKey(location)}`;
+    const dailyCached = todayPickDailyCache.get(dailyCacheKey);
+    let dailyCachedEvent: any = null;
+
+    if (dailyCached && dailyCached.kstDate === todayKst) {
+      // 1순위: 현재 pool에서 찾기 (빠름)
+      const todayPickPool = cached.pools.find(p => p.slug === 'today_pick');
+      if (todayPickPool) {
+        if (USE_TODAY_PICK_V2) {
+          const raw = todayPickPool.rawEvents as ScoredTodayPickCandidate[];
+          dailyCachedEvent = raw.find(c => c.event.id === dailyCached.eventId)?.event ?? null;
+        } else {
+          dailyCachedEvent = todayPickPool.rawEvents.find((e: any) => e.id === dailyCached.eventId) ?? null;
+        }
+      }
+      // 2순위: pool에 없으면 DB 직접 조회 (위치에 따라 pool이 달라지는 경우 대비)
+      if (!dailyCachedEvent) {
+        try {
+          const r = await pool.query<any>(
+            `SELECT * FROM canonical_events WHERE id = $1 AND is_deleted = false AND end_at >= NOW()`,
+            [dailyCached.eventId],
+          );
+          dailyCachedEvent = r.rows[0] ?? null;
+        } catch { /* 조회 실패 시 정상 선택 로직으로 폴백 */ }
+      }
+      if (dailyCachedEvent) {
+        console.log(`[today_pick] daily cache HIT (key=${dailyCacheKey}, event="${dailyCachedEvent.title}")`);
+      }
+    }
+
     const shownIds = new Set<string>();
     const sections = cached.pools.map((pool_) => {
       let events: any[];
 
       if (pool_.slug === 'today_pick') {
-        let pickedEvent: any;
-        const todayKst = getKSTDateString(Date.now());
-        const dailyCacheKey = userId ? String(userId) : `anon:${getSectionsCacheKey(location)}`;
-        const dailyCached = todayPickDailyCache.get(dailyCacheKey);
+        // daily cache는 map 이전에 이미 조회됨 (dailyCachedEvent)
+        // pool이 달라도 (no-location vs location) 동일 이벤트 반환 보장
+        let pickedEvent: any = dailyCachedEvent ?? null;
 
-        // 하루 고정: 오늘 날짜 캐시가 있으면 해당 이벤트를 풀에서 찾아 반환
-        if (dailyCached && dailyCached.kstDate === todayKst) {
-          if (USE_TODAY_PICK_V2) {
-            const rawCandidates = pool_.rawEvents as ScoredTodayPickCandidate[];
-            pickedEvent = rawCandidates.find(c => c.event.id === dailyCached.eventId)?.event ?? null;
-          } else {
-            pickedEvent = pool_.rawEvents.find((e: any) => e.id === dailyCached.eventId) ?? null;
-          }
-          if (pickedEvent) {
-            console.log(`[today_pick] daily cache HIT (key=${dailyCacheKey}, event="${pickedEvent.title}")`);
-          }
-        }
-
-        // 캐시 미스 또는 이벤트가 풀에서 사라진 경우 → 정상 선택 후 캐시 저장
+        // 캐시 미스인 경우 → 정상 선택 후 캐시 저장
         if (!pickedEvent) {
           if (USE_TODAY_PICK_V2) {
             const rawCandidates = pool_.rawEvents as ScoredTodayPickCandidate[];
