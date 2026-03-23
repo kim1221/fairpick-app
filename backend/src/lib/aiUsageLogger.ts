@@ -50,15 +50,19 @@ const PRICING: Record<string, ModelPricing> = {
 
 const FALLBACK_PRICING: ModelPricing = { inputPer1M: 0.50, outputPer1M: 1.50 };
 
+const GROUNDING_QUERY_COST = 0.035; // $0.035 per Google Search grounding query
+
 export function estimateGeminiCost(
   model: string,
   promptTokens: number,
   responseTokens: number,
+  groundingQueries = 0,
 ): number {
   const pricing = PRICING[model] ?? FALLBACK_PRICING;
-  const inputCost  = (promptTokens  / 1_000_000) * pricing.inputPer1M;
-  const outputCost = (responseTokens / 1_000_000) * pricing.outputPer1M;
-  return inputCost + outputCost;
+  const inputCost    = (promptTokens  / 1_000_000) * pricing.inputPer1M;
+  const outputCost   = (responseTokens / 1_000_000) * pricing.outputPer1M;
+  const groundingCost = groundingQueries * GROUNDING_QUERY_COST;
+  return inputCost + outputCost + groundingCost;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -76,7 +80,6 @@ export type AiUsageType =
   | 'normalize'        // 이벤트명 정규화
   | 'curation_copy'    // 큐레이션 카피라이팅 (Gemini) / 배너 카피 (OpenAI)
   | 'hot_rating'       // Hot 이벤트 평가
-  | 'popup_discovery'  // 팝업 발견
   | 'other';
 
 export type AiProvider = 'gemini' | 'openai';
@@ -88,6 +91,7 @@ export interface AiUsageInput {
   promptTokens: number;
   responseTokens: number;
   totalTokens?: number;
+  groundingQueries?: number; // Google Search grounding 쿼리 수 ($0.035/건 별도 청구)
   success?: boolean;
   errorCode?: string;
 }
@@ -109,12 +113,13 @@ export function logAiUsage(input: AiUsageInput): void {
     promptTokens,
     responseTokens,
     totalTokens,
+    groundingQueries = 0,
     success = true,
     errorCode,
   } = input;
 
   const total = totalTokens ?? promptTokens + responseTokens;
-  const estimatedCost = estimateGeminiCost(model, promptTokens, responseTokens);
+  const estimatedCost = estimateGeminiCost(model, promptTokens, responseTokens, groundingQueries);
 
   setImmediate(() => {
     pool
@@ -150,7 +155,7 @@ export function logGeminiUsage(
   response: { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } | null },
   model: string,
   usageType: AiUsageType,
-  options?: { success?: boolean; errorCode?: string },
+  options?: { success?: boolean; errorCode?: string; groundingQueries?: number },
 ): void {
   const meta = response.usageMetadata;
   if (!meta) return;
@@ -158,10 +163,11 @@ export function logGeminiUsage(
   logAiUsage({
     model,
     usageType,
-    promptTokens:   meta.promptTokenCount   ?? 0,
-    responseTokens: meta.candidatesTokenCount ?? 0,
-    totalTokens:    meta.totalTokenCount     ?? undefined,
-    success:        options?.success ?? true,
-    errorCode:      options?.errorCode,
+    promptTokens:    meta.promptTokenCount    ?? 0,
+    responseTokens:  meta.candidatesTokenCount ?? 0,
+    totalTokens:     meta.totalTokenCount      ?? undefined,
+    groundingQueries: options?.groundingQueries ?? 0,
+    success:         options?.success ?? true,
+    errorCode:       options?.errorCode,
   });
 }

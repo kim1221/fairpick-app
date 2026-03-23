@@ -140,7 +140,7 @@ async function callGeminiWithGrounding(prompt: string): Promise<string> {
   // AI 사용량 로깅 (grounding 쿼리 요금 포함)
   logAiUsage({
     model: 'gemini-2.5-flash',
-    usageType: 'popup_discovery',
+    usageType: 'other',
     promptTokens:   data.usageMetadata?.promptTokenCount    ?? 0,
     responseTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
     totalTokens:    data.usageMetadata?.totalTokenCount      ?? undefined,

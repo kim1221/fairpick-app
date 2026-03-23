@@ -230,8 +230,7 @@ router.get('/filters', async (req, res) => {
  * GET /api/recommendations/featured
  * 
  * AI가 선별한 핫한 이벤트 반환
- * - 팝업: ai-popup-discovery로 발굴 후 admin 승인 (hotness_score 70+)
- * - 전시/공연/축제: ai-hot-rating으로 평가 (hotness_score 70+)
+ * - 전시/공연/축제/팝업: ai-hot-rating으로 평가 (hotness_score 70+)
  */
 router.get('/featured', async (req, res) => {
   try {

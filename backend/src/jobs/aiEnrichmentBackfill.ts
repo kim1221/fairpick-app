@@ -643,6 +643,11 @@ export async function aiEnrichmentBackfill(options: {
       AND ai_enriched_at IS NULL
       AND COALESCE(ai_enrichment_attempts, 0) < 3
       AND (start_at IS NULL OR start_at <= NOW() + INTERVAL '${AI_ENRICH_MAX_DAYS_AHEAD} days')
+      AND (
+        derived_tags IS NULL OR derived_tags = '[]'::jsonb
+        OR opening_hours IS NULL
+        OR (price_min IS NULL AND price_max IS NULL)
+      )
   `;
 
   if (onlyMissingTags) {

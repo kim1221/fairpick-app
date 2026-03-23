@@ -1222,17 +1222,19 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
           (SELECT COUNT(*) FROM canonical_events
            WHERE is_deleted = false AND (overview IS NULL OR overview = ''))
            AS "incompleteEvents",
-          (SELECT COUNT(*) FROM collection_logs
-           WHERE status = 'success'
-             AND (started_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date
+          (SELECT COUNT(*) FROM canonical_events
+           WHERE is_deleted = false
+             AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date
                = (NOW() AT TIME ZONE 'Asia/Seoul')::date)
            AS "collectedToday",
           (SELECT COUNT(DISTINCT COALESCE(scheduler_job_name, type)) FROM collection_logs
            WHERE status = 'failed' AND started_at >= NOW() - INTERVAL '24 hours')
            AS "failedJobsRecent",
           (SELECT row_to_json(t) FROM (
-            SELECT source, type, status, started_at, completed_at
-            FROM collection_logs ORDER BY started_at DESC LIMIT 1
+            SELECT created_at AS started_at
+            FROM canonical_events
+            WHERE is_deleted = false
+            ORDER BY created_at DESC LIMIT 1
           ) t) AS "lastCollection"
       `),
       pool.query(`
@@ -9399,13 +9401,6 @@ const AI_USAGE_CONTEXT: Record<string, {
     relatedFeature: 'vector_search',
     shortExplanation: '검색어를 벡터로 변환해 의미 기반 검색에 사용합니다. 동일 쿼리는 캐시 재사용. $0.15/1M tokens',
   },
-  popup_discovery: {
-    itemId: 'gemini-popup-discovery',
-    name: 'Gemini — 팝업 발굴',
-    costDriver: 'AI 팝업 발굴 (runPopupDiscovery · 매일 08:00)',
-    relatedFeature: 'popup_discovery',
-    shortExplanation: '인터넷에서 팝업스토어를 자동 발굴하고 DB 중복을 검증합니다.',
-  },
   hot_rating: {
     itemId: 'gemini-hot-rating',
     name: 'Gemini — Hot Rating',
@@ -9516,6 +9511,7 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
         SUM(estimated_cost_usd)::text AS cost_usd
       FROM ai_usage_logs
       WHERE ${dateFilter} AND success = true
+        AND usage_type != 'popup_discovery'
       GROUP BY provider, usage_type
       ORDER BY SUM(estimated_cost_usd) DESC
     `);
@@ -9540,7 +9536,7 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
     // Grounding with Google Search 쿼리 요금: $35/1000 requests = $0.035/request
     // 토큰 비용과 별도로 청구되는 항목 — 현재 estimated_cost_usd에 미포함
     const GROUNDING_QUERY_FEE_USD = 0.035;
-    const GROUNDING_TYPES = new Set(['grounding', 'popup_discovery', 'hot_rating']);
+    const GROUNDING_TYPES = new Set(['grounding', 'hot_rating']);
 
     const itemMap = new Map<string, {
       id: string; category: string; provider: string; name: string;
@@ -9647,7 +9643,6 @@ app.get('/admin/cost/ai', requireAdminAuth, async (req, res) => {
         shortExplanation: ctx.shortExplanation,
         sourceOfTruth: 'DB ai_usage_logs 기반 집계 — 아직 검색 기록 없음',
         pricingRef: '$0.15/1M input tokens (gemini-embedding-001 Tier 1 기준)',
-        noAmountReason: undefined,
         usageMetrics: [
           { label: '요청 수',   value: 0, unit: '건',    formatted: '0건' },
           { label: '입력 토큰', value: 0, unit: 'tokens', formatted: '0' },
@@ -9923,12 +9918,6 @@ app.get('/admin/cost/api-usage', requireAdminAuth, async (_req, res) => {
         sources: 'KOPIS · TourAPI',
         costDriver: '오후 증분 수집 (매일 15:00)',
         shortExplanation: '정부 개방 API를 이용한 오후 증분 수집입니다. 현재 무료입니다.',
-      },
-      'ai-popup-discovery': {
-        label: 'AI 팝업 발굴',
-        sources: 'Gemini + 웹 검색',
-        costDriver: 'AI 팝업 발굴 (매일 08:00)',
-        shortExplanation: 'AI로 팝업 이벤트를 발굴합니다. API 비용은 AI 비용 섹션에 포함됩니다.',
       },
     };
 

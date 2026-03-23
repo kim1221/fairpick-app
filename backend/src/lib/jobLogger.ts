@@ -9,7 +9,6 @@
  *   - phase2-internal-fields (enrichInternalFields)
  *   - embed-new-events (embedNewEvents)
  *   - price-info (runPriceInfoBackfill)
- *   - ai-popup-discovery (runPopupDiscovery)
  *   - ai-hot-rating (runHotRating)
  */
 

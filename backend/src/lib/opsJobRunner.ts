@@ -11,7 +11,6 @@ import { updateMetadata } from '../jobs/updateMetadata';
 import { updateBuzzScore } from '../jobs/updateBuzzScore';
 import { runBackfill as runPriceInfoBackfill } from '../jobs/priceInfoBackfill';
 import { enrichInternalFields } from '../jobs/enrichInternalFields';
-import { runPopupDiscovery } from '../scripts/ai-popup-discovery';
 import { runHotRating } from '../scripts/ai-hot-rating';
 import { embedNewEvents } from '../jobs/embedNewEvents';
 import { sendEndSoonNotifications } from '../jobs/sendEndSoonNotifications';
@@ -39,7 +38,6 @@ const JOB_RUNNERS: Record<string, () => Promise<unknown>> = {
     await withJobLog('embed-new-events', embedNewEvents);
   },
   'price-info': () => withJobLog('price-info', () => runPriceInfoBackfill({ dryRun: false })),
-  'ai-popup-discovery': () => withJobLog('ai-popup-discovery', runPopupDiscovery),
   'end-soon-notifications': sendEndSoonNotifications,
   'ai-hot-rating': () => withJobLog('ai-hot-rating', runHotRating),
 };

@@ -7,7 +7,6 @@ import { runBackfill as runPriceInfoBackfill } from './jobs/priceInfoBackfill';
 import { cleanupStuckCollectionLogs } from './maintenance/cleanupStuckCollectionLogs';
 import { aiEnrichmentBackfill } from './jobs/aiEnrichmentBackfill';
 import { enrichInternalFields } from './jobs/enrichInternalFields';
-import { runPopupDiscovery } from './scripts/ai-popup-discovery';
 import { runHotRating } from './scripts/ai-hot-rating';
 import { embedNewEvents } from './jobs/embedNewEvents';
 import { sendEndSoonNotifications } from './jobs/sendEndSoonNotifications';
@@ -99,7 +98,6 @@ async function runMissedJobsOnStartup(): Promise<void> {
       { name: 'price-info',             schedH:  3, schedM: 30, expectedH: 24, fn: () => withJobLog('price-info', () => runPriceInfoBackfill({ dryRun: false })) },
       { name: 'phase2-internal-fields', schedH:  4, schedM: 15, expectedH: 24, fn: () => withJobLog('phase2-internal-fields', enrichInternalFields) },
       { name: 'embed-new-events',       schedH:  5, schedM:  0, expectedH: 24, fn: () => withJobLog('embed-new-events', embedNewEvents) },
-      { name: 'ai-popup-discovery',     schedH:  8, schedM:  0, expectedH: 24,  fn: () => withJobLog('ai-popup-discovery', runPopupDiscovery) },
       { name: 'ai-hot-rating',          schedH:  9, schedM:  0, expectedH: 168, fn: () => withJobLog('ai-hot-rating', runHotRating) },
       { name: 'collect-15',             schedH: 15, schedM:  0, expectedH: 24,  fn: () => runGeoRefreshPipeline({ lightMode: true, schedulerJobName: 'collect-15' }) },
     ];
@@ -329,13 +327,6 @@ export function initScheduler() {
     });
     console.log('[Scheduler] registered: Embed new events @ 05:00 KST');
 
-    // 매일 08:00 KST - AI Popup Discovery (팝업 신규 발굴 + DB 중복 체크)
-    cron.schedule('0 8 * * *', async () => {
-      await runJobSafely('ai-popup-discovery', () => withJobLog('ai-popup-discovery', runPopupDiscovery));
-    }, {
-      timezone: 'Asia/Seoul'
-    });
-    console.log('[Scheduler] registered: AI Popup Discovery @ 08:00 KST');
 
     // 매일 09:00 KST - 찜한 이벤트 종료 D-3 알림 발송 (기능 보류 중 — 재개 시 주석 해제)
     // cron.schedule('0 9 * * *', async () => {
@@ -380,7 +371,6 @@ export function initScheduler() {
     console.log('  - 03:30 KST: Price info backfill (extract from API payloads)');
     console.log('  - 04:15 KST: Phase 2 Internal Fields (metadata.internal generation)');
     console.log('  - 05:00 KST: Embed new events (벡터 임베딩 생성)');
-    console.log('  - 08:00 KST: AI Popup Discovery (팝업 신규 발굴)');
     // console.log('  - 09:00 KST: End-soon notifications (찜한 이벤트 D-3 알림) — 보류');
     console.log('  - 09:00 KST (Mon): AI Hot Rating (전시/공연/축제 핫함 평가)');
     console.log('  - 15:00 KST: Light collect pipeline (collect + dedupe only, geo/AI 생략)');

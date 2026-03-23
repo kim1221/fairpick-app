@@ -2285,7 +2285,9 @@ export async function extractEventInfoEnhanced(
     const result = await currentModel.generateContent(prompt);
     const response = await result.response;
     // useGoogleSearch=false이면 실제 grounding 없음 → 'extraction'으로 기록 (grounding query fee 과계산 방지)
-    logGeminiUsage(response, 'gemini-2.5-flash', useGoogleSearch ? 'grounding' : 'extraction');
+    logGeminiUsage(response, 'gemini-2.5-flash', useGoogleSearch ? 'grounding' : 'extraction', {
+      groundingQueries: useGoogleSearch ? 1 : 0,
+    });
     const content = response.text();
 
     console.log('[AI] 🔍 Response length:', content.length, 'chars');
