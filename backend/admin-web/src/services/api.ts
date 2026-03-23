@@ -119,8 +119,11 @@ export const adminApi = {
     hasImage?: string;
     isDeleted?: string;
     sort?: string;
-    recentlyCollected?: string; // 🆕 추가
-    completeness?: string; // 🆕 데이터 완성도 필터
+    recentlyCollected?: string;
+    completeness?: string;
+    needsReview?: string;   // 'true'
+    createdSource?: string; // 'public_api' | 'admin_manual' | 'ai_discovery'
+    ingestType?: string;    // 'new' | 'updated'
   }): Promise<PaginatedResponse<Event>> => {
     const { data } = await api.get('/admin/events', { params });
     return data;

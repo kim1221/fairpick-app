@@ -337,6 +337,12 @@ export interface CanonicalEvent {
   derivedTags?: string[];
   qualityFlags?: Record<string, boolean>;
   fieldSources?: Record<string, any>; // 🆕 필드별 데이터 출처
+  // 수집 메타데이터 (1단계 MVP)
+  createdSource?: string;        // 'public_api' | 'admin_manual' | 'ai_discovery'
+  lastCollectorSource?: string;  // kopis | culture | tour | admin | ai
+  ingestChangeType?: string;     // 'new' (caller 고정값; ON CONFLICT에서 SQL이 'updated'로 교체)
+  needsReview?: boolean;
+  reviewReason?: string[] | null;
 }
 
 // Raw 테이블에서 모든 이벤트 조회
@@ -398,12 +404,18 @@ export async function upsertCanonicalEvent(event: CanonicalEvent) {
         source_priority_winner, sources,
         external_links, status, price_min, price_max, source_tags, derived_tags, quality_flags,
         field_sources,
+        created_source, last_collector_source, ingest_change_type,
+        needs_review, review_reason,
+        first_collected_at, last_collected_at,
         updated_at
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
         $18::jsonb, $19, $20, $21, $22::jsonb, $23::jsonb, $24::jsonb,
         $25::jsonb,
+        $26, $27, $28,
+        $29, $30::text[],
+        NOW(), NOW(),
         NOW()
       )
       ON CONFLICT (canonical_key)
@@ -490,6 +502,15 @@ export async function upsertCanonicalEvent(event: CanonicalEvent) {
         END,
         quality_flags = EXCLUDED.quality_flags,
         field_sources = COALESCE(EXCLUDED.field_sources, canonical_events.field_sources, '{}'::jsonb),
+        -- 수집 메타데이터: created_source / first_collected_at 는 최초 값 보존
+        created_source = COALESCE(canonical_events.created_source, EXCLUDED.created_source),
+        first_collected_at = COALESCE(canonical_events.first_collected_at, NOW()),
+        last_collected_at = NOW(),
+        last_collector_source = EXCLUDED.last_collector_source,
+        -- INSERT 시 'new', ON CONFLICT 시 항상 'updated'
+        ingest_change_type = 'updated',
+        needs_review = EXCLUDED.needs_review,
+        review_reason = EXCLUDED.review_reason,
         updated_at = NOW()
     `,
     [
@@ -517,7 +538,13 @@ export async function upsertCanonicalEvent(event: CanonicalEvent) {
       JSON.stringify(event.sourceTags || []),
       event.derivedTags && event.derivedTags.length > 0 ? JSON.stringify(event.derivedTags) : null,
       JSON.stringify(event.qualityFlags || {}),
-      JSON.stringify(event.fieldSources || {}), // 🆕
+      JSON.stringify(event.fieldSources || {}),
+      // 수집 메타데이터 ($26–$30)
+      event.createdSource ?? 'public_api',
+      event.lastCollectorSource ?? null,
+      event.ingestChangeType ?? 'new',
+      event.needsReview ?? false,
+      event.reviewReason ?? null,
     ],
   );
 

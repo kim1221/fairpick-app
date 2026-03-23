@@ -709,6 +709,50 @@ function extractPhase1Fields(events: (RawEventFromDB & { rawTable: string })[]):
 }
 
 /**
+ * 검토 필요 여부 계산 (1단계 MVP)
+ * - dedupe 단계에서 1차 계산
+ * - 향후 updateMetadata에서 동일 함수를 import해 재계산 가능
+ */
+export function computeNeedsReview(event: {
+  imageUrl?: string | null;
+  priceInfo?: string | null;
+  isFree?: boolean | null;
+  lat?: number | null;
+  lng?: number | null;
+  overview?: string | null;
+  createdSource?: string | null;
+}): { needsReview: boolean; reviewReason: string[] } {
+  const reasons: string[] = [];
+
+  // no_image: 이미지 없음 또는 placeholder
+  if (!event.imageUrl || event.imageUrl.includes('placeholder') || event.imageUrl.includes('/defaults/')) {
+    reasons.push('no_image');
+  }
+
+  // no_price: price_info도 없고 is_free도 미결정
+  if (!event.priceInfo && event.isFree == null) {
+    reasons.push('no_price');
+  }
+
+  // no_geo: 좌표 없음 (0 falsy 오판 방지 — null/undefined 비교)
+  if (event.lat == null || event.lng == null) {
+    reasons.push('no_geo');
+  }
+
+  // short_overview: 설명 없거나 30자 미만
+  if (!event.overview || event.overview.length < 30) {
+    reasons.push('short_overview');
+  }
+
+  // ai_discovery: AI 발굴 이벤트
+  if (event.createdSource === 'ai_discovery') {
+    reasons.push('ai_discovery');
+  }
+
+  return { needsReview: reasons.length > 0, reviewReason: reasons };
+}
+
+/**
  * Dedupe 메인 로직
  */
 export async function dedupeCanonicalEvents() {
@@ -965,6 +1009,14 @@ export async function dedupeCanonicalEvents() {
         has_price_info: !!(phase1Fields.priceMin || phase1Fields.priceMax),
       };
 
+      // 수집 메타데이터 계산
+      const { needsReview, reviewReason } = computeNeedsReview({
+        imageUrl: winnerEvent.image_url,
+        isFree,
+        lat: location.lat,
+        lng: location.lng,
+      });
+
       const canonicalEvent: CanonicalEvent = {
         canonicalKey,
         title: winnerEvent.title || '',
@@ -991,8 +1043,13 @@ export async function dedupeCanonicalEvents() {
         sourceTags: phase1Fields.sourceTags,
         derivedTags: undefined, // AI 백필에서 채움 — dedupe가 초기화하지 않도록 undefined 유지
         qualityFlags,
-        // 🆕 field_sources (공공API 출처 추적)
         fieldSources,
+        // 수집 메타데이터 (1단계 MVP)
+        createdSource: 'public_api',
+        lastCollectorSource: winnerSource,  // kopis | culture | tour
+        ingestChangeType: 'new',            // ON CONFLICT 시 SQL이 'updated'로 교체
+        needsReview,
+        reviewReason,
       };
 
       // DB에 저장 (UPSERT)

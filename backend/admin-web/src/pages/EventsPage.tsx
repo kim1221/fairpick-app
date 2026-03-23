@@ -14,6 +14,41 @@ const isPlaceholderImage = (imageUrl: string | null | undefined): boolean => {
   return lowerUrl.includes('placeholder') || lowerUrl.includes('/defaults/');
 };
 
+// 상대 시각 표시 (UI 표시용 — last_collected_at, fallback: created_at)
+const formatRelativeTime = (dateStr: string | null | undefined, fallback?: string | null): string => {
+  const raw = dateStr || fallback;
+  if (!raw) return '-';
+  const diff = Date.now() - new Date(raw).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}분 전`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}시간 전`;
+  const days = Math.floor(hrs / 24);
+  return `${days}일 전`;
+};
+
+// 등록 경로 배지 설정
+const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
+  public_api:    { label: 'API',  cls: 'bg-blue-100 text-blue-700' },
+  admin_manual:  { label: '수동', cls: 'bg-gray-100 text-gray-700' },
+  ai_discovery:  { label: 'AI',   cls: 'bg-purple-100 text-purple-700' },
+};
+
+// 수집 변경 유형 배지 설정 (최근 7일만 표시)
+const INGEST_BADGE: Record<string, { label: string; cls: string }> = {
+  new:     { label: '신규', cls: 'bg-blue-500 text-white' },
+  updated: { label: '갱신', cls: 'bg-orange-400 text-white' },
+};
+
+// review_reason 코드 → 한국어 레이블
+const REVIEW_REASON_LABEL: Record<string, string> = {
+  no_image:       '이미지 없음',
+  no_price:       '가격 미정',
+  no_geo:         '좌표 없음',
+  short_overview: '설명 부족',
+  ai_discovery:   'AI 발굴',
+};
+
 export default function EventsPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -21,8 +56,12 @@ export default function EventsPage() {
   const [category, setCategory] = useState('');
   const [isFeatured, setIsFeatured] = useState('');
   const [hasImage, setHasImage] = useState(''); // 이미지 필터 추가
-  const [recentlyCollected, setRecentlyCollected] = useState(''); // 🆕 최근 수집 필터
-  const [completeness, setCompleteness] = useState(''); // 🆕 데이터 완성도 필터
+  const [recentlyCollected, setRecentlyCollected] = useState('');
+  const [completeness, setCompleteness] = useState('');
+  // 수집 메타데이터 필터 (1단계 MVP)
+  const [needsReview, setNeedsReview] = useState('');
+  const [createdSource, setCreatedSource] = useState('');
+  const [ingestType, setIngestType] = useState('');
   const [sortBy, setSortBy] = useState('updated_at_desc'); // 정렬 기준
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -54,7 +93,7 @@ export default function EventsPage() {
   }, [search]);
 
   const { data: eventsData, isLoading, refetch } = useQuery({
-    queryKey: ['events', page, debouncedSearch, category, isFeatured, hasImage, recentlyCollected, completeness, sortBy],
+    queryKey: ['events', page, debouncedSearch, category, isFeatured, hasImage, recentlyCollected, completeness, sortBy, needsReview, createdSource, ingestType],
     queryFn: () =>
       adminApi.getEvents({
         page,
@@ -65,8 +104,11 @@ export default function EventsPage() {
         hasImage: hasImage || undefined,
         isDeleted: 'false',
         sort: sortBy,
-        recentlyCollected: recentlyCollected || undefined, // 🆕 추가
-        completeness: completeness || undefined, // 🆕 완성도 필터
+        recentlyCollected: recentlyCollected || undefined,
+        completeness: completeness || undefined,
+        needsReview: needsReview || undefined,
+        createdSource: createdSource || undefined,
+        ingestType: ingestType || undefined,
       }),
   });
 
@@ -731,6 +773,34 @@ export default function EventsPage() {
             <option value="good">🟡 양호 (공통 필드 완료)</option>
             <option value="excellent">🟢 완벽 (카테고리 특화 포함)</option>
           </select>
+          {/* 수집 메타데이터 필터 (1단계 MVP) */}
+          <select
+            value={needsReview}
+            onChange={(e) => { setNeedsReview(e.target.value); setPage(1); }}
+            className="input"
+          >
+            <option value="">검토: 전체</option>
+            <option value="true">⚠️ 검토 필요</option>
+          </select>
+          <select
+            value={createdSource}
+            onChange={(e) => { setCreatedSource(e.target.value); setPage(1); }}
+            className="input"
+          >
+            <option value="">등록 경로: 전체</option>
+            <option value="public_api">🌐 공공 API</option>
+            <option value="admin_manual">✏️ 수동 등록</option>
+            <option value="ai_discovery">🤖 AI 발굴</option>
+          </select>
+          <select
+            value={ingestType}
+            onChange={(e) => { setIngestType(e.target.value); setPage(1); }}
+            className="input"
+          >
+            <option value="">수집 유형: 전체</option>
+            <option value="new">🆕 신규</option>
+            <option value="updated">🔄 갱신</option>
+          </select>
           <select
             value={sortBy}
             onChange={(e) => {
@@ -849,6 +919,37 @@ export default function EventsPage() {
                         </td>
                         <td className="px-4 py-4 text-sm">
                           <div className="flex flex-col gap-1">
+                            {/* 등록 경로 배지 */}
+                            {(event as any).created_source && SOURCE_BADGE[(event as any).created_source] && (
+                              <span className={`text-xs px-1.5 py-0.5 rounded font-medium w-fit ${SOURCE_BADGE[(event as any).created_source].cls}`}>
+                                {SOURCE_BADGE[(event as any).created_source].label}
+                              </span>
+                            )}
+                            {/* 신규/갱신 배지 — 최근 7일만 */}
+                            {(() => {
+                              const lca = (event as any).last_collected_at;
+                              const itype = (event as any).ingest_change_type;
+                              const badge = itype && INGEST_BADGE[itype];
+                              const isRecent = lca && (Date.now() - new Date(lca).getTime()) < 7 * 24 * 3600 * 1000;
+                              return badge && isRecent ? (
+                                <span className={`text-xs px-1.5 py-0.5 rounded font-medium w-fit ${badge.cls}`}>
+                                  {badge.label}
+                                </span>
+                              ) : null;
+                            })()}
+                            {/* 검토 필요 아이콘 */}
+                            {(event as any).needs_review && (
+                              <span
+                                className="text-xs text-red-500 font-medium"
+                                title={(((event as any).review_reason as string[]) || []).map((r: string) => REVIEW_REASON_LABEL[r] || r).join(', ')}
+                              >
+                                ⚠️ 검토 필요
+                              </span>
+                            )}
+                            {/* 마지막 수집 시각 */}
+                            <span className="text-xs text-gray-400">
+                              {formatRelativeTime((event as any).last_collected_at, (event as any).created_at)}
+                            </span>
                             {event.is_featured && (
                               <span className="badge badge-purple text-xs">Featured</span>
                             )}
