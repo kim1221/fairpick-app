@@ -84,8 +84,10 @@ function ServerHealthRow({ health, isLoading }: { health?: AdminHealth; isLoadin
         value={health.db.ok
           ? <span className="text-green-600">✓ 연결됨</span>
           : <span className="text-red-600">✕ 연결 실패</span>}
-        sub={health.pool.totalCount != null ? `pool ${health.pool.idleCount}/${health.pool.totalCount} idle` : undefined}
-        accent={health.db.ok ? 'ok' : 'error'}
+        sub={health.pool.totalCount != null
+          ? `idle ${health.pool.idleCount}/${health.pool.totalCount}${health.pool.waitingCount ? ` · wait ${health.pool.waitingCount}` : ''}`
+          : undefined}
+        accent={health.pool.waitingCount && health.pool.waitingCount > 3 ? 'warn' : health.db.ok ? 'ok' : 'error'}
       />
       <MetricCard
         label="메모리"

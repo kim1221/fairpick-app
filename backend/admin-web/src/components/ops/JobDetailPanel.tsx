@@ -33,6 +33,7 @@ interface JobDetailPanelProps {
   onClose: () => void;
   job: SchedulerJob | null;
   onRunNow?: (jobName: string) => Promise<void>;
+  onRetry?: (executionId: string, jobName: string) => Promise<void>;
 }
 
 export default function JobDetailPanel({
@@ -40,6 +41,7 @@ export default function JobDetailPanel({
   onClose,
   job,
   onRunNow,
+  onRetry,
 }: JobDetailPanelProps) {
   const execution = job?.lastExecution ?? null;
   const [copied, setCopied] = useState(false);
@@ -238,14 +240,27 @@ export default function JobDetailPanel({
           >
             {copied ? '✓ 복사됨' : '📋 로그 복사'}
           </button>
-          {job && onRunNow && (
-            <RunNowButton
-              jobName={job.name}
-              jobLabel={job.label}
-              onRun={onRunNow}
-              disabled={job.isRunning}
-            />
-          )}
+          <div className="flex items-center gap-2">
+            {job && onRetry && execution &&
+              (execution.status === 'failed' || execution.status === 'partial_success') && (
+              <button
+                onClick={() => void onRetry(execution.id, job.name)}
+                disabled={job.isRunning}
+                className="text-xs px-3 py-1.5 rounded-lg border border-yellow-300 text-yellow-700
+                           hover:bg-yellow-50 transition-colors disabled:opacity-30"
+              >
+                ↺ 재시도
+              </button>
+            )}
+            {job && onRunNow && (
+              <RunNowButton
+                jobName={job.name}
+                jobLabel={job.label}
+                onRun={onRunNow}
+                disabled={job.isRunning}
+              />
+            )}
+          </div>
         </div>
       </div>
     </>

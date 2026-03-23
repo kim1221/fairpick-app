@@ -119,18 +119,6 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     maxRunHours: 2,
     sourceKeywords: ['embed', 'embedding'],
   },
-  {
-    name: 'ai-popup-discovery',
-    label: 'AI 팝업 발굴',
-    description: '팝업 신규 발굴 + DB 중복 체크',
-    schedule: '매일 08:00',
-    scheduleHour: 8,
-    scheduleMinute: 0,
-    scheduleDayOfWeek: null,
-    expectedIntervalHours: 24,
-    maxRunHours: 1,
-    sourceKeywords: ['popup-discovery', 'ai-popup'],
-  },
   // end-soon-notifications: 기능 보류 중 (scheduler.ts도 주석 처리됨)
   {
     name: 'ai-hot-rating',
@@ -364,7 +352,7 @@ export async function runJobNow(jobName: string): Promise<RunJobResult> {
 }
 
 /**
- * 실행 재시도 — POST /admin/ops/executions/:logId/retry (stub)
+ * 실행 재시도 — POST /admin/ops/executions/:logId/retry
  */
 export async function retryExecution(logId: string): Promise<RunJobResult> {
   const res = await api.post<RunJobResult>(`/admin/ops/executions/${logId}/retry`);

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { JobExecution, SchedulerJob } from '../types/ops';
 import { useJobStatus } from '../hooks/useJobStatus';
 import { useAdminHealth, useApiHealth } from '../hooks/useAdminHealth';
-import { runJobNow } from '../services/opsApi';
+import { runJobNow, retryExecution } from '../services/opsApi';
 import SystemStatusBanner from '../components/ops/SystemStatusBanner';
 import JobCard from '../components/ops/JobCard';
 import ExecutionLogTable from '../components/ops/ExecutionLogTable';
@@ -80,6 +80,25 @@ export default function OpsPage() {
       let msg = '실행 요청 실패';
       if (res?.status === 409) msg = '이미 실행 중입니다';
       else if (res?.status === 404) msg = '알 수 없는 잡 이름';
+      else if (err instanceof Error) msg = err.message;
+      setRunFeedback({ jobName, type: 'error', msg });
+      setTimeout(() => setRunFeedback(null), 5000);
+    }
+  };
+
+  // ── Retry ───────────────────────────────────────────────────
+
+  const handleRetry = async (executionId: string, jobName: string) => {
+    try {
+      const result = await retryExecution(executionId);
+      setRunFeedback({ jobName, type: 'success', msg: result.message ?? '재시도 요청 완료' });
+      void refetch();
+      setTimeout(() => setRunFeedback(null), 4000);
+    } catch (err: unknown) {
+      const res = (err as { response?: { status?: number } }).response;
+      let msg = '재시도 실패';
+      if (res?.status === 409) msg = '이미 실행 중입니다';
+      else if (res?.status === 422) msg = '재시도 불가: 잡 이름을 찾을 수 없습니다';
       else if (err instanceof Error) msg = err.message;
       setRunFeedback({ jobName, type: 'error', msg });
       setTimeout(() => setRunFeedback(null), 5000);
@@ -271,6 +290,7 @@ export default function OpsPage() {
         onClose={closePanel}
         job={selectedJob}
         onRunNow={handleRunNow}
+        onRetry={handleRetry}
       />
     </>
   );
