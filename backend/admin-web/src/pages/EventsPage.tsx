@@ -2299,7 +2299,23 @@ export default function EventsPage() {
                           <input
                             type="text"
                             value={selectedEvent.metadata?.display?.popup?.photo_zone_desc || ''}
-                            onChange={(e) => handleMetadataDisplayChange('popup', 'photo_zone_desc', e.target.value)}
+                            onChange={(e) => {
+                              setSelectedEvent({
+                                ...selectedEvent,
+                                metadata: {
+                                  ...selectedEvent.metadata,
+                                  display: {
+                                    ...selectedEvent.metadata?.display,
+                                    popup: {
+                                      ...selectedEvent.metadata?.display?.popup,
+                                      photo_zone_desc: e.target.value,
+                                      is_fnb: selectedEvent.metadata?.display?.popup?.is_fnb || false,
+                                      brands: selectedEvent.metadata?.display?.popup?.brands || [],
+                                    },
+                                  },
+                                },
+                              });
+                            }}
                             className="input"
                             placeholder="예: 대형 곰인형 포토존, 2층 입구"
                           />

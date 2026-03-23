@@ -2939,7 +2939,7 @@ export default function CreateEventPage() {
       {/* Field Selector Modal */}
       {showFieldSelectorModal && (
         <FieldSelectorModal
-          category={formData.mainCategory}
+          mainCategory={formData.mainCategory}
           onConfirm={(forceFields) => {
             setShowFieldSelectorModal(false);
             handleAIEnrichPreview(forceFields);
