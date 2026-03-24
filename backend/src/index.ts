@@ -1224,17 +1224,18 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
            AS "incompleteEvents",
           (SELECT COUNT(*) FROM canonical_events
            WHERE is_deleted = false
-             AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date
+             AND last_collected_at IS NOT NULL
+             AND (last_collected_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date
                = (NOW() AT TIME ZONE 'Asia/Seoul')::date)
            AS "collectedToday",
           (SELECT COUNT(DISTINCT COALESCE(scheduler_job_name, type)) FROM collection_logs
            WHERE status = 'failed' AND started_at >= NOW() - INTERVAL '24 hours')
            AS "failedJobsRecent",
           (SELECT row_to_json(t) FROM (
-            SELECT created_at AS started_at
+            SELECT last_collected_at AS started_at
             FROM canonical_events
-            WHERE is_deleted = false
-            ORDER BY created_at DESC LIMIT 1
+            WHERE is_deleted = false AND last_collected_at IS NOT NULL
+            ORDER BY last_collected_at DESC LIMIT 1
           ) t) AS "lastCollection"
       `),
       pool.query(`
