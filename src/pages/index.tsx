@@ -285,16 +285,22 @@ function HomePageInner() {
       const uid = await getCurrentUserId();
       setUserId(uid);
 
-      const locPromise = requestLocation();
-      await loadSections(undefined, uid);
-
+      // GPS를 최대 2초 대기 후 위치 포함해 첫 API 호출
+      // → today_pick 포함 모든 섹션이 처음부터 위치 기반으로 로드됨
       const loc = await Promise.race([
-        locPromise,
-        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 5000)),
+        requestLocation(),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 2000)),
       ]);
 
-      if (loc) {
-        await injectLocationSections(loc, uid);
+      await loadSections(loc, uid);
+
+      // GPS가 2초 내에 못 왔지만 이후 완료된 경우 전체 섹션 재로드
+      if (!loc) {
+        requestLocation().then((resolvedLoc) => {
+          if (resolvedLoc) {
+            void loadSections(resolvedLoc, uid);
+          }
+        }).catch(() => {});
       }
     } catch (error) {
       console.error('[Home] init error:', error);
@@ -348,29 +354,6 @@ function HomePageInner() {
         expiresAt: Date.now() + HOME_CACHE_TTL_MS,
       };
     }
-  };
-
-  const injectLocationSections = async (loc: Location, uid?: string) => {
-    const currentUid = uid ?? userId;
-    const response = await recommendationService.getSections(loc, currentUid);
-    if (!response.success) return;
-
-    const locationSlugs = new Set(['nearby', 'walkable']);
-    const incoming = response.sections.filter((s) => locationSlugs.has(s.slug));
-    if (incoming.length === 0) return;
-
-    setSections((prev) => {
-      if (!prev) return prev;
-      const base = prev.filter((s) => !locationSlugs.has(s.slug));
-      const merged = [...base, ...incoming];
-      _homeCache = {
-        sections: merged,
-        location: loc,
-        userId: currentUid,
-        expiresAt: Date.now() + HOME_CACHE_TTL_MS,
-      };
-      return merged;
-    });
   };
 
   const handleEventPress = useCallback((eventId: string, sectionSlug?: string, rankPosition?: number) => {
