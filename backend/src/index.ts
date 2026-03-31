@@ -8182,9 +8182,32 @@ const buildInFlightMap        = new Map<string, Promise<SectionsCache>>();
 const trendingRefreshInFlight = new Set<string>(); // trending 중복 갱신 방지
 
 // ─── today_pick 하루 고정 캐시 ───────────────────────────────────────────────
-// 유저(또는 위치)별로 하루 동안 동일한 today_pick 이벤트를 반환
+// L1: in-memory (빠름), L2: cost_cache DB (서버 재시작 생존)
 // 키: userId 또는 "anon:{location_key}", 값: { eventId, kstDate }
 const todayPickDailyCache = new Map<string, { eventId: string; kstDate: string }>();
+
+async function getTodayPickFromDB(
+  cacheKey: string,
+): Promise<{ eventId: string; kstDate: string } | null> {
+  try {
+    const { rows } = await pool.query<{ value: { eventId: string; kstDate: string } }>(
+      `SELECT value FROM cost_cache WHERE key = $1`,
+      [`today_pick:${cacheKey}`],
+    );
+    return rows[0]?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function saveTodayPickToDB(cacheKey: string, data: { eventId: string; kstDate: string }): void {
+  pool.query(
+    `INSERT INTO cost_cache (key, value, updated_at)
+     VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = $2::jsonb, updated_at = NOW()`,
+    [`today_pick:${cacheKey}`, JSON.stringify(data)],
+  ).catch(() => {});
+}
 
 // 섹션별 stable 슬롯 수: 재빌드 후에도 이전 상위 이벤트가 우선 노출되도록 고정
 // rotation 슬롯(limit - stableCount개)은 나머지 후보에서 shuffle 채움
@@ -8615,8 +8638,17 @@ app.get('/api/home/sections', async (req, res) => {
     // map 이전에 미리 DB에서 이벤트를 확보해둠
     const todayKst = getKSTDateString(Date.now());
     const dailyCacheKey = userId ? String(userId) : `anon:${getSectionsCacheKey(location)}`;
-    const dailyCached = todayPickDailyCache.get(dailyCacheKey);
+    let dailyCached = todayPickDailyCache.get(dailyCacheKey);
     let dailyCachedEvent: any = null;
+
+    // L1 미스 → L2(DB) 조회 (서버 재시작 후 복구)
+    if (!dailyCached || dailyCached.kstDate !== todayKst) {
+      const dbCached = await getTodayPickFromDB(dailyCacheKey);
+      if (dbCached && dbCached.kstDate === todayKst) {
+        todayPickDailyCache.set(dailyCacheKey, dbCached); // L1 복원
+        dailyCached = dbCached;
+      }
+    }
 
     if (dailyCached && dailyCached.kstDate === todayKst) {
       // 1순위: 현재 pool에서 찾기 (빠름)
@@ -8669,7 +8701,9 @@ app.get('/api/home/sections', async (req, res) => {
             pickedEvent = pickTodayPickCandidate(pool_.rawEvents, recentClickedIds, clickedIds);
           }
           if (pickedEvent) {
-            todayPickDailyCache.set(dailyCacheKey, { eventId: pickedEvent.id, kstDate: todayKst });
+            const dailyCacheData = { eventId: pickedEvent.id, kstDate: todayKst };
+            todayPickDailyCache.set(dailyCacheKey, dailyCacheData);
+            saveTodayPickToDB(dailyCacheKey, dailyCacheData); // L2 영속화
             console.log(`[today_pick] daily cache SET (key=${dailyCacheKey}, event="${pickedEvent.title}")`);
           }
         }
