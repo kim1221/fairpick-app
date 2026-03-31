@@ -784,13 +784,10 @@ function EventDetailPage() {
 
         </View>
 
-        {/* Bottom Spacer — 광고 + CTA 높이만큼 여백 */}
-        <View style={{ height: (primaryCTALink ? 90 + (primaryCTALink.label === '티켓 예매하기' ? 22 : 0) : 0) + (adRendered ? 96 : 0) + 20 }} />
-      </ScrollView>
+        {/* Bottom Spacer — CTA 높이만큼 여백 (광고 위에 위치해 광고가 스크롤 마지막 요소가 됨) */}
+        <View style={{ height: primaryCTALink ? 90 + (primaryCTALink.label === '티켓 예매하기' ? 22 : 0) : 20 }} />
 
-      {/* 하단 고정 영역: 광고(CTA 바로 위) + CTA */}
-      <View style={styles.bottomArea}>
-        {/* 광고 — 지도보기와 CTA 사이, 스크롤 위치 무관하게 항상 노출 */}
+        {/* 광고 — 스크롤 마지막 요소, 완전히 내리면 CTA 바로 위에 붙음 */}
         <View style={[styles.adBannerContainer, { height: adRendered ? 96 : 0 }]}>
           <InlineAd
             adGroupId="ait.v2.live.6526c6e693454a28"
@@ -798,7 +795,11 @@ function EventDetailPage() {
             onAdRendered={() => setAdRendered(true)}
           />
         </View>
-        {primaryCTALink && (
+      </ScrollView>
+
+      {/* 하단 고정 영역: CTA만 */}
+      {primaryCTALink && (
+        <View style={styles.bottomArea}>
           <View style={[
             styles.stickyBar,
             { backgroundColor: adaptive.background },
@@ -818,8 +819,8 @@ function EventDetailPage() {
               {primaryCTALink.label}
             </Button>
           </View>
-        )}
-      </View>
+        </View>
+      )}
 
       {/* TDS BottomSheet */}
       <BottomSheet.Root
