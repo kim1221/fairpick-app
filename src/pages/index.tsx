@@ -282,15 +282,15 @@ function HomePageInner() {
     if (_homeCache && Date.now() < _homeCache.expiresAt) return;
 
     try {
-      const uid = await getCurrentUserId();
-      setUserId(uid);
-
-      // GPS를 최대 500ms 대기 후 위치 포함해 첫 API 호출
-      // → today_pick 포함 모든 섹션이 처음부터 위치 기반으로 로드됨
-      const loc = await Promise.race([
-        requestLocation(),
-        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 500)),
+      // userId 조회 + GPS 대기 병렬 실행
+      const [uid, loc] = await Promise.all([
+        getCurrentUserId(),
+        Promise.race([
+          requestLocation(),
+          new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 500)),
+        ]),
       ]);
+      setUserId(uid);
 
       await loadSections(loc, uid);
 
