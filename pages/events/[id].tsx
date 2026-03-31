@@ -233,7 +233,6 @@ function EventDetailPage() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [activeSheet, setActiveSheet] = useState<'price' | 'hours' | 'overview' | null>(null);
   const [adRendered, setAdRendered] = useState(false);
-  const [isScrolledToBottom, setIsScrolledToBottom] = useState(false);
   // event 로드 후 snapshot 추출 → useLike에 전달 (찜 시 로컬 snapshot 저장)
   const eventSnapshot = React.useMemo(() => event ? {
     title: event.title,
@@ -473,11 +472,8 @@ function EventDetailPage() {
         style={{ backgroundColor: adaptive.background }}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
-        onScroll={(e) => {
-          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-          setIsScrolledToBottom(contentOffset.y + layoutMeasurement.height >= contentSize.height - 16);
-        }}
+        contentInset={Platform.OS === 'ios' ? { bottom: STICKY_BAR_HEIGHT } : undefined}
+        scrollIndicatorInsets={Platform.OS === 'ios' ? { bottom: STICKY_BAR_HEIGHT } : undefined}
       >
         {/* Hero Image with Overlay Badges */}
         <View style={styles.heroContainer}>
@@ -790,29 +786,18 @@ function EventDetailPage() {
 
         </View>
 
+        {/* 광고 — 스크롤 콘텐츠 마지막 요소, 광고 아래 스크롤 불가 */}
+        <View style={[styles.adBannerContainer, { height: adRendered ? 96 : 0 }]}>
+          <InlineAd
+            adGroupId="ait.v2.live.6526c6e693454a28"
+            impressFallbackOnMount={true}
+            onAdRendered={() => setAdRendered(true)}
+          />
+        </View>
+
       </ScrollView>
 
-      {/* 광고 — 스크롤 끝에 도달했을 때만 CTA 바로 위에 노출 (고정) */}
-      <View style={[
-        styles.adBannerContainer,
-        {
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: primaryCTALink ? STICKY_BAR_HEIGHT : 0,
-          height: (adRendered && isScrolledToBottom) ? 96 : 0,
-          overflow: 'hidden',
-          zIndex: 9,
-        },
-      ]}>
-        <InlineAd
-          adGroupId="ait.v2.live.6526c6e693454a28"
-          impressFallbackOnMount={true}
-          onAdRendered={() => setAdRendered(true)}
-        />
-      </View>
-
-      {/* 하단 고정 영역: CTA */}
+      {/* 하단 고정 영역: CTA (항상 고정) */}
       {primaryCTALink && (
         <View style={styles.bottomArea}>
           <View style={[
@@ -1119,7 +1104,9 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: STICKY_BAR_HEIGHT + (Platform.OS === 'ios' ? 34 : 20),
+    // iOS: contentInset.bottom이 CTA 여백 처리 → paddingBottom 불필요 (광고 아래 스크롤 방지)
+    // Android: paddingBottom으로 CTA 뒤에 숨지 않도록
+    paddingBottom: Platform.OS === 'ios' ? 0 : STICKY_BAR_HEIGHT + 20,
   },
   centered: {
     justifyContent: 'center',
