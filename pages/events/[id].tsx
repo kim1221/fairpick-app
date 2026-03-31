@@ -40,7 +40,6 @@ export const Route = createRoute('/events/:id', {
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const IMAGE_HEIGHT = SCREEN_HEIGHT * 0.5;
-const STICKY_BAR_HEIGHT = Platform.OS === 'ios' ? 90 : 80;
 
 // ─────────────────────────────────────────────────
 // Helper: 가격 요약 포맷터
@@ -469,11 +468,9 @@ function EventDetailPage() {
   return (
     <View style={styles.page}>
       <ScrollView
-        style={{ backgroundColor: adaptive.background }}
+        style={[{ backgroundColor: adaptive.background }, styles.scrollFlex]}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        contentInset={Platform.OS === 'ios' ? { bottom: STICKY_BAR_HEIGHT } : undefined}
-        scrollIndicatorInsets={Platform.OS === 'ios' ? { bottom: STICKY_BAR_HEIGHT } : undefined}
       >
         {/* Hero Image with Overlay Badges */}
         <View style={styles.heroContainer}>
@@ -797,28 +794,26 @@ function EventDetailPage() {
 
       </ScrollView>
 
-      {/* 하단 고정 영역: CTA (항상 고정) */}
+      {/* 하단 CTA — ScrollView 아래 일반 View로 배치 (iOS/Android 모두 오버스크롤 없음) */}
       {primaryCTALink && (
-        <View style={styles.bottomArea}>
-          <View style={[
-            styles.stickyBar,
-            { backgroundColor: adaptive.background },
-            primaryCTALink.label === '티켓 예매하기' && { paddingTop: 6 },
-          ]}>
-            {primaryCTALink.label === '티켓 예매하기' && (
-              <Text style={styles.ctaHint}>
-                {getTicketSiteName(primaryCTALink.url)}에서 예매할 수 있어요
-              </Text>
-            )}
-            <Button
-              type="primary"
-              size="big"
-              viewStyle={{ width: '100%' }}
-              onPress={() => handleOpenLink(primaryCTALink.url)}
-            >
-              {primaryCTALink.label}
-            </Button>
-          </View>
+        <View style={[
+          styles.stickyBar,
+          { backgroundColor: adaptive.background },
+          primaryCTALink.label === '티켓 예매하기' && { paddingTop: 6 },
+        ]}>
+          {primaryCTALink.label === '티켓 예매하기' && (
+            <Text style={styles.ctaHint}>
+              {getTicketSiteName(primaryCTALink.url)}에서 예매할 수 있어요
+            </Text>
+          )}
+          <Button
+            type="primary"
+            size="big"
+            viewStyle={{ width: '100%' }}
+            onPress={() => handleOpenLink(primaryCTALink.url)}
+          >
+            {primaryCTALink.label}
+          </Button>
         </View>
       )}
 
@@ -1103,10 +1098,11 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   page: {
     flex: 1,
   },
+  scrollFlex: {
+    flex: 1,
+  },
   scrollContent: {
-    // iOS: contentInset.bottom이 CTA 여백 처리 → paddingBottom 불필요 (광고 아래 스크롤 방지)
-    // Android: paddingBottom으로 CTA 뒤에 숨지 않도록
-    paddingBottom: Platform.OS === 'ios' ? 0 : STICKY_BAR_HEIGHT + 20,
+    paddingBottom: 0,
   },
   centered: {
     justifyContent: 'center',
