@@ -5,7 +5,7 @@
 
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
 import { Icon, AnimateSkeleton } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
@@ -19,6 +19,7 @@ import userEventService from '../services/userEventService';
 import { getCurrentUserId } from '../utils/anonymousUser';
 import { getAiNoticeShown, setAiNoticeShown } from '../utils/storage';
 import { reverseGeocode } from '../utils/geocoding';
+import { LikesProvider } from '../contexts/LikesContext';
 
 import type { ScoredEvent, Location } from '../types/recommendation';
 
@@ -45,6 +46,39 @@ interface HomeSection {
   title: string;
   subtitle: string | null;
   events: ScoredEvent[];
+}
+
+interface ProcessedSection {
+  slug: string;
+  title: string;
+  subtitle: string | null;
+  events: Array<ScoredEvent & { signal?: { label: string; color: string } }>;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 섹션별 핵심 신호 계산 (컴포넌트 외부 — 재생성 없음)
+// ─────────────────────────────────────────────────────────────
+
+function getSectionSignal(slug: string, event: ScoredEvent): { label: string; color: string } | undefined {
+  if (slug === 'budget_pick') {
+    if ((event as any).is_free) return { label: '무료', color: '#22C55E' };
+    const priceMin = (event as any).price_min as number | null;
+    if (priceMin != null) {
+      if (priceMin <= 10000) return { label: '1만원 이하', color: '#22C55E' };
+      const manWon = Math.round(priceMin / 10000);
+      return { label: `${manWon}만원대`, color: '#6B7280' };
+    }
+    return undefined;
+  }
+  if (slug === 'ending_soon') {
+    if (!event.end_date) return undefined;
+    const days = Math.ceil((new Date(event.end_date).getTime() - Date.now()) / 86400000);
+    if (days <= 0) return { label: '오늘 마감', color: '#FF3B30' };
+    if (days <= 3) return { label: `D-${days}`, color: '#FF3B30' };
+    if (days <= 7) return { label: `D-${days}`, color: '#FF9500' };
+    return { label: `D-${days}`, color: '#6B7280' };
+  }
+  return undefined;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -166,16 +200,56 @@ function HorizontalSectionSkeleton() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// SectionCard — 메모이제이션된 카드 래퍼
+// onPress를 안정된 참조로 유지해 EventCard 리렌더 방지
+// ─────────────────────────────────────────────────────────────
+
+interface SectionCardProps {
+  event: ScoredEvent & { signal?: { label: string; color: string } };
+  slug: string;
+  rank: number;
+  onPress: (id: string, slug: string, rank: number) => void;
+}
+
+const SectionCard = React.memo(({ event, slug, rank, onPress }: SectionCardProps) => {
+  const handlePress = useCallback(
+    (id: string) => onPress(id, slug, rank),
+    [onPress, slug, rank],
+  );
+  return (
+    <EventCard
+      event={event}
+      onPress={handlePress}
+      variant="small"
+      contextLabel={event.signal?.label}
+      contextLabelColor={event.signal?.color}
+    />
+  );
+});
+
+interface TodayPickCardProps {
+  event: ScoredEvent;
+  onPress: (id: string, slug: string, rank: number) => void;
+}
+
+const TodayPickCard = React.memo(({ event, onPress }: TodayPickCardProps) => {
+  const handlePress = useCallback(
+    (id: string) => onPress(id, 'today_pick', 1),
+    [onPress],
+  );
+  return <EventCard event={event} onPress={handlePress} variant="large" />;
+});
+
+// ─────────────────────────────────────────────────────────────
 // 홈 화면
 // ─────────────────────────────────────────────────────────────
 
-function HomePage() {
+function HomePageInner() {
   const navigation = Route.useNavigation();
   const adaptive = useAdaptive();
   const { top } = useSafeAreaInsets();
-  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
+  const styles = useMemo(() => createStyles(adaptive), [adaptive]);
 
-  // null = 로딩 중, [] = 실패/빈 상태, [...] = 로드 완료
   const now = Date.now();
   const validCache = _homeCache && now < _homeCache.expiresAt ? _homeCache : null;
   const [sections, setSections] = useState<HomeSection[] | null>(validCache?.sections ?? null);
@@ -199,37 +273,29 @@ function HomePage() {
     if (!shown) setShowAiNotice(true);
   };
 
-  const handleAiNoticeConfirm = async () => {
+  const handleAiNoticeConfirm = useCallback(async () => {
     await setAiNoticeShown();
     setShowAiNotice(false);
-  };
+  }, []);
 
   const initializeUser = async () => {
-    // 캐시 유효: 재로딩 완전 스킵
     if (_homeCache && Date.now() < _homeCache.expiresAt) return;
 
     try {
       const uid = await getCurrentUserId();
       setUserId(uid);
 
-      // GPS와 홈 섹션 API를 병렬로 시작
-      // - 홈 API: 위치 없이 즉시 호출 → today_pick, trending 등 바로 표시
-      // - GPS: 백그라운드에서 조회 → 완료 후 nearby/walkable 섹션 추가 갱신
       const locPromise = requestLocation();
       await loadSections(undefined, uid);
 
-      // 홈 API 완료 후 GPS를 최대 5초 추가 대기
       const loc = await Promise.race([
         locPromise,
-        new Promise<undefined>(resolve => setTimeout(resolve, 5000)),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 5000)),
       ]);
 
-      // GPS 성공 시 nearby/walkable만 조용히 추가
-      // today_pick 등 나머지 섹션은 첫 번째 호출 결과를 유지 (불필요한 교체 방지)
       if (loc) {
         await injectLocationSections(loc, uid);
       }
-      // locPromise 계속 백그라운드 실행 → setLocation/setCurrentAddress 자동 업데이트
     } catch (error) {
       console.error('[Home] init error:', error);
       await loadSections();
@@ -249,7 +315,6 @@ function HomePage() {
       const data = await getCurrentLocation({ accuracy: Accuracy.Balanced });
       const loc: Location = { lat: data.coords.latitude, lng: data.coords.longitude };
       setLocation(loc);
-      // 역지오코딩은 주소 텍스트 표시용이므로 비블로킹 처리 — GPS 결과를 즉시 반환
       reverseGeocode(loc.lat, loc.lng).then((geo) => {
         setCurrentAddress(geo.success && geo.address ? geo.address : '위치 정보');
       }).catch(() => {});
@@ -285,7 +350,6 @@ function HomePage() {
     }
   };
 
-  // GPS 완료 후 nearby/walkable만 조용히 주입 — today_pick 등 기존 섹션은 유지
   const injectLocationSections = async (loc: Location, uid?: string) => {
     const currentUid = uid ?? userId;
     const response = await recommendationService.getSections(loc, currentUid);
@@ -309,7 +373,7 @@ function HomePage() {
     });
   };
 
-  const handleEventPress = (eventId: string, sectionSlug?: string, rankPosition?: number) => {
+  const handleEventPress = useCallback((eventId: string, sectionSlug?: string, rankPosition?: number) => {
     userEventService.logEventClick(eventId, {
       sectionSlug,
       rankPosition,
@@ -319,11 +383,11 @@ function HomePage() {
       },
     }).catch(() => {});
     navigation.navigate('/events/:id', { id: eventId });
-  };
+  }, [navigation]);
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    _homeCache = null; // 수동 새로고침: 캐시 무효화
+    _homeCache = null;
     try {
       excludedIds.current.clear();
       const loc = await requestLocation();
@@ -331,46 +395,44 @@ function HomePage() {
     } finally {
       setRefreshing(false);
     }
-  };
+  }, [userId]);
 
   // ─────────────────────────────────────────────────────────────
-  // 섹션별 핵심 신호 계산
-  // budget_pick: 가격  /  discovery: 등록일  /  ending_soon: D-N
+  // 중복 제거 + 신호 계산을 useMemo로 처리 — 렌더 중 연산 제거
   // ─────────────────────────────────────────────────────────────
 
-  const getSectionSignal = (slug: string, event: ScoredEvent): { label: string; color: string } | undefined => {
-    if (slug === 'budget_pick') {
-      if ((event as any).is_free) return { label: '무료', color: '#22C55E' };
-      const priceMin = (event as any).price_min as number | null;
-      if (priceMin != null) {
-        if (priceMin <= 10000) return { label: '1만원 이하', color: '#22C55E' };
-        const manWon = Math.round(priceMin / 10000);
-        return { label: `${manWon}만원대`, color: '#6B7280' };
-      }
-      return undefined;
+  const processedSections = useMemo((): ProcessedSection[] => {
+    if (!sections) return [];
+    const seenIds = new Set<string>();
+    const result: ProcessedSection[] = [];
+
+    for (const section of sections) {
+      if (section.slug === 'nearby' && !location) continue;
+
+      const unique = section.events.filter((e) => !seenIds.has(e.id));
+      unique.forEach((e) => seenIds.add(e.id));
+
+      if (unique.length === 0) continue;
+
+      result.push({
+        ...section,
+        events: unique.map((event) => ({
+          ...event,
+          signal: getSectionSignal(section.slug, event),
+        })),
+      });
     }
-    if (slug === 'ending_soon') {
-      if (!event.end_date) return undefined;
-      const days = Math.ceil((new Date(event.end_date).getTime() - Date.now()) / 86400000);
-      if (days <= 0) return { label: '오늘 마감', color: '#FF3B30' };
-      if (days <= 3) return { label: `D-${days}`, color: '#FF3B30' };
-      if (days <= 7) return { label: `D-${days}`, color: '#FF9500' };
-      return { label: `D-${days}`, color: '#6B7280' };
-    }
-    return undefined;
-  };
+
+    return result;
+  }, [sections, location]);
 
   // ─────────────────────────────────────────────────────────────
-  // 섹션 렌더링 (slug에 따라 레이아웃 결정)
+  // 섹션 렌더링
   // ─────────────────────────────────────────────────────────────
 
-  const renderSection = (section: HomeSection) => {
+  const renderSection = useCallback((section: ProcessedSection) => {
     const { slug, title, subtitle, events } = section;
 
-    if (events.length === 0) return null;
-    if (slug === 'nearby' && !location) return null;
-
-    // today_pick: 대형 카드 (첫 번째 이벤트)
     if (slug === 'today_pick') {
       return (
         <View key={slug} style={styles.section}>
@@ -379,17 +441,12 @@ function HomePage() {
             {subtitle ? <Text style={styles.sectionSubtitle}>{subtitle}</Text> : null}
           </View>
           <View style={{ paddingHorizontal: 20 }}>
-            <EventCard
-              event={events[0]!}
-              onPress={(id) => handleEventPress(id, 'today_pick', 1)}
-              variant="large"
-            />
+            <TodayPickCard event={events[0]!} onPress={handleEventPress} />
           </View>
         </View>
       );
     }
 
-    // 나머지: 가로 스크롤 소형 카드
     return (
       <View key={slug} style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -400,26 +457,26 @@ function HomePage() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.horizontalList}
+          scrollEventThrottle={16}
         >
-          {events.map((event, idx) => {
-            const signal = getSectionSignal(slug, event);
-            return (
-              <EventCard
-                key={event.id}
-                event={event}
-                onPress={(id) => handleEventPress(id, slug, idx + 1)}
-                variant="small"
-                contextLabel={signal?.label}
-                contextLabelColor={signal?.color}
-              />
-            );
-          })}
+          {events.map((event, idx) => (
+            <SectionCard
+              key={event.id}
+              event={event}
+              slug={slug}
+              rank={idx + 1}
+              onPress={handleEventPress}
+            />
+          ))}
         </ScrollView>
       </View>
     );
-  };
+  }, [styles, handleEventPress]);
 
+  // ─────────────────────────────────────────────────────────────
   // 로딩 스켈레톤
+  // ─────────────────────────────────────────────────────────────
+
   const renderLoading = () => (
     <>
       <View style={styles.section}>
@@ -439,6 +496,39 @@ function HomePage() {
     </>
   );
 
+  const renderContent = () => {
+    if (sections === null) return renderLoading();
+    if (sections.length === 0) {
+      return (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyText}>
+            {isOffline ? '네트워크 연결을 확인해 주세요' : '추천 이벤트를 불러오지 못했어요'}
+          </Text>
+        </View>
+      );
+    }
+
+    const nodes: React.ReactNode[] = [];
+    for (let i = 0; i < processedSections.length; i++) {
+      nodes.push(renderSection(processedSections[i]!));
+      // 2번째 섹션 이후 피드형 배너 1개 삽입
+      if (i === 1) {
+        nodes.push(
+          <View key="feed-ad" style={{ width: '100%', marginVertical: feedAdRendered ? 8 : 0 }}>
+            <InlineAd
+              adGroupId="ait.v2.live.b3363cb4c82643e9"
+              impressFallbackOnMount={true}
+              onAdRendered={() => setFeedAdRendered(true)}
+              onAdFailedToRender={() => setFeedAdRendered(false)}
+              onNoFill={() => setFeedAdRendered(false)}
+            />
+          </View>
+        );
+      }
+    }
+    return nodes;
+  };
+
   return (
     <View style={styles.container}>
       {showAiNotice && (
@@ -453,6 +543,7 @@ function HomePage() {
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
         onScrollBeginDrag={handleAiNoticeConfirm}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
@@ -479,52 +570,21 @@ function HomePage() {
           </View>
         </View>
 
-        {sections === null
-          ? renderLoading()
-          : sections.length === 0
-            ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyText}>
-                  {isOffline ? '네트워크 연결을 확인해 주세요' : '추천 이벤트를 불러오지 못했어요'}
-                </Text>
-              </View>
-            )
-            : (() => {
-                // 상위 섹션에서 이미 노출된 이벤트를 하위 섹션에서 제거 (중복 방지)
-                const seenIds = new Set<string>();
-                const rendered: React.ReactNode[] = [];
-                let visibleCount = 0;
-                sections.forEach((section) => {
-                  const unique = section.events.filter((e) => !seenIds.has(e.id));
-                  unique.forEach((e) => seenIds.add(e.id));
-                  const el = renderSection({ ...section, events: unique });
-                  if (el !== null) {
-                    rendered.push(el);
-                    visibleCount++;
-                    // 2번째 섹션 이후 피드형 배너 1개 삽입
-                    if (visibleCount === 2) {
-                      rendered.push(
-                        <View key="feed-ad" style={{ width: '100%', marginVertical: feedAdRendered ? 8 : 0 }}>
-                          <InlineAd
-                            adGroupId="ait.v2.live.b3363cb4c82643e9"
-                            impressFallbackOnMount={true}
-                            onAdRendered={() => setFeedAdRendered(true)}
-                            onAdFailedToRender={() => setFeedAdRendered(false)}
-                            onNoFill={() => setFeedAdRendered(false)}
-                          />
-                        </View>
-                      );
-                    }
-                  }
-                });
-                return rendered;
-              })()}
+        {renderContent()}
 
         <View style={{ height: 100 }} />
       </ScrollView>
 
       <BottomTabBar currentTab="home" />
     </View>
+  );
+}
+
+function HomePage() {
+  return (
+    <LikesProvider>
+      <HomePageInner />
+    </LikesProvider>
   );
 }
 

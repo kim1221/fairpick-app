@@ -310,7 +310,7 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
 
 // ==================== 메인 컴포넌트 ====================
 
-export const EventCard: React.FC<EventCardProps> = ({ event, onPress, variant = 'default', contextLabel, contextLabelColor }) => {
+const EventCardBase: React.FC<EventCardProps> = ({ event, onPress, variant = 'default', contextLabel, contextLabelColor }) => {
   const adaptive = useAdaptive();
   const styles = useMemo(() => createStyles(adaptive), [adaptive]);
   const { isLiked, toggle } = useLike({ eventId: event.id });
@@ -437,3 +437,5 @@ export const EventCard: React.FC<EventCardProps> = ({ event, onPress, variant = 
     </Analytics.Press>
   );
 };
+
+export const EventCard = React.memo(EventCardBase);
