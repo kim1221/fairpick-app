@@ -9,6 +9,7 @@ export interface ReverseGeocodeResult {
   success: boolean;
   address?: string; // 행정동 (예: "성수2가1동")
   fullAddress?: string; // 전체 주소
+  gu?: string; // 구 (예: "송파구")
   sido?: string; // 시도 (예: "서울특별시", "경기도")
   error?: string;
 }
@@ -76,6 +77,7 @@ export async function reverseGeocode(
           success: true,
           address: data.dong || data.label, // dong이 있으면 dong, 없으면 label 사용
           fullAddress: data.label,
+          gu: data.gu || '',
           sido: data.sido || '',
         };
         // 성공만 캐시 (실패/일시 오류는 재시도 보장)

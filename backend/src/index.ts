@@ -3799,6 +3799,7 @@ app.get('/events', async (req, res) => {
     const mainCategory = (req.query.category as string) || undefined; // 호환성: category → main_category
     const subCategory = (req.query.subCategory as string) || undefined;
     const region = (req.query.region as string) || undefined;
+    const district = (req.query.district as string) || undefined; // 구 단위 필터 (내 근처)
     const query = (req.query.q as string) || undefined; // 검색어
     const sortBy = (req.query.sortBy as string) || 'start_at'; // start_at | created_at | updated_at
     const order = (req.query.order as string) || 'asc'; // asc | desc
@@ -3822,7 +3823,11 @@ app.get('/events', async (req, res) => {
       params.push(region);
       filters.push(`region = $${params.length}`);
     }
-    
+    if (district) {
+      params.push(`%${district}%`);
+      filters.push(`address ILIKE $${params.length}`);
+    }
+
     // 검색어 스마트 파싱
     // 1) "무료" 포함 → is_free=true 자동 추가 + "무료" 제거
     // 2) 남은 단어가 카테고리명(전시/공연/팝업/축제/행사)이면 category 필터로 전환

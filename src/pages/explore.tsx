@@ -159,8 +159,16 @@ const SIDO_TO_REGION: Record<string, string> = {
 
 interface ActiveFilters {
   quickFilter: string | null;
-  region: string | null;
+  region: string | null;    // 시도 단위 (서울, 경기 등)
+  district: string | null;  // 구 단위 (송파구 등, 내 근처 전용)
   category: string | null;
+}
+
+// 내 근처 감지 결과
+interface NearbyInfo {
+  district: string; // e.g. "송파구"
+  sido: string;     // e.g. "서울" (앱 지역 코드)
+  expanded: boolean; // true = 구 이벤트 부족 → 시 전체로 확장
 }
 
 // ─────────────────────────────────────────────────
@@ -366,6 +374,22 @@ function createStyles(a: Adaptive) {
       textAlign: 'center',
     },
 
+    // ── 내 근처 확장 배너 ────────────────────────────
+    expansionBanner: {
+      marginHorizontal: 10,
+      marginTop: 10,
+      marginBottom: 4,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      backgroundColor: a.blue50,
+      borderRadius: 8,
+    },
+    expansionBannerText: {
+      fontSize: 12,
+      color: a.blue500,
+      lineHeight: 17,
+    },
+
     // ── 지역 BottomSheet ─────────────────────────────
     regionSheetList: {
       paddingHorizontal: 20,
@@ -513,7 +537,7 @@ const EXPLORE_CACHE_TTL_MS = 2 * 60 * 1000; // 2분
 function buildExploreCacheKey(filters: ActiveFilters): string {
   return [
     filters.quickFilter ?? 'none',
-    filters.region ?? 'none',
+    filters.district ? `district:${filters.district}` : (filters.region ?? 'none'),
     filters.category ?? 'none',
   ].join('|');
 }
@@ -624,8 +648,10 @@ function ExplorePage() {
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({
     quickFilter: null,
     region: null,
+    district: null,
     category: null,
   });
+  const [nearbyInfo, setNearbyInfo] = useState<NearbyInfo | null>(null);
 
   const [events, setEvents] = useState<EventCardData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -706,7 +732,8 @@ function ExplorePage() {
       }
     }
 
-    if (activeFilters.region) params.append('region', activeFilters.region);
+    if (activeFilters.district) params.append('district', activeFilters.district);
+    else if (activeFilters.region) params.append('region', activeFilters.region);
     if (activeFilters.category) params.append('category', activeFilters.category);
     params.append('sortBy', sortBy);
     params.append('order', order);
@@ -833,26 +860,58 @@ function ExplorePage() {
   };
 
   const handleRegionSelect = (region: string | null) => {
-    setActiveFilters(prev => ({ ...prev, region }));
+    setActiveFilters(prev => ({ ...prev, region, district: null }));
+    setNearbyInfo(null);
     setPage(0);
     setShowRegionSheet(false);
   };
 
-  // "내 근처" — GPS 감지 후 지역 자동 선택
-  // 실패 시 시트를 닫지 않고 그대로 유지해 수동 선택 가능하게 함
+  // "내 근처" — GPS → 구 단위 필터, 이벤트 부족 시 시 단위로 자동 확장
   const handleNearbyPress = async () => {
     setIsDetectingLocation(true);
     try {
       const location = await getCurrentLocation({ accuracy: Accuracy.Balanced });
       const { latitude, longitude } = location.coords;
       const geo = await reverseGeocode(latitude, longitude);
+      const gu = geo.gu?.trim();
       const sido = geo.sido?.trim();
-      // 직접 매치 우선(서울, 경기 등) → 예외 매핑(강원특별자치도 등) → undefined
       const region = sido ? (SIDO_TO_REGION[sido] ?? sido) : undefined;
-      if (region) {
-        handleRegionSelect(region); // 시트 닫힘 + 필터 적용
+
+      if (gu) {
+        // 구 단위 이벤트 수 확인 (size=1로 totalCount만 조회)
+        let districtCount = 0;
+        try {
+          const countRes = await fetch(
+            `${API_BASE_URL}/events?district=${encodeURIComponent(gu)}&size=1&page=1`
+          );
+          const countData = await countRes.json() as EventsApiResponse;
+          districtCount = countData.pageInfo.totalCount;
+        } catch {
+          // 카운트 실패 시 구 단위 그대로 사용
+          districtCount = 10;
+        }
+
+        if (districtCount >= 10) {
+          // 구 단위 필터 적용
+          setActiveFilters(prev => ({ ...prev, region: null, district: gu }));
+          setNearbyInfo({ district: gu, sido: region ?? sido ?? '', expanded: false });
+        } else if (region) {
+          // 구 이벤트 부족 → 시 단위로 확장
+          setActiveFilters(prev => ({ ...prev, region, district: null }));
+          setNearbyInfo({ district: gu, sido: region, expanded: true });
+        } else {
+          // region 매핑 실패 → 구 단위 그대로 사용
+          setActiveFilters(prev => ({ ...prev, region: null, district: gu }));
+          setNearbyInfo({ district: gu, sido: '', expanded: false });
+        }
+      } else if (region) {
+        // gu 없는 경우 sido 사용 (수도권 외 지역 등)
+        setActiveFilters(prev => ({ ...prev, region, district: null }));
+        setNearbyInfo({ district: '', sido: region, expanded: false });
       }
-      // region 매핑 실패 시: 시트 그대로 유지
+
+      setPage(0);
+      setShowRegionSheet(false);
     } catch (error) {
       if (error instanceof GetCurrentLocationPermissionError) {
         console.warn('[Explore] 위치 권한 거부');
@@ -905,24 +964,36 @@ function ExplorePage() {
     />
   );
 
-  // ─── FlatList 헤더: 결과 카운트 ───────────────
+  // ─── FlatList 헤더: 결과 카운트 + 내 근처 확장 배너 ───────────────
   const renderListHeader = () => (
-    <View style={styles.countRow}>
-      <Text style={styles.countText}>총 {totalCount.toLocaleString()}개</Text>
+    <View>
+      {nearbyInfo?.expanded && (
+        <View style={styles.expansionBanner}>
+          <Text style={styles.expansionBannerText}>
+            {nearbyInfo.district} 주변 이벤트가 적어 {nearbyInfo.sido} 전체를 보여드려요
+          </Text>
+        </View>
+      )}
+      <View style={styles.countRow}>
+        <Text style={styles.countText}>총 {totalCount.toLocaleString()}개</Text>
+      </View>
     </View>
   );
 
   // ─── Empty State ────────────────────────────────
   const renderEmpty = () => {
     if (loading) return null;
-    const hasFilter = activeFilters.quickFilter || activeFilters.region || activeFilters.category;
+    const hasFilter = activeFilters.quickFilter || activeFilters.region || activeFilters.district || activeFilters.category;
+    const locationLabel = nearbyInfo
+      ? (nearbyInfo.expanded ? nearbyInfo.sido : nearbyInfo.district || nearbyInfo.sido)
+      : activeFilters.region;
     return (
       <View style={styles.emptyState}>
         <View style={styles.emptyIconWrapper}>
           <Icon name="icon-search-bold-mono" size={36} color={adaptive.grey400} />
         </View>
         <Text style={styles.emptyText}>
-          {activeFilters.region ? `${activeFilters.region}에 ` : ''}
+          {locationLabel ? `${locationLabel}에 ` : ''}
           {activeFilters.category ? `${activeFilters.category} ` : ''}
           이벤트가 없어요
         </Text>
@@ -990,7 +1061,10 @@ function ExplorePage() {
               <Pressable style={styles.regionPill} onPress={() => setShowRegionSheet(true)}>
                 <Icon name="icon-pin-mono" size={12} color={adaptive.grey700} />
                 <Text style={styles.regionPillText}>
-                  {activeFilters.region ?? '전국'} ▾
+                  {nearbyInfo
+                    ? `내 근처 (${nearbyInfo.expanded ? nearbyInfo.sido : nearbyInfo.district || nearbyInfo.sido})`
+                    : (activeFilters.region ?? '전국')
+                  } ▾
                 </Text>
               </Pressable>
 
