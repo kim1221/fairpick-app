@@ -605,6 +605,8 @@ export async function aiEnrichmentBackfill(options: {
   /** @deprecated ai_enriched_at IS NULL 필터로 대체됨. 무시됨. */
   onlyRecent?: boolean;
   forceFields?: string[];
+  /** 이 시각 이후 first_collected_at인 이벤트만 보강 (파이프라인 시작 시각 전달) */
+  collectedAfter?: Date;
 }) {
   const {
     limit = null,
@@ -613,6 +615,7 @@ export async function aiEnrichmentBackfill(options: {
     onlyMissingTags = false,
     onlyRecent = false,
     forceFields = [],
+    collectedAfter,
   } = options;
 
   console.log('\n========================================');
@@ -652,6 +655,12 @@ export async function aiEnrichmentBackfill(options: {
 
   if (onlyMissingTags) {
     selectSQL += ` AND (derived_tags IS NULL OR jsonb_array_length(derived_tags) = 0)`;
+  }
+
+  // 파이프라인 수집분만 보강: collectedAfter 이후 first_collected_at인 이벤트만 처리
+  if (collectedAfter) {
+    selectSQL += ` AND first_collected_at >= '${collectedAfter.toISOString()}'`;
+    console.log(`[Enrich] collectedAfter 필터: ${collectedAfter.toISOString()} 이후 수집분만 처리`);
   }
 
   selectSQL += ` ORDER BY created_at DESC`;

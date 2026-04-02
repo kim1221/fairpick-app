@@ -237,6 +237,7 @@ export async function runGeoRefreshPipeline(options: { lightMode?: boolean; sche
         limit: 200,
         testMode: false,
         useNaverSearch: true,
+        collectedAfter: new Date(pipelineStart), // 당일 수집분만 보강
       });
       
       const step5End = Date.now();

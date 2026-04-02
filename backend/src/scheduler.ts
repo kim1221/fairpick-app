@@ -99,7 +99,7 @@ async function runMissedJobsOnStartup(): Promise<void> {
       { name: 'phase2-internal-fields', schedH:  4, schedM: 15, expectedH: 24, fn: () => withJobLog('phase2-internal-fields', enrichInternalFields) },
       { name: 'embed-new-events',       schedH:  5, schedM:  0, expectedH: 24, fn: () => withJobLog('embed-new-events', embedNewEvents) },
       { name: 'ai-hot-rating',          schedH:  9, schedM:  0, expectedH: 168, fn: () => withJobLog('ai-hot-rating', runHotRating) },
-      { name: 'collect-15',             schedH: 15, schedM:  0, expectedH: 24,  fn: () => runGeoRefreshPipeline({ lightMode: true, schedulerJobName: 'collect-15' }) },
+      // collect-15 제거 — 새벽 3시 1회 수집으로 통합
     ];
 
     let geoRefreshQueued = false;
@@ -240,14 +240,7 @@ export function initScheduler() {
     });
     console.log('[Scheduler] registered: Geo refresh pipeline @ 03:00 KST');
 
-    // 매일 15:00 KST - 경량 파이프라인 (수집 + 중복제거만, geo/AI 생략)
-    // heavy 후처리(geo backfill, AI enrichment)는 03:00 full pipeline에서 1회 처리
-    cron.schedule('0 15 * * *', async () => {
-      await runJobSafely('collect-15', () => runGeoRefreshPipeline({ lightMode: true, schedulerJobName: 'collect-15' }), { allowConcurrent: false });
-    }, {
-      timezone: 'Asia/Seoul'
-    });
-    console.log('[Scheduler] registered: Light collect pipeline @ 15:00 KST (collect+dedupe only)');
+    // collect-15 제거 — 새벽 3시 full pipeline 1회로 통합
 
     // 매일 00:00 KST - 정리 작업 (geo-refresh 03:00 시작 전 완료 목표)
     cron.schedule('0 0 * * *', async () => {
