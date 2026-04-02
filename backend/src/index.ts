@@ -1225,7 +1225,7 @@ app.get('/admin/dashboard', requireAdminAuth, async (_, res) => {
           (SELECT COUNT(*) FROM canonical_events
            WHERE is_deleted = false
              AND last_collected_at IS NOT NULL
-             AND (last_collected_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul')::date
+             AND (last_collected_at AT TIME ZONE 'Asia/Seoul')::date
                = (NOW() AT TIME ZONE 'Asia/Seoul')::date)
            AS "collectedToday",
           (SELECT COUNT(DISTINCT COALESCE(scheduler_job_name, type)) FROM collection_logs
