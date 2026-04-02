@@ -132,18 +132,6 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     maxRunHours: 4,
     sourceKeywords: ['hot-rating', 'ai-hot'],
   },
-  {
-    name: 'collect-15',
-    label: '오후 경량 수집',
-    description: '수집 + 중복제거 (geo/AI 생략)',
-    schedule: '매일 15:00',
-    scheduleHour: 15,
-    scheduleMinute: 0,
-    scheduleDayOfWeek: null,
-    expectedIntervalHours: 24,
-    maxRunHours: 2,
-    sourceKeywords: ['collect-15', 'light-collect'],
-  },
 ];
 
 // ──────────────────────────────────────────────────────────────
@@ -304,8 +292,8 @@ export function deriveSystemStatus(jobs: SchedulerJob[]): OpsSystemStatus {
   else if (warningJobs > 0) overall = 'warning';
   else overall = 'healthy';
 
-  // geo-refresh-03 또는 collect-15 중 가장 최근 실행된 것을 파이프라인 기준으로 표시
-  const pipelineJobs = jobs.filter((j) => j.name === 'geo-refresh-03' || j.name === 'collect-15');
+  // geo-refresh-03을 파이프라인 기준으로 표시
+  const pipelineJobs = jobs.filter((j) => j.name === 'geo-refresh-03');
   const pipelineJob = pipelineJobs
     .filter((j) => j.lastExecution?.startedAt)
     .sort((a, b) => {
