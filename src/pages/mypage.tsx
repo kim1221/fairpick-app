@@ -1,7 +1,7 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl, Switch } from 'react-native';
+import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl } from 'react-native';
 import { Loader, Icon, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { useAuth } from '../hooks/useAuth';
@@ -136,9 +136,6 @@ function MyPage() {
   const [likesError, setLikesError] = useState(false);
   const [recentError, setRecentError] = useState(false);
 
-  const [pushEnabled, setPushEnabled] = useState(true);
-  const [pushLoading, setPushLoading] = useState(false);
-
   const smokeTestRanRef = useRef<boolean>(false);
 
   // 찜 목록 로드
@@ -251,35 +248,6 @@ function MyPage() {
     });
     return unsubscribe;
   }, [loadLikes, loadRecent]);
-
-  const loadNotificationSettings = useCallback(async () => {
-    try {
-      const { data } = await http.get<{ pushEnabled: boolean }>('/users/me/notifications');
-      setPushEnabled(data.pushEnabled);
-    } catch {
-      // 기본값 true 유지
-    }
-  }, []);
-
-  const handlePushToggle = useCallback(async (value: boolean) => {
-    if (pushLoading) return;
-    setPushEnabled(value);
-    setPushLoading(true);
-    try {
-      await http.patch('/users/me/notifications', { pushEnabled: value });
-    } catch {
-      setPushEnabled(!value);
-      dialog.openAlert({ title: '오류', description: '설정 변경에 실패했어요. 다시 시도해 주세요.' });
-    } finally {
-      setPushLoading(false);
-    }
-  }, [pushLoading]);
-
-  useEffect(() => {
-    if (isLoggedIn) {
-      loadNotificationSettings();
-    }
-  }, [isLoggedIn, loadNotificationSettings]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -498,31 +466,7 @@ function MyPage() {
           </>
         )}
 
-        {/* 알림 설정 (로그인 시만) */}
-        {isLoggedIn && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>알림 설정</Text>
-            </View>
-            <View style={styles.settingsCard}>
-              <View style={styles.settingsRow}>
-                <View style={styles.settingsRowInfo}>
-                  <Text style={styles.settingsRowTitle}>이벤트 종료 알림</Text>
-                  <Text style={styles.settingsRowDesc}>
-                    찜한 이벤트가 3일 후 종료되면 알려드려요.
-                  </Text>
-                </View>
-                <Switch
-                  value={pushEnabled}
-                  onValueChange={handlePushToggle}
-                  disabled={pushLoading}
-                  trackColor={{ false: adaptive.grey200, true: adaptive.blue500 }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-            </View>
-          </View>
-        )}
+        {/* 알림 설정 — 미구현으로 숨김 */}
 
         <View style={{ height: 100 }} />
       </ScrollView>
