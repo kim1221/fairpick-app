@@ -191,7 +191,7 @@ function MyPage() {
     setRecentError(false);
     try {
       const recentData = await getRecentV2();
-      setRecentCount(recentData.items.length);
+      setRecentCount(recentData.totalCount);
 
       if (recentData.items.length > 0) {
         const previewItems = recentData.items.slice(0, 3);
