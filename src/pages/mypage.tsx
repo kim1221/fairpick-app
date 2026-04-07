@@ -1,7 +1,6 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useFocusEffect } from '@react-navigation/core';
 import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl } from 'react-native';
 import { Loader, Icon, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
@@ -243,11 +242,6 @@ function MyPage() {
     loadRecent();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 탭 포커스 시 최신 데이터 재로드 (다른 화면에서 찜/최근 변경 후 돌아왔을 때 반영)
-  useFocusEffect(useCallback(() => {
-    loadLikes();
-    loadRecent();
-  }, [loadLikes, loadRecent]));
 
   // Storage 변경 구독 — 타입별로 분리
   useEffect(() => {
