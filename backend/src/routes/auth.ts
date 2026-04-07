@@ -13,7 +13,6 @@ import { config } from '../config';
 import { requireAuth } from '../middleware/requireAuth';
 import {
   generateTossToken,
-  refreshTossToken,
   getTossUser,
   revokeTossToken,
 } from '../lib/tossAuth';
@@ -30,41 +29,6 @@ function signJwt(userId: string, userKey: number): string {
   );
 }
 
-/**
- * DB에서 유저의 Toss access token을 가져오되,
- * 만료 임박(5분 이내)이면 자동으로 refresh해요.
- */
-async function getFreshAccessToken(userId: string): Promise<string> {
-  const { rows } = await pool.query<{
-    toss_access_token: string;
-    toss_refresh_token: string;
-    token_expires_at: Date;
-  }>(
-    'SELECT toss_access_token, toss_refresh_token, token_expires_at FROM users WHERE id = $1',
-    [userId]
-  );
-
-  const user = rows[0];
-  if (!user?.toss_access_token) throw new Error('토큰 정보가 없어요. 다시 로그인해 주세요.');
-
-  const expiresAt = new Date(user.token_expires_at).getTime();
-  const isExpiringSoon = expiresAt - Date.now() < 5 * 60 * 1000; // 5분 이내
-
-  if (!isExpiringSoon) return user.toss_access_token;
-
-  // Toss access token 재발급 (refreshToken도 새로 받아요)
-  const refreshed = await refreshTossToken(user.toss_refresh_token);
-  const newExpiresAt = new Date(Date.now() + refreshed.expiresIn * 1000);
-
-  await pool.query(
-    `UPDATE users
-     SET toss_access_token = $1, toss_refresh_token = $2, token_expires_at = $3
-     WHERE id = $4`,
-    [refreshed.accessToken, refreshed.refreshToken, newExpiresAt, userId]
-  );
-
-  return refreshed.accessToken;
-}
 
 // ─── POST /auth/login ───────────────────────────────────────────────────────
 
@@ -125,27 +89,29 @@ router.post('/login', async (req, res) => {
 
 /**
  * 현재 로그인 유저 프로필 조회
- * Toss access token이 만료됐으면 자동으로 refresh해요.
+ * DB에서 바로 반환 (Toss login-me API 호출 안 함 — 호출 빈도 절감)
+ * 토큰 유효성은 우리 JWT로 확인하고, unlink 감지는 콜백(POST /auth/callback/unlink)으로 처리
  */
 router.get('/me', requireAuth, async (req, res) => {
   try {
-    const accessToken = await getFreshAccessToken(req.user!.userId);
-    const tossUser = await getTossUser(accessToken);
+    const { rows } = await pool.query<{ name: string | null; toss_access_token: string | null }>(
+      'SELECT name, toss_access_token FROM users WHERE id = $1',
+      [req.user!.userId]
+    );
+
+    if (!rows[0] || !rows[0].toss_access_token) {
+      // 토큰 없음 = unlink됐거나 로그아웃된 상태
+      res.status(401).json({ error: 'TokenNotFound', message: '다시 로그인해 주세요.' });
+      return;
+    }
 
     res.json({
       id: req.user!.userId,
       userKey: req.user!.userKey,
-      name: tossUser.name ?? null,
-      phoneNumber: tossUser.phoneNumber ?? null,
-      email: tossUser.email ?? null,
+      name: rows[0].name ?? null,
     });
   } catch (err) {
     console.error('[auth/me]', err);
-    // DB에 토큰 없음 (콜백으로 폐기됐거나 로그아웃된 경우) → 재로그인 필요
-    if (err instanceof Error && err.message.includes('다시 로그인')) {
-      res.status(401).json({ error: 'TokenNotFound', message: err.message });
-      return;
-    }
     res.status(500).json({ error: 'FetchFailed', message: '사용자 정보를 가져오지 못했어요.' });
   }
 });
