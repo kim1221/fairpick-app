@@ -240,6 +240,14 @@ function MyPage() {
     loadRecent();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 탭 포커스 시 최신 데이터 재로드 (다른 화면에서 찜/최근 변경 후 돌아왔을 때 반영)
+  useEffect(() => {
+    return navigation.addListener('focus', () => {
+      loadLikes();
+      loadRecent();
+    });
+  }, [navigation, loadLikes, loadRecent]);
+
   // Storage 변경 구독 — 타입별로 분리
   useEffect(() => {
     const unsubscribe = subscribeStorageChange((event) => {
