@@ -1,6 +1,7 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/core';
 import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl } from 'react-native';
 import { Loader, Icon, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
@@ -210,7 +211,9 @@ function MyPage() {
           .map((item, i) => {
             const result = results[i]!;
             if (result.status === 'fulfilled' && result.value != null) return result.value;
-            // API 실패 + snapshot 없음
+            // API 실패 → snapshot 폴백 (제목·이미지 있으면 표시)
+            const snap = item.snapshot;
+            if (snap?.title && snap?.imageUrl) return snapshotToEventCard(item.id, snap);
             return null;
           })
           .filter((e): e is EventCardData => e !== null);
@@ -241,12 +244,10 @@ function MyPage() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 탭 포커스 시 최신 데이터 재로드 (다른 화면에서 찜/최근 변경 후 돌아왔을 때 반영)
-  useEffect(() => {
-    return navigation.addListener('focus', () => {
-      loadLikes();
-      loadRecent();
-    });
-  }, [navigation, loadLikes, loadRecent]);
+  useFocusEffect(useCallback(() => {
+    loadLikes();
+    loadRecent();
+  }, [loadLikes, loadRecent]));
 
   // Storage 변경 구독 — 타입별로 분리
   useEffect(() => {
