@@ -191,7 +191,11 @@ function MyPage() {
     setRecentError(false);
     try {
       const recentData = await getRecentV2();
-      setRecentCount(recentData.totalCount);
+      // 날짜가 바뀌면 dailyCount를 0으로 처리 (스토리지 갱신은 다음 pushRecent 시 자동)
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const dailyCount = recentData.dailyDate === todayStr ? (recentData.dailyCount ?? 0) : 0;
+      setRecentCount(dailyCount);
 
       if (recentData.items.length > 0) {
         const previewItems = recentData.items.slice(0, 3);
