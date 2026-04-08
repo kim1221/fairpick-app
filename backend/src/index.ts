@@ -8459,7 +8459,8 @@ async function buildSectionPools(
         } else if (theme.slug === 'budget_pick') {
           events = await recommender.getBudgetPick(pool, location, limit);
         } else if (theme.slug === 'date_pick') {
-          events = await recommender.getDatePick(pool, location, limit);
+          // fetchLimit으로 큰 풀 확보: 앞 섹션 중복 제거 후에도 충분한 후보가 남도록
+          events = await recommender.getDatePick(pool, location, fetchLimit);
         } else if (theme.slug === 'walkable') {
           // 위치 없으면 빈 배열 → 프런트에서 섹션 자동 숨김
           events = location
