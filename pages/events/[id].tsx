@@ -9,7 +9,10 @@ import {
   TouchableOpacity,
   Text,
   Platform,
-  Pressable
+  Pressable,
+  Modal,
+  Image,
+  StatusBar,
 } from 'react-native';
 import { Txt, Badge, Post, BottomSheet, Loader, Button, Icon, IconButton, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
@@ -237,6 +240,7 @@ function EventDetailPage() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [activeSheet, setActiveSheet] = useState<'price' | 'hours' | 'overview' | null>(null);
   const [adRendered, setAdRendered] = useState(false);
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
   // event 로드 후 snapshot 추출 → useLike에 전달 (찜 시 로컬 snapshot 저장)
   const eventSnapshot = React.useMemo(() => event ? {
     title: event.title,
@@ -479,14 +483,20 @@ function EventDetailPage() {
       >
         {/* Hero Image with Overlay Badges */}
         <View style={styles.heroContainer}>
-          <EventImage
-            uri={event.detailImageUrl}
-            height={IMAGE_HEIGHT}
-            borderRadius={0}
-            resizeMode="cover"
-            category={event.category}
-            accessibilityLabel={`${event.title} 대표 이미지`}
-          />
+          <TouchableOpacity
+            activeOpacity={0.95}
+            onPress={() => setImageViewerVisible(true)}
+            accessibilityLabel="이미지 전체보기"
+          >
+            <EventImage
+              uri={event.detailImageUrl}
+              height={IMAGE_HEIGHT}
+              borderRadius={0}
+              resizeMode="cover"
+              category={event.category}
+              accessibilityLabel={`${event.title} 대표 이미지`}
+            />
+          </TouchableOpacity>
 
           {/* Hero Overlay Badges */}
           <View style={styles.heroBadgeContainer}>
@@ -952,9 +962,73 @@ function EventDetailPage() {
           </>
         )}
       </BottomSheet.Root>
+
+      {/* 전체화면 이미지 뷰어 */}
+      <Modal
+        visible={imageViewerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setImageViewerVisible(false)}
+        statusBarTranslucent
+      >
+        <StatusBar hidden />
+        <View style={imageViewerStyles.overlay}>
+          <TouchableOpacity
+            style={imageViewerStyles.closeButton}
+            onPress={() => setImageViewerVisible(false)}
+            activeOpacity={0.7}
+          >
+            <Icon name="icon-x-mono" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={imageViewerStyles.imageArea}
+            activeOpacity={1}
+            onPress={() => setImageViewerVisible(false)}
+          >
+            <Image
+              source={{ uri: event.detailImageUrl || event.thumbnailUrl }}
+              style={imageViewerStyles.fullImage}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </View>
   );
 }
+
+const { width: SCREEN_WIDTH, height: FULL_SCREEN_HEIGHT } = Dimensions.get('screen');
+
+const imageViewerStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageArea: {
+    width: SCREEN_WIDTH,
+    height: FULL_SCREEN_HEIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullImage: {
+    width: SCREEN_WIDTH,
+    height: FULL_SCREEN_HEIGHT,
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 52,
+    right: 20,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
 
 // ─────────────────────────────────────────────────
 // 카테고리별 상세 메타데이터 렌더링 (Tier 2)
