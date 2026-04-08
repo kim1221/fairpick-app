@@ -6,7 +6,7 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
+import { FlatList, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
 import { Icon, AnimateSkeleton } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
@@ -54,6 +54,13 @@ interface ProcessedSection {
   subtitle: string | null;
   events: Array<ScoredEvent & { signal?: { label: string; color: string } }>;
 }
+
+// FlatList 아이템 타입
+type FeedItem =
+  | { type: 'skeleton'; skeletonType: 'today_pick' | 'horizontal'; id: string }
+  | { type: 'empty' }
+  | { type: 'section'; section: ProcessedSection }
+  | { type: 'ad' };
 
 // ─────────────────────────────────────────────────────────────
 // 섹션별 핵심 신호 계산 (컴포넌트 외부 — 재생성 없음)
@@ -374,15 +381,18 @@ function HomePageInner() {
   };
 
   const handleEventPress = useCallback((eventId: string, sectionSlug?: string, rankPosition?: number) => {
-    userEventService.logEventClick(eventId, {
-      sectionSlug,
-      rankPosition,
-      metadata: {
-        click_source: 'home_card',
-        ...(sectionSlug === 'today_pick' && { algorithm_version: 'v2' }),
-      },
-    }).catch(() => {});
     navigation.navigate('/events/:id', { id: eventId });
+    // navigate 이후 로깅: 네비게이션 애니메이션이 먼저 시작되도록 지연
+    requestAnimationFrame(() => {
+      userEventService.logEventClick(eventId, {
+        sectionSlug,
+        rankPosition,
+        metadata: {
+          click_source: 'home_card',
+          ...(sectionSlug === 'today_pick' && { algorithm_version: 'v2' }),
+        },
+      }).catch(() => {});
+    });
   }, [navigation]);
 
   const handleRefresh = useCallback(async () => {
@@ -474,32 +484,53 @@ function HomePageInner() {
   }, [styles, handleEventPress]);
 
   // ─────────────────────────────────────────────────────────────
-  // 로딩 스켈레톤
+  // FlatList 데이터 + 렌더러
   // ─────────────────────────────────────────────────────────────
 
-  const renderLoading = () => (
-    <>
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <View style={{ height: 24, width: 100, backgroundColor: adaptive.grey200, borderRadius: 4 }} />
-        </View>
-        <TodayPickSkeleton />
-      </View>
-      {[0, 1, 2].map((i) => (
-        <View key={i} style={styles.section}>
+  const feedItems = useMemo((): FeedItem[] => {
+    if (sections === null) {
+      return [
+        { type: 'skeleton', skeletonType: 'today_pick', id: 'sk-today' },
+        { type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h1' },
+        { type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h2' },
+        { type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h3' },
+      ];
+    }
+    if (processedSections.length === 0) {
+      return [{ type: 'empty' }];
+    }
+    const items: FeedItem[] = [];
+    for (let i = 0; i < processedSections.length; i++) {
+      items.push({ type: 'section', section: processedSections[i]! });
+      if (i === 1) {
+        items.push({ type: 'ad' });
+      }
+    }
+    return items;
+  }, [sections, processedSections]);
+
+  const renderFeedItem = useCallback(({ item }: { item: FeedItem }) => {
+    if (item.type === 'skeleton') {
+      if (item.skeletonType === 'today_pick') {
+        return (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View style={{ height: 24, width: 100, backgroundColor: adaptive.grey200, borderRadius: 4 }} />
+            </View>
+            <TodayPickSkeleton />
+          </View>
+        );
+      }
+      return (
+        <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={{ height: 20, width: 120, backgroundColor: adaptive.grey200, borderRadius: 4 }} />
           </View>
           <HorizontalSectionSkeleton />
         </View>
-      ))}
-    </>
-  );
-
-  // useMemo로 섹션 노드 캐싱 — sections/isOffline 이외 상태 변경 시 재계산 방지
-  const contentNodes = useMemo(() => {
-    if (sections === null) return null; // null → 호출부에서 renderLoading() 표시
-    if (sections.length === 0) {
+      );
+    }
+    if (item.type === 'empty') {
       return (
         <View style={styles.emptyCard}>
           <Text style={styles.emptyText}>
@@ -508,16 +539,37 @@ function HomePageInner() {
         </View>
       );
     }
-
-    const nodes: React.ReactNode[] = [];
-    for (let i = 0; i < processedSections.length; i++) {
-      nodes.push(renderSection(processedSections[i]!));
-      if (i === 1) {
-        nodes.push(<AdSlot key="feed-ad" />);
-      }
+    if (item.type === 'ad') {
+      return <AdSlot />;
     }
-    return nodes;
-  }, [processedSections, sections, isOffline, styles, renderSection]);
+    return renderSection(item.section);
+  }, [styles, adaptive, isOffline, renderSection]);
+
+  const listHeader = useMemo(() => (
+    <>
+      <ScrollViewInertialBackground topColor={adaptive.background} bottomColor={adaptive.grey100} />
+      <View style={[styles.header, { paddingTop: top }]}>
+        <View style={styles.headerTop}>
+          <View>
+            <Text style={styles.title}>페어픽</Text>
+            <Text style={styles.subtitle}>오늘의 재미를 찾아볼까요?</Text>
+          </View>
+          {location && currentAddress ? (
+            <Pressable
+              onPress={handleRefresh}
+              style={styles.locationButton}
+              android_ripple={{ color: adaptive.grey200, radius: 20 }}
+            >
+              <View style={styles.locationButtonContent}>
+                <Icon name="icon-pin-mono" size={14} color={adaptive.blue600} />
+                <Text style={styles.locationButtonText}>{currentAddress}</Text>
+              </View>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+    </>
+  ), [adaptive, styles, top, location, currentAddress, handleRefresh]);
 
   return (
     <View style={styles.container}>
@@ -530,41 +582,22 @@ function HomePageInner() {
         </View>
       )}
 
-      <ScrollView
+      <FlatList
         style={styles.scrollView}
+        data={feedItems}
+        renderItem={renderFeedItem}
+        keyExtractor={(item) => {
+          if (item.type === 'section') return item.section.slug;
+          if (item.type === 'skeleton') return item.id;
+          return item.type;
+        }}
+        ListHeaderComponent={listHeader}
+        ListFooterComponent={<View style={{ height: 100 }} />}
         showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
         removeClippedSubviews={true}
         onScrollBeginDrag={handleAiNoticeConfirm}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-      >
-        <ScrollViewInertialBackground topColor={adaptive.background} bottomColor={adaptive.grey100} />
-        {/* 헤더 */}
-        <View style={[styles.header, { paddingTop: top }]}>
-          <View style={styles.headerTop}>
-            <View>
-              <Text style={styles.title}>페어픽</Text>
-              <Text style={styles.subtitle}>오늘의 재미를 찾아볼까요?</Text>
-            </View>
-            {location && currentAddress ? (
-              <Pressable
-                onPress={handleRefresh}
-                style={styles.locationButton}
-                android_ripple={{ color: adaptive.grey200, radius: 20 }}
-              >
-                <View style={styles.locationButtonContent}>
-                  <Icon name="icon-pin-mono" size={14} color={adaptive.blue600} />
-                  <Text style={styles.locationButtonText}>{currentAddress}</Text>
-                </View>
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
-
-        {sections === null ? renderLoading() : contentNodes}
-
-        <View style={{ height: 100 }} />
-      </ScrollView>
+      />
 
       <BottomTabBar currentTab="home" />
     </View>

@@ -1,8 +1,8 @@
 /**
  * 찜하기 훅
  *
- * LikesContext에서 상태를 읽어 per-card 스토리지 호출 제거.
- * 로컬 스토리지 업데이트 + 로그인 상태면 서버에도 반영 (fire-and-forget)
+ * useIsLiked / useSetLiked를 사용해 per-card 선택적 구독.
+ * 다른 카드 찜 토글 시 이 카드는 리렌더링되지 않음.
  *
  * 사용법:
  *   const { isLiked, toggle } = useLike({ eventId: 'abc123' });
@@ -12,7 +12,7 @@ import { useCallback } from 'react';
 import { generateHapticFeedback } from '@apps-in-toss/framework';
 import { toggleLike, StoredEventItemV2 } from '../utils/storage';
 import { useAuth } from './useAuth';
-import { useLikesContext } from '../contexts/LikesContext';
+import { useIsLiked, useSetLiked } from '../contexts/LikesContext';
 import http from '../lib/http';
 
 interface UseLikeOptions {
@@ -27,9 +27,8 @@ interface UseLikeResult {
 
 export function useLike({ eventId, snapshot }: UseLikeOptions): UseLikeResult {
   const { isLoggedIn } = useAuth();
-  const { likedIds, setLiked } = useLikesContext();
-
-  const isLiked = eventId ? likedIds.has(eventId) : false;
+  const isLiked = useIsLiked(eventId);
+  const setLiked = useSetLiked();
 
   const toggle = useCallback(async (): Promise<{ liked: boolean }> => {
     if (!eventId) return { liked: false };
