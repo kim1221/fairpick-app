@@ -274,6 +274,15 @@ function RecentPage() {
     loadRecent();
   }, [loadRecent]);
 
+  // 화면 포커스 시 재로드 (스택에서 돌아왔을 때 최신 데이터 반영)
+  useEffect(() => {
+    return navigation.addListener('focus', () => {
+      if (!skipNextStorageReload.current) {
+        loadRecent();
+      }
+    });
+  }, [navigation, loadRecent]);
+
   // recent 변경 시만 갱신 (optimistic 업데이트로 인한 재호출은 스킵)
   useEffect(() => {
     const unsubscribe = subscribeStorageChange((event) => {
