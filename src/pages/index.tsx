@@ -457,7 +457,7 @@ function HomePageInner() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.horizontalList}
-          scrollEventThrottle={16}
+          removeClippedSubviews={true}
         >
           {events.map((event, idx) => (
             <SectionCard
@@ -496,8 +496,9 @@ function HomePageInner() {
     </>
   );
 
-  const renderContent = () => {
-    if (sections === null) return renderLoading();
+  // useMemo로 섹션 노드 캐싱 — sections/isOffline 이외 상태 변경 시 재계산 방지
+  const contentNodes = useMemo(() => {
+    if (sections === null) return null; // null → 호출부에서 renderLoading() 표시
     if (sections.length === 0) {
       return (
         <View style={styles.emptyCard}>
@@ -511,13 +512,12 @@ function HomePageInner() {
     const nodes: React.ReactNode[] = [];
     for (let i = 0; i < processedSections.length; i++) {
       nodes.push(renderSection(processedSections[i]!));
-      // 2번째 섹션 이후 피드형 배너 1개 삽입
       if (i === 1) {
         nodes.push(<AdSlot key="feed-ad" />);
       }
     }
     return nodes;
-  };
+  }, [processedSections, sections, isOffline, styles, renderSection]);
 
   return (
     <View style={styles.container}>
@@ -534,6 +534,7 @@ function HomePageInner() {
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
+        removeClippedSubviews={true}
         onScrollBeginDrag={handleAiNoticeConfirm}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
@@ -560,7 +561,7 @@ function HomePageInner() {
           </View>
         </View>
 
-        {renderContent()}
+        {sections === null ? renderLoading() : contentNodes}
 
         <View style={{ height: 100 }} />
       </ScrollView>
