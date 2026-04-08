@@ -416,7 +416,7 @@ const [likeEvents, setLikeEvents] = useState<EventCardData[]>([]);
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>최근 본 이벤트</Text>
-                {recentCount > 0 && (
+                {recentEvents.length > 0 && (
                   <TouchableOpacity
                     onPress={() => navigation.navigate('/mypage/recent')}
                     activeOpacity={0.7}
