@@ -180,6 +180,12 @@ function RecentPage() {
   const skipNextStorageReload = useRef(false);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastOpacity = useRef(new Animated.Value(0));
+  const isLoggedInRef = useRef(isLoggedIn);
+
+  // isLoggedIn이 변할 때마다 ref를 동기화 (loadRecent 의존성 제거용)
+  useEffect(() => {
+    isLoggedInRef.current = isLoggedIn;
+  }, [isLoggedIn]);
 
   const adaptive = useAdaptive();
   const { top } = useSafeAreaInsets();
@@ -195,7 +201,7 @@ function RecentPage() {
 
       // 로그인 시 서버를 ID 소스로 사용, 실패 시 로컬로 폴백
       let orderedItems: Array<{ id: string; timestamp: string }>;
-      if (isLoggedIn) {
+      if (isLoggedInRef.current) {
         try {
           const { data } = await http.get<GetRecentResponse>('/users/me/recent');
           orderedItems = data.items.map((i) => ({ id: i.eventId, timestamp: i.viewedAt }));
@@ -268,7 +274,7 @@ function RecentPage() {
     } finally {
       setLoading(false);
     }
-  }, [isLoggedIn]);
+  }, []);
 
   useEffect(() => {
     loadRecent();
@@ -343,7 +349,7 @@ function RecentPage() {
     try {
       await removeRecentItem(eventId);
       // 로그인 시 서버에도 삭제 (fire-and-forget)
-      if (isLoggedIn) {
+      if (isLoggedInRef.current) {
         http.delete(`/users/me/recent/${eventId}`).catch((e) => {
           if (__DEV__) console.warn('[RecentPage][Remove][Server]', e.message);
         });
@@ -366,7 +372,7 @@ function RecentPage() {
     try {
       await clearRecent();
       // 로그인 시 서버에도 전체 삭제 (fire-and-forget)
-      if (isLoggedIn) {
+      if (isLoggedInRef.current) {
         http.delete('/users/me/recent').catch((e) => {
           if (__DEV__) console.warn('[RecentPage][ClearAll][Server]', e.message);
         });
@@ -420,7 +426,7 @@ function RecentPage() {
         await writeRecentV2({ version: 2, items: restoredItems, totalCount: recentData.totalCount });
         emitStorageChangeEvent({ type: 'recent', action: 'update', count: restoredItems.length });
         // 로그인 시 서버에도 복원 (fire-and-forget)
-        if (isLoggedIn) {
+        if (isLoggedInRef.current) {
           http.post('/users/me/recent/batch', {
             items: [{ eventId: event.id, viewedAt: event.viewedAt || new Date().toISOString() }],
           }).catch((e) => {
@@ -455,7 +461,7 @@ function RecentPage() {
         await writeRecentV2({ version: 2, items: restoredItems, totalCount: restoredItems.length });
         emitStorageChangeEvent({ type: 'recent', action: 'update', count: restoredItems.length });
         // 로그인 시 서버에도 복원 (fire-and-forget)
-        if (isLoggedIn) {
+        if (isLoggedInRef.current) {
           http.post('/users/me/recent/batch', {
             items: info.events.map((e) => ({
               eventId: e.id,
