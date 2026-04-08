@@ -391,6 +391,24 @@ export async function getAllRawTourEvents(): Promise<RawEventFromDB[]> {
   return result.rows;
 }
 
+/**
+ * DATE 파라미터 안전 변환
+ *
+ * postgres-date는 new Date(year, month-1, day) (로컬 시간 생성자)로 Date를 만들기 때문에
+ * pg.defaults.parseInputDatesAsUTC=true와 결합하면 UTC 직렬화 시 1일 감소.
+ * Date 객체가 오더라도 로컬 getter로 YYYY-MM-DD 문자열을 추출해 타임존 영향을 완전 제거.
+ */
+function toDateParam(v: string | Date | null | undefined): string | null {
+  if (!v) return null;
+  if (v instanceof Date) {
+    const y = v.getFullYear();
+    const m = String(v.getMonth() + 1).padStart(2, '0');
+    const d = String(v.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return (v as string).substring(0, 10);
+}
+
 // Canonical 이벤트 UPSERT
 export async function upsertCanonicalEvent(event: CanonicalEvent) {
   // UPSERT 전 존재 여부 확인 (로그용)
@@ -524,8 +542,8 @@ export async function upsertCanonicalEvent(event: CanonicalEvent) {
       event.title,
       event.displayTitle ?? event.title,
       event.contentKey ?? null,
-      event.startAt,
-      event.endAt,
+      toDateParam(event.startAt),
+      toDateParam(event.endAt),
       event.venue,
       event.region,
       event.mainCategory,
