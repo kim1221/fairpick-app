@@ -26,6 +26,7 @@ import { pushRecent } from '../../src/utils/storage';
 import { updateProfileOnView, updateProfileOnAction } from '../../src/utils/userProfile';
 import { computePersonalScoreForEvent, formatPersonalScoreDebug } from '../../src/utils/personalScore';
 import { useLike } from '../../src/hooks/useLike';
+import { LikesProvider } from '../../src/contexts/LikesContext';
 import { useAuth } from '../../src/hooks/useAuth';
 import http from '../../src/lib/http';
 
@@ -35,7 +36,7 @@ type EventDetailParams = {
 
 export const Route = createRoute('/events/:id', {
   validateParams: (params) => params as { id: string },
-  component: EventDetailPage,
+  component: () => <LikesProvider><EventDetailPage /></LikesProvider>,
 });
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');

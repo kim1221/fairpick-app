@@ -18,6 +18,7 @@ import { EventCardData } from '../data/events';
 import { EventImage } from '../components/EventImage';
 import { API_BASE_URL } from '../config/api';
 import { useLike } from '../hooks/useLike';
+import { LikesProvider } from '../contexts/LikesContext';
 import { reverseGeocode } from '../utils/geocoding';
 
 // ─────────────────────────────────────────────────
@@ -54,7 +55,7 @@ interface EventsApiResponse {
 }
 
 export const Route = createRoute('/explore', {
-  component: ExplorePage,
+  component: () => <LikesProvider><ExplorePage /></LikesProvider>,
 });
 
 // ─────────────────────────────────────────────────
