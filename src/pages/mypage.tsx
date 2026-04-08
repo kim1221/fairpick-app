@@ -127,8 +127,7 @@ function MyPage() {
   // 찜/최근 각각 독립적인 카운트 + 로딩 상태
   const [likesCount, setLikesCount] = useState(0);
   const [likesActiveCount, setLikesActiveCount] = useState(0);
-  const [recentCount, setRecentCount] = useState(0);
-  const [likeEvents, setLikeEvents] = useState<EventCardData[]>([]);
+const [likeEvents, setLikeEvents] = useState<EventCardData[]>([]);
   const [recentEvents, setRecentEvents] = useState<EventCardData[]>([]);
   const [likesLoading, setLikesLoading] = useState(true);
   const [recentLoading, setRecentLoading] = useState(true);
@@ -191,12 +190,6 @@ function MyPage() {
     setRecentError(false);
     try {
       const recentData = await getRecentV2();
-      // 날짜가 바뀌면 dailyCount를 0으로 처리 (스토리지 갱신은 다음 pushRecent 시 자동)
-      const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-      const dailyCount = recentData.dailyDate === todayStr ? (recentData.dailyCount ?? 0) : 0;
-      setRecentCount(dailyCount);
-
       if (recentData.items.length > 0) {
         const previewItems = recentData.items.slice(0, 3);
         const results = await Promise.allSettled(
@@ -262,7 +255,7 @@ function MyPage() {
     setRefreshing(false);
   }, [loadLikes, loadRecent]);
 
-  const isEmpty = likesCount === 0 && recentCount === 0;
+  const isEmpty = likesCount === 0 && recentEvents.length === 0;
 
   return (
     <View style={styles.container}>
@@ -354,11 +347,6 @@ function MyPage() {
                       활성 {likesActiveCount}개 · 종료 {likesCount - likesActiveCount}개
                     </Text>
                   )}
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                  <Text style={styles.statNumber}>{recentCount}</Text>
-                  <Text style={styles.statLabel}>최근 본 수</Text>
                 </View>
               </View>
             )}

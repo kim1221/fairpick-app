@@ -52,9 +52,7 @@ export interface LikesDataV2 {
 export interface RecentDataV2 {
   version: 2;
   items: StoredEventItemV2[]; // 최대 50개
-  totalCount: number; // 누적 카운트 (무한 증가, 하위호환용)
-  dailyCount: number; // 오늘 본 이벤트 수 (자정 기준 초기화)
-  dailyDate: string;  // 'YYYY-MM-DD' 형식
+  totalCount: number; // 누적 카운트
 }
 
 // Storage 변경 이벤트 타입
@@ -242,15 +240,6 @@ export async function writeLikesV2(data: LikesDataV2): Promise<void> {
   }
 }
 
-/** 오늘 날짜를 'YYYY-MM-DD' 형식으로 반환 (로컬 시간 기준) */
-function todayDateString(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
 /**
  * V2 데이터 읽기 (Recent)
  */
@@ -259,7 +248,7 @@ async function readRecentV2(): Promise<RecentDataV2> {
     const raw = await TossStorage.getItem(STORAGE_KEYS.RECENT);
     if (!raw) {
       console.log('[Storage][readRecentV2] No data, returning empty v2');
-      return { version: 2, items: [], totalCount: 0, dailyCount: 0, dailyDate: todayDateString() };
+      return { version: 2, items: [], totalCount: 0 };
     }
 
     const parsed = JSON.parse(raw);
@@ -272,8 +261,7 @@ async function readRecentV2(): Promise<RecentDataV2> {
         timestamp: new Date().toISOString(),
         lastKnownStatus: 'active' as const,
       }));
-      // V1의 개수를 totalCount 초기값으로 사용
-      return { version: 2, items, totalCount: parsed.length, dailyCount: 0, dailyDate: todayDateString() };
+      return { version: 2, items, totalCount: parsed.length };
     }
 
     // V2 구조 확인
@@ -282,20 +270,15 @@ async function readRecentV2(): Promise<RecentDataV2> {
         itemCount: parsed.items.length,
         totalCount: parsed.totalCount,
       });
-      // dailyCount/dailyDate 없는 구버전 데이터 마이그레이션
-      return {
-        ...parsed,
-        dailyCount: parsed.dailyCount ?? 0,
-        dailyDate: parsed.dailyDate ?? todayDateString(),
-      } as RecentDataV2;
+      return parsed as RecentDataV2;
     }
 
     // 알 수 없는 구조
     console.warn('[Storage][readRecentV2] Unknown structure, resetting', { parsed });
-    return { version: 2, items: [], totalCount: 0, dailyCount: 0, dailyDate: todayDateString() };
+    return { version: 2, items: [], totalCount: 0 };
   } catch (error) {
     console.error('[Storage][readRecentV2] Exception', { error });
-    return { version: 2, items: [], totalCount: 0, dailyCount: 0, dailyDate: todayDateString() };
+    return { version: 2, items: [], totalCount: 0 };
   }
 }
 
@@ -505,19 +488,10 @@ export async function pushRecent(
   // totalCount 증가 (중복이 아닐 때만)
   const newTotalCount = wasDuplicate ? data.totalCount : data.totalCount + 1;
 
-  // dailyCount: 날짜가 바뀌면 리셋, 중복이 아닐 때만 증가
-  const today = todayDateString();
-  const isNewDay = data.dailyDate !== today;
-  const newDailyCount = wasDuplicate
-    ? (isNewDay ? 0 : data.dailyCount)
-    : (isNewDay ? 1 : data.dailyCount + 1);
-
   const updatedData: RecentDataV2 = {
     version: 2,
     items: trimmed,
     totalCount: newTotalCount,
-    dailyCount: newDailyCount,
-    dailyDate: today,
   };
 
   console.log(`[Storage][pushRecent][UPDATED]`, {
@@ -552,7 +526,7 @@ export async function clearLikes(): Promise<void> {
  * 최근 본 목록 초기화
  */
 export async function clearRecent(): Promise<void> {
-  await writeRecentV2({ version: 2, items: [], totalCount: 0, dailyCount: 0, dailyDate: todayDateString() });
+  await writeRecentV2({ version: 2, items: [], totalCount: 0 });
   emitStorageChange({ type: 'recent', action: 'update', count: 0 });
   if (__DEV__) console.log('[Storage][clearRecent] cleared');
 }
