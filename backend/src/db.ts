@@ -7,6 +7,12 @@ import { config } from './config';
 // raw string으로 반환해 toUtcIso()가 'Z'를 붙여 UTC로 처리하도록 한다.
 types.setTypeParser(1114, (val: string) => val);
 
+// DATE (OID 1082):
+// postgres-date가 new Date(year, month-1, day) (로컬 시간 생성자)를 사용해 Date 객체를 만든다.
+// parseInputDatesAsUTC=true와 결합 시, KST 환경에서 전날 15:00Z로 직렬화 → DB에 하루 적게 저장됨.
+// raw "YYYY-MM-DD" 문자열로 반환해 타임존 영향 없이 날짜를 그대로 전달한다.
+types.setTypeParser(1082, (val: string) => val);
+
 // JS Date 파라미터 직렬화를 항상 UTC로 강제:
 // TIMESTAMP WITHOUT TIME ZONE 컬럼은 pg가 보낸 값의 timezone 정보를 변환 없이 strip한다.
 // 기본값(false) 시 로컬 타임존(KST +09:00) 포함 문자열을 전송해도 PostgreSQL이 +09:00을 무시하고

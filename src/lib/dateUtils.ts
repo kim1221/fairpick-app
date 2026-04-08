@@ -137,30 +137,21 @@ export function formatEventPeriodShort(
   startAt: string | null | undefined,
   endAt: string | null | undefined,
 ): string {
-  console.log('[DEBUG] formatEventPeriodShort input:', { startAt, endAt });
   const startDate = parseDate(startAt);
   const endDate = parseDate(endAt);
-  console.log('[DEBUG] formatEventPeriodShort parsed:', { startDate, endDate });
 
   if (startDate && endDate) {
-    const result = `${formatShortDate(startDate)} ~ ${formatShortDate(endDate)}`;
-    console.log('[DEBUG] formatEventPeriodShort result (both):', result);
-    return result;
+    return `${formatShortDate(startDate)} ~ ${formatShortDate(endDate)}`;
   }
 
   if (startDate) {
-    const result = `${formatShortDate(startDate)} ~`;
-    console.log('[DEBUG] formatEventPeriodShort result (start only):', result);
-    return result;
+    return `${formatShortDate(startDate)} ~`;
   }
 
   if (endDate) {
-    const result = `~ ${formatShortDate(endDate)}`;
-    console.log('[DEBUG] formatEventPeriodShort result (end only):', result);
-    return result;
+    return `~ ${formatShortDate(endDate)}`;
   }
 
-  console.log('[DEBUG] formatEventPeriodShort result (none): 일정 미정');
   return '일정 미정';
 }
 

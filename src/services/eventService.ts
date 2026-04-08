@@ -447,14 +447,15 @@ interface EventResponse {
 }
 
 function formatPeriodText(startAt: string, endAt: string): string {
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}.${month}.${day}`;
+  // Date 객체 없이 문자열에서 직접 추출 → timezone 영향 없음
+  // 'YYYY-MM-DD', 'YYYY-MM-DD HH:MM:SS', 'YYYY-MM-DDTHH:MM:SSZ' 모두 지원
+  const parseYMD = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return '';
+    return `${m[1]}.${m[2]}.${m[3]}`;
   };
-  return `${formatDate(startAt)} ~ ${formatDate(endAt)}`;
+  return `${parseYMD(startAt)} ~ ${parseYMD(endAt)}`;
 }
 
 type CategoryResolution = {

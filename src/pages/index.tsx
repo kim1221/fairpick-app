@@ -200,6 +200,25 @@ function HorizontalSectionSkeleton() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// AdSlot — InlineAd를 독립 컴포넌트로 분리
+// feedAdRendered 상태가 HomePageInner를 리렌더하지 않도록 격리
+// Android에서 부모 리렌더 시 Native Ad View가 리셋되는 문제 방지
+// ─────────────────────────────────────────────────────────────
+const AdSlot = React.memo(() => {
+  const [rendered, setRendered] = useState(false);
+  return (
+    <View style={{ width: '100%', marginVertical: rendered ? 8 : 0 }}>
+      <InlineAd
+        adGroupId="ait.v2.live.b3363cb4c82643e9"
+        impressFallbackOnMount={true}
+        onAdRendered={() => setRendered(true)}
+        onAdFailedToRender={() => setRendered(false)}
+        onNoFill={() => setRendered(false)}
+      />
+    </View>
+  );
+});
+
 // SectionCard — 메모이제이션된 카드 래퍼
 // onPress를 안정된 참조로 유지해 EventCard 리렌더 방지
 // ─────────────────────────────────────────────────────────────
@@ -259,8 +278,6 @@ function HomePageInner() {
   const [refreshing, setRefreshing] = useState(false);
   const [showAiNotice, setShowAiNotice] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
-  const [feedAdRendered, setFeedAdRendered] = useState(false);
-
   const excludedIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -496,17 +513,7 @@ function HomePageInner() {
       nodes.push(renderSection(processedSections[i]!));
       // 2번째 섹션 이후 피드형 배너 1개 삽입
       if (i === 1) {
-        nodes.push(
-          <View key="feed-ad" style={{ width: '100%', marginVertical: feedAdRendered ? 8 : 0 }}>
-            <InlineAd
-              adGroupId="ait.v2.live.b3363cb4c82643e9"
-              impressFallbackOnMount={true}
-              onAdRendered={() => setFeedAdRendered(true)}
-              onAdFailedToRender={() => setFeedAdRendered(false)}
-              onNoFill={() => setFeedAdRendered(false)}
-            />
-          </View>
-        );
+        nodes.push(<AdSlot key="feed-ad" />);
       }
     }
     return nodes;

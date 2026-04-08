@@ -97,6 +97,10 @@ function formatOpeningHoursSummary(openingHours: any): string {
   if (parts.length === 0) {
     if (openingHours.notes) {
       const notes = String(openingHours.notes);
+      // 날짜 형식("2015년 7월 6일" 같은 패턴) → 잘못된 AI 추출 데이터로 판단, 폴백
+      if (/\d{4}년\s*\d+월\s*\d+일/.test(notes)) {
+        return '운영 시간을 더 모으고 있어요';
+      }
       return notes.length > 30 ? notes.substring(0, 30) + '...' : notes;
     }
     return '운영 시간을 더 모으고 있어요';
@@ -571,12 +575,15 @@ function EventDetailPage() {
               (!!event.priceInfo?.trim() ||
                (event.priceMin != null && event.priceMax != null && event.priceMin !== event.priceMax));
 
-            // 운영시간 상세정보 존재 여부
+            // 운영시간 상세정보 존재 여부 (날짜 형식 notes는 잘못된 AI 추출 → 제외)
+            const isValidNotes = event.openingHours?.notes
+              ? !/\d{4}년\s*\d+월\s*\d+일/.test(String(event.openingHours.notes))
+              : false;
             const hasHoursDetail =
               !!event.openingHours?.weekday ||
               !!event.openingHours?.weekend ||
               !!event.openingHours?.holiday ||
-              !!event.openingHours?.notes;
+              isValidNotes;
 
             // 홀수 그리드 여부 (마지막 카드 full-width 처리)
             const gridCardCount = 2 + (hasPriceData ? 1 : 0) + (hasHoursDetail ? 1 : 0);
@@ -883,7 +890,8 @@ function EventDetailPage() {
                   <Text style={styles.sheetText}>{event.openingHours.closedDays}</Text>
                 </View>
               )}
-              {event?.openingHours?.notes && (
+              {event?.openingHours?.notes &&
+               !/\d{4}년\s*\d+월\s*\d+일/.test(String(event.openingHours.notes)) && (
                 <View style={styles.sheetSection}>
                   <Text style={styles.sheetLabel}>추가 정보</Text>
                   <Text style={styles.sheetText}>{event.openingHours.notes}</Text>
@@ -892,7 +900,7 @@ function EventDetailPage() {
               {!event?.openingHours?.weekday &&
                !event?.openingHours?.weekend &&
                !event?.openingHours?.holiday &&
-               !event?.openingHours?.notes && (
+               !(event?.openingHours?.notes && !/\d{4}년\s*\d+월\s*\d+일/.test(String(event.openingHours.notes))) && (
                 <View style={styles.sheetSection}>
                   <Text style={styles.sheetText}>지금은 운영 시간을 더 모으고 있어요</Text>
                 </View>

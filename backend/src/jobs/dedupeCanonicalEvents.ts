@@ -1056,6 +1056,23 @@ export async function dedupeCanonicalEvents() {
 
       // DB에 저장 (UPSERT)
       await upsertCanonicalEvent(canonicalEvent);
+
+      // KOPIS 이벤트: dtguidance → opening_hours (NULL인 경우에만)
+      // AI enrichment 이전에 공식 공연시간을 미리 설정해 AI 오추출 방지
+      const kopisEvent = events.find(e => e.source === 'kopis');
+      if (kopisEvent) {
+        const payload = kopisEvent.payload as any;
+        const dtguidance = (payload?.dtguidance as string | undefined)?.trim();
+        if (dtguidance) {
+          await pool.query(
+            `UPDATE canonical_events
+             SET opening_hours = $1::jsonb
+             WHERE canonical_key = $2 AND opening_hours IS NULL`,
+            [JSON.stringify({ notes: dtguidance }), canonicalKey],
+          );
+        }
+      }
+
       savedCount++;
 
       if (savedCount % 100 === 0) {
