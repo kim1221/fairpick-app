@@ -264,7 +264,7 @@ async function fetchDetail(popgaId: string | number, type: string): Promise<Popg
 
 // ─── 단일 이벤트 처리 ─────────────────────────────────────────────────────────
 
-async function processEvent(item: any, index: number): Promise<boolean | 'duplicate'> {
+async function processEvent(item: any, index: number): Promise<boolean> {
   const popgaId: string | number =
     item.id ?? item.eventId ?? item.popupId ?? item.seq ?? item._id ?? `unknown-${index}`;
   const type: string = item.type ?? item.category ?? item.eventType ?? 'STORE';
@@ -274,8 +274,8 @@ async function processEvent(item: any, index: number): Promise<boolean | 'duplic
   console.log(`\n[${index + 1}/${MAX_EVENTS}] 처리 중: "${title}" (popga:${popgaId})`);
 
   if (await isDuplicate(popgaId, title)) {
-    console.log(`  → 이미 등록됨 (popga:${popgaId} / title="${title}") — 중단`);
-    return 'duplicate';
+    console.log(`  → 이미 등록됨 (popga:${popgaId} / title="${title}") — 건너뜀`);
+    return false;
   }
 
   const category = toCategory(type);
@@ -501,12 +501,8 @@ async function main() {
       }
       processed++;
       try {
-        const result = await processEvent(items[i], i);
-        if (result === 'duplicate') {
-          console.log(`[popga] 중복 이벤트 감지 — 이하 모두 기등록으로 판단, 종료`);
-          break;
-        }
-        result ? created++ : skipped++;
+        const ok = await processEvent(items[i], i);
+        ok ? created++ : skipped++;
       } catch (err: any) {
         console.error(`[popga] 처리 오류 (index=${i}): ${err?.message}`);
         skipped++;

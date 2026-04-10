@@ -213,7 +213,7 @@ async function fetchDetail(popgaId: string | number, type: string): Promise<Popg
 
 // ─── 단일 이벤트 처리 ──────────────────────────────────────────────────────
 
-async function processEvent(item: any, index: number): Promise<boolean | 'duplicate'> {
+async function processEvent(item: any, index: number): Promise<boolean> {
   const popgaId: string | number =
     item.id ?? item.eventId ?? item.popupId ?? item.seq ?? item._id ?? `unknown-${index}`;
   const type: string = item.type ?? item.category ?? item.eventType ?? 'STORE';
@@ -223,8 +223,8 @@ async function processEvent(item: any, index: number): Promise<boolean | 'duplic
   console.log(`[${JOB_NAME}] [${index + 1}] "${title}" (popga:${popgaId})`);
 
   if (await isDuplicate(popgaId, title)) {
-    console.log(`[${JOB_NAME}]   → 중복 감지 — 종료`);
-    return 'duplicate';
+    console.log(`[${JOB_NAME}]   → 중복 — 건너뜀`);
+    return false;
   }
 
   const category = toCategory(type);
@@ -367,14 +367,14 @@ async function processEvent(item: any, index: number): Promise<boolean | 'duplic
 
 /**
  * 팝가 수집 잡 실행.
- * 최신순으로 순회하다 중복 발견 시 즉시 종료.
+ * 목록 전체를 순회하며 미등록 이벤트만 수집 (최대 MAX_PER_RUN건).
  * @returns 등록 성공 건수
  */
 export async function runPopgaCollector(): Promise<number> {
   console.log(`[${JOB_NAME}] 시작 (MAX_PER_RUN=${MAX_PER_RUN})`);
 
   const items = await fetchEventList();
-  console.log(`[${JOB_NAME}] 목록 ${items.length}건 — 최신순 순회`);
+  console.log(`[${JOB_NAME}] 목록 ${items.length}건 전체 순회`);
 
   let created = 0;
 
@@ -384,12 +384,8 @@ export async function runPopgaCollector(): Promise<number> {
       break;
     }
     try {
-      const result = await processEvent(items[i], i);
-      if (result === 'duplicate') {
-        console.log(`[${JOB_NAME}] 중복 감지 — 이하 모두 기등록 판단, 종료`);
-        break;
-      }
-      if (result) created++;
+      const ok = await processEvent(items[i], i);
+      if (ok) created++;
     } catch (err: any) {
       console.error(`[${JOB_NAME}] 처리 오류 (index=${i}): ${err?.message}`);
     }
