@@ -111,14 +111,16 @@ async function fetchEventList(): Promise<any[]> {
       headers: API_HEADERS,
     });
 
-    // API 응답 구조: { code, data: { content, totalPages, ... } } 또는 직접 { content, totalPages }
-    const payload = res.data?.data ?? res.data;
-    const content: any[] = Array.isArray(payload?.content) ? payload.content : [];
+    // API 응답 구조: { data: { content: [...], page: { totalPages, totalElements, ... } } }
+    const dataBlock = res.data?.data ?? res.data;
+    const content: any[] = Array.isArray(dataBlock?.content) ? dataBlock.content : [];
     if (content.length === 0) break;
 
     all.push(...content);
 
-    const totalPages: number = payload?.totalPages ?? 1;
+    // Spring 3.x: pagination info는 data.page 하위에 있음
+    const pageInfo = dataBlock?.page ?? {};
+    const totalPages: number = pageInfo?.totalPages ?? dataBlock?.totalPages ?? 1;
     console.log(
       `[${JOB_NAME}] 목록 page=${page + 1}/${totalPages}, 이번 ${content.length}건 (누계 ${all.length}건)`,
     );
