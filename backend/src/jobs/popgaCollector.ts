@@ -2,9 +2,9 @@
  * popgaCollector — 팝가(popga.co.kr) 이벤트 자동 수집 Job
  *
  * 동작:
- *  1. popga.co.kr 목록 페이지 RSC 파싱 → 최신순 이벤트 목록
- *  2. 위에서부터 순회하며 중복(popga ID 또는 title) 발견 시 즉시 종료
- *  3. 미수집 이벤트 상세 페이지 파싱 + Gemini AI 정보 추출
+ *  1. popga REST API (api.popga.co.kr) → 전체 진행중·예정 이벤트 목록 (페이지네이션)
+ *  2. 위에서부터 순회하며 중복(popga ID 또는 title) 건너뜀
+ *  3. 상세 API 호출 → Gemini AI 정보 추출
  *  4. 이미지 R2 업로드 → POST /admin/events/popup 등록
  *
  * 스케줄: 매일 06:00 KST (scheduler.ts)
@@ -22,47 +22,19 @@ const MAX_PER_RUN = 50;
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:5001';
 const ADMIN_KEY = process.env.ADMIN_KEY || 'fairpick-admin-2024';
 
-const LIST_URL = 'https://popga.co.kr/list/popup';
+const POPGA_API_BASE = 'https://api.popga.co.kr/user';
 const DETAIL_BASE = 'https://popga.co.kr';
 const JOB_NAME = 'popga-collector';
 
-const BROWSER_HEADERS = {
+/** 팝가 API 요청 헤더 (Referer/Origin 필수) */
+const API_HEADERS = {
   'User-Agent':
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  Accept: 'application/json',
   'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-  'Cache-Control': 'no-cache',
-  Pragma: 'no-cache',
+  Referer: 'https://popga.co.kr/',
+  Origin: 'https://popga.co.kr',
 };
-
-// ─── RSC 파싱 ──────────────────────────────────────────────────────────────
-
-function walkRscQueries<T>(html: string, visitor: (data: any) => T | null): T | null {
-  const scriptTagRe = /<script[^>]*>([\s\S]*?)<\/script>/g;
-  let sm: RegExpExecArray | null;
-  while ((sm = scriptTagRe.exec(html)) !== null) {
-    const raw = sm[1];
-    if (!raw.includes('__next_f')) continue;
-    const pushMatch = raw.match(/self\.__next_f\.push\((\[[\s\S]*\])\)/);
-    if (!pushMatch) continue;
-    let arr: any;
-    try { arr = JSON.parse(pushMatch[1]); } catch { continue; }
-    if (!Array.isArray(arr) || arr[0] !== 1 || typeof arr[1] !== 'string') continue;
-    const rscStr: string = arr[1];
-    const colonIdx = rscStr.indexOf(':');
-    if (colonIdx < 0) continue;
-    let parsed: any;
-    try { parsed = JSON.parse(rscStr.slice(colonIdx + 1)); } catch { continue; }
-    if (!Array.isArray(parsed) || parsed.length < 4) continue;
-    const sw = parsed[3];
-    if (!sw?.state?.queries) continue;
-    for (const query of sw.state.queries) {
-      const result = visitor(query?.state?.data);
-      if (result !== null) return result;
-    }
-  }
-  return null;
-}
 
 // ─── 유틸 ──────────────────────────────────────────────────────────────────
 
@@ -92,7 +64,10 @@ async function downloadImage(url: string): Promise<Buffer | null> {
     const res = await axios.get(url, {
       responseType: 'arraybuffer',
       timeout: 15_000,
-      headers: { ...BROWSER_HEADERS, Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8' },
+      headers: {
+        ...API_HEADERS,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      },
     });
     return Buffer.from(res.data);
   } catch (err: any) {
@@ -111,25 +86,52 @@ async function isDuplicate(popgaId: string | number, title: string): Promise<boo
   return result.rowCount! > 0;
 }
 
-// ─── 목록 페이지 파싱 ──────────────────────────────────────────────────────
+// ─── 목록 API (페이지네이션) ────────────────────────────────────────────────
 
+/**
+ * 팝가 REST API에서 진행중/예정 이벤트 전체 목록을 가져온다.
+ * GET https://api.popga.co.kr/user/v1/spots
+ */
 async function fetchEventList(): Promise<any[]> {
-  const res = await axios.get(LIST_URL, { timeout: 15_000, headers: BROWSER_HEADERS });
-  const html = res.data as string;
-  const items = walkRscQueries<any[]>(html, (data) => {
-    if (!Array.isArray(data?.pages)) return null;
-    const all: any[] = [];
-    for (const page of data.pages) {
-      const content = page?.data?.content;
-      if (Array.isArray(content)) all.push(...content);
-    }
-    return all.length > 0 ? all : null;
-  });
-  if (!items) throw new Error('popga 이벤트 목록을 HTML에서 찾지 못했습니다');
-  return items;
+  const all: any[] = [];
+  let page = 0;
+  const size = 50;
+
+  while (true) {
+    const params = new URLSearchParams([
+      ['periodTypes', 'IN_PROGRESS'],
+      ['periodTypes', 'READY'],
+      ['size', String(size)],
+      ['page', String(page)],
+      ['sorts[0].order', 'activated_at'],
+    ]);
+
+    const res = await axios.get(`${POPGA_API_BASE}/v1/spots?${params}`, {
+      timeout: 15_000,
+      headers: API_HEADERS,
+    });
+
+    // API 응답 구조: { code, data: { content, totalPages, ... } } 또는 직접 { content, totalPages }
+    const payload = res.data?.data ?? res.data;
+    const content: any[] = Array.isArray(payload?.content) ? payload.content : [];
+    if (content.length === 0) break;
+
+    all.push(...content);
+
+    const totalPages: number = payload?.totalPages ?? 1;
+    console.log(
+      `[${JOB_NAME}] 목록 page=${page + 1}/${totalPages}, 이번 ${content.length}건 (누계 ${all.length}건)`,
+    );
+
+    if (page + 1 >= totalPages || all.length >= 500) break;
+    page++;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
+  return all;
 }
 
-// ─── 상세 페이지 파싱 ──────────────────────────────────────────────────────
+// ─── 상세 API ──────────────────────────────────────────────────────────────
 
 interface PopgaDetail {
   obj: any;
@@ -138,25 +140,23 @@ interface PopgaDetail {
   hasMate: boolean;
 }
 
-async function fetchDetail(popgaId: string | number, type: string): Promise<PopgaDetail | null> {
-  const segment = type.toUpperCase() === 'EXHIBITION' ? 'exhibition' : 'popup';
-  const url = `${DETAIL_BASE}/${segment}/${popgaId}`;
-  let html: string;
+/**
+ * 팝가 REST API에서 단건 상세 데이터를 가져온다.
+ * GET https://api.popga.co.kr/user/v1/spots/{id}
+ */
+async function fetchDetail(popgaId: string | number): Promise<PopgaDetail | null> {
+  let detail: any;
   try {
-    const res = await axios.get(url, { timeout: 15_000, headers: BROWSER_HEADERS });
-    html = res.data as string;
+    const res = await axios.get(`${POPGA_API_BASE}/v1/spots/${popgaId}`, {
+      timeout: 15_000,
+      headers: API_HEADERS,
+    });
+    detail = res.data?.data ?? res.data;
+    if (!detail?.id || !detail?.title) return null;
   } catch (err: any) {
-    console.warn(`[${JOB_NAME}] 상세 페이지 실패 (${url}): ${err?.message}`);
+    console.warn(`[${JOB_NAME}] 상세 API 실패 (id=${popgaId}): ${err?.message}`);
     return null;
   }
-
-  const detail = walkRscQueries<any>(html, (data) => {
-    if (data?.data?.id && data?.data?.title) return data.data;
-    if (data?.id && data?.title) return data;
-    return null;
-  });
-
-  if (!detail) return null;
 
   const instagramUrl: string | null =
     detail.website?.instagram ?? detail.instagram ?? detail.sns?.instagram ?? null;
@@ -174,21 +174,21 @@ async function fetchDetail(popgaId: string | number, type: string): Promise<Popg
     : [];
 
   const parts: string[] = [];
-  if (detail.title)                 parts.push(`이벤트명: ${detail.title}`);
-  if (categoryNames.length > 0)     parts.push(`카테고리: ${categoryNames.join(', ')}`);
-  if (detail.content)               parts.push(`설명:\n${detail.content}`);
-  if (detail.address)               parts.push(`주소: ${detail.address}`);
-  if (detail.addressDetail)         parts.push(`장소: ${detail.addressDetail}`);
-  if (detail.openDate)              parts.push(`시작일: ${detail.openDate}`);
-  if (detail.closeDate)             parts.push(`종료일: ${detail.closeDate}`);
+  if (detail.title)         parts.push(`이벤트명: ${detail.title}`);
+  if (categoryNames.length) parts.push(`카테고리: ${categoryNames.join(', ')}`);
+  if (detail.content)       parts.push(`설명:\n${detail.content}`);
+  if (detail.address)       parts.push(`주소: ${detail.address}`);
+  if (detail.addressDetail) parts.push(`장소: ${detail.addressDetail}`);
+  if (detail.openDate)      parts.push(`시작일: ${detail.openDate}`);
+  if (detail.closeDate)     parts.push(`종료일: ${detail.closeDate}`);
   if (Array.isArray(detail.operationTime) && detail.operationTime.length > 0)
     parts.push(`운영시간: ${detail.operationTime.join(', ')}`);
-  if (benefitLines.length > 0)      parts.push(`혜택:\n${benefitLines.join('\n')}`);
+  if (benefitLines.length)  parts.push(`혜택:\n${benefitLines.join('\n')}`);
   if (detail.additionalInformation) parts.push(`추가정보: ${detail.additionalInformation}`);
-  if (detail.notice)                parts.push(`공지: ${detail.notice}`);
+  if (detail.notice)        parts.push(`공지: ${detail.notice}`);
   if (Array.isArray(detail.tags) && detail.tags.length > 0)
     parts.push(`태그: ${(detail.tags as string[]).join(', ')}`);
-  if (instagramUrl)                 parts.push(`인스타그램: ${instagramUrl}`);
+  if (instagramUrl)         parts.push(`인스타그램: ${instagramUrl}`);
 
   const mate =
     detail.aiSupplement ??
@@ -242,8 +242,8 @@ async function processEvent(item: any, index: number): Promise<boolean> {
   const popgaImageUrl = normalizeImageUrl(rawImagePath);
   const popgaTags: string[] = Array.isArray(item.tags) ? item.tags : [];
 
-  // 상세 페이지
-  const detail = await fetchDetail(popgaId, type);
+  // 상세 API
+  const detail = await fetchDetail(popgaId);
   const detailVenue = detail?.obj?.addressDetail || venue;
   const detailAddress = detail?.obj?.address || address;
   const detailOperationTime: string[] =
@@ -269,7 +269,6 @@ async function processEvent(item: any, index: number): Promise<boolean> {
       String(new Date().getFullYear()),
       { ticket: [], official: [searchResults], place: [], blog: [] },
     );
-    // AI 메이트 없으면 주차 null
     if (aiInfo && !detail?.hasMate) {
       aiInfo.parking_available = undefined;
       aiInfo.parking_info = undefined;
@@ -302,7 +301,7 @@ async function processEvent(item: any, index: number): Promise<boolean> {
   }
 
   const sourceTags = [
-    ...detailTags.filter(t => t && t.trim()),
+    ...detailTags.filter((t) => t && t.trim()),
     'popga_collector',
     `popga:${popgaId}`,
   ];
@@ -367,14 +366,14 @@ async function processEvent(item: any, index: number): Promise<boolean> {
 
 /**
  * 팝가 수집 잡 실행.
- * 목록 전체를 순회하며 미등록 이벤트만 수집 (최대 MAX_PER_RUN건).
+ * REST API로 전체 목록을 가져온 뒤 미등록 이벤트만 수집 (최대 MAX_PER_RUN건).
  * @returns 등록 성공 건수
  */
 export async function runPopgaCollector(): Promise<number> {
   console.log(`[${JOB_NAME}] 시작 (MAX_PER_RUN=${MAX_PER_RUN})`);
 
   const items = await fetchEventList();
-  console.log(`[${JOB_NAME}] 목록 ${items.length}건 전체 순회`);
+  console.log(`[${JOB_NAME}] 목록 총 ${items.length}건 확인`);
 
   let created = 0;
 
@@ -389,7 +388,7 @@ export async function runPopgaCollector(): Promise<number> {
     } catch (err: any) {
       console.error(`[${JOB_NAME}] 처리 오류 (index=${i}): ${err?.message}`);
     }
-    if (i < items.length - 1) await new Promise(r => setTimeout(r, 1500));
+    if (i < items.length - 1) await new Promise((r) => setTimeout(r, 1500));
   }
 
   console.log(`[${JOB_NAME}] 완료 — 등록 ${created}건`);

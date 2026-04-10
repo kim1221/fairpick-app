@@ -32,7 +32,7 @@ const MAX_EVENTS = parseInt(process.env.MAX_EVENTS || '3', 10);
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:5001';
 const ADMIN_KEY = process.env.ADMIN_KEY || 'fairpick-admin-2024';
 
-const LIST_URL = 'https://popga.co.kr/list/popup';
+const POPGA_API_BASE = 'https://api.popga.co.kr/user';
 const DETAIL_BASE = 'https://popga.co.kr';
 
 const pool = new Pool({
@@ -40,54 +40,17 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL?.includes('localhost') ? undefined : { rejectUnauthorized: false },
 });
 
-const BROWSER_HEADERS = {
+/** 팝가 API 요청 헤더 (Referer/Origin 필수) */
+const API_HEADERS = {
   'User-Agent':
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  Accept: 'application/json',
   'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-  'Cache-Control': 'no-cache',
-  Pragma: 'no-cache',
+  Referer: 'https://popga.co.kr/',
+  Origin: 'https://popga.co.kr',
 };
 
-// ─── RSC 파싱 공통 함수 ───────────────────────────────────────────────────────
-
-/**
- * HTML의 self.__next_f.push 스크립트들을 순회하며
- * 콜백이 non-null을 반환할 때까지 RSC 오브젝트를 탐색한다.
- */
-function walkRscQueries<T>(html: string, visitor: (data: any) => T | null): T | null {
-  const scriptTagRe = /<script[^>]*>([\s\S]*?)<\/script>/g;
-  let sm: RegExpExecArray | null;
-
-  while ((sm = scriptTagRe.exec(html)) !== null) {
-    const raw = sm[1];
-    if (!raw.includes('__next_f')) continue;
-
-    const pushMatch = raw.match(/self\.__next_f\.push\((\[[\s\S]*\])\)/);
-    if (!pushMatch) continue;
-
-    let arr: any;
-    try { arr = JSON.parse(pushMatch[1]); } catch { continue; }
-    if (!Array.isArray(arr) || arr[0] !== 1 || typeof arr[1] !== 'string') continue;
-
-    const rscStr: string = arr[1];
-    const colonIdx = rscStr.indexOf(':');
-    if (colonIdx < 0) continue;
-
-    let parsed: any;
-    try { parsed = JSON.parse(rscStr.slice(colonIdx + 1)); } catch { continue; }
-
-    if (!Array.isArray(parsed) || parsed.length < 4) continue;
-    const sw = parsed[3];
-    if (!sw?.state?.queries) continue;
-
-    for (const query of sw.state.queries) {
-      const result = visitor(query?.state?.data);
-      if (result !== null) return result;
-    }
-  }
-  return null;
-}
+// (RSC 파싱 불필요 — REST API 직접 호출로 전환)
 
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
 
@@ -117,7 +80,7 @@ async function downloadImage(url: string): Promise<Buffer | null> {
     const res = await axios.get(url, {
       responseType: 'arraybuffer',
       timeout: 15_000,
-      headers: { ...BROWSER_HEADERS, Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8' },
+      headers: { ...API_HEADERS, Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8' },
     });
     return Buffer.from(res.data);
   } catch (err: any) {
@@ -136,30 +99,55 @@ async function isDuplicate(popgaId: string | number, title: string): Promise<boo
   return result.rowCount! > 0;
 }
 
-// ─── 목록 페이지 파싱 ─────────────────────────────────────────────────────────
+// ─── 목록 API (페이지네이션) ─────────────────────────────────────────────────
 
+/**
+ * 팝가 REST API에서 진행중/예정 이벤트 전체 목록을 가져온다.
+ * GET https://api.popga.co.kr/user/v1/spots
+ */
 async function fetchEventList(): Promise<any[]> {
-  console.log(`[popga] 목록 페이지 로드: ${LIST_URL}`);
-  const res = await axios.get(LIST_URL, { timeout: 15_000, headers: BROWSER_HEADERS });
-  const html = res.data as string;
+  const all: any[] = [];
+  let page = 0;
+  const size = 50;
 
-  // RSC data.pages 배열의 모든 페이지 내용을 합산 (무한스크롤 캐시 활용)
-  const items = walkRscQueries<any[]>(html, (data) => {
-    if (!Array.isArray(data?.pages)) return null;
-    const all: any[] = [];
-    for (const page of data.pages) {
-      const content = page?.data?.content;
-      if (Array.isArray(content)) all.push(...content);
-    }
-    return all.length > 0 ? all : null;
-  });
+  while (true) {
+    const params = new URLSearchParams([
+      ['periodTypes', 'IN_PROGRESS'],
+      ['periodTypes', 'READY'],
+      ['size', String(size)],
+      ['page', String(page)],
+      ['sorts[0].order', 'activated_at'],
+    ]);
 
-  if (!items) throw new Error('popga 이벤트 목록을 HTML에서 찾지 못했습니다');
-  console.log(`[popga] 이벤트 ${items.length}건 추출 완료`);
-  return items;
+    console.log(`[popga] 목록 API page=${page + 1} 요청...`);
+    const res = await axios.get(`${POPGA_API_BASE}/v1/spots?${params}`, {
+      timeout: 15_000,
+      headers: API_HEADERS,
+    });
+
+    // API 응답 구조: { code, data: { content, totalPages, ... } } 또는 직접 { content, totalPages }
+    const payload = res.data?.data ?? res.data;
+    const content: any[] = Array.isArray(payload?.content) ? payload.content : [];
+    if (content.length === 0) break;
+
+    all.push(...content);
+
+    const totalPages: number = payload?.totalPages ?? 1;
+    const totalElements: number = payload?.totalElements ?? content.length;
+    console.log(
+      `[popga] page=${page + 1}/${totalPages} (${content.length}건) → 누계 ${all.length}/${totalElements}건`,
+    );
+
+    if (page + 1 >= totalPages || all.length >= 500) break;
+    page++;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
+  console.log(`[popga] 목록 총 ${all.length}건 수집 완료`);
+  return all;
 }
 
-// ─── 상세 페이지 파싱 ─────────────────────────────────────────────────────────
+// ─── 상세 API ─────────────────────────────────────────────────────────────────
 
 interface PopgaDetail {
   /** 상세 이벤트 오브젝트 전체 */
@@ -172,30 +160,25 @@ interface PopgaDetail {
   hasMate: boolean;
 }
 
-async function fetchDetail(popgaId: string | number, type: string): Promise<PopgaDetail | null> {
-  // 실제 URL: /popup/{id} 또는 /exhibition/{id}
-  const segment = type.toUpperCase() === 'EXHIBITION' ? 'exhibition' : 'popup';
-  const url = `${DETAIL_BASE}/${segment}/${popgaId}`;
-  let html: string;
+/**
+ * 팝가 REST API에서 단건 상세 데이터를 가져온다.
+ * GET https://api.popga.co.kr/user/v1/spots/{id}
+ */
+async function fetchDetail(popgaId: string | number): Promise<PopgaDetail | null> {
+  let detail: any;
   try {
-    const res = await axios.get(url, { timeout: 15_000, headers: BROWSER_HEADERS });
-    html = res.data as string;
-    console.log(`  → 상세 페이지 로드: ${url}`);
+    const res = await axios.get(`${POPGA_API_BASE}/v1/spots/${popgaId}`, {
+      timeout: 15_000,
+      headers: API_HEADERS,
+    });
+    detail = res.data?.data ?? res.data;
+    console.log(`  → 상세 API: id=${popgaId}, 키=${Object.keys(detail ?? {}).join(', ')}`);
+    if (!detail?.id || !detail?.title) {
+      console.warn(`  → 상세 응답 구조 이상`);
+      return null;
+    }
   } catch (err: any) {
-    console.warn(`  → 상세 페이지 실패 (${url}): ${err?.message}`);
-    return null;
-  }
-
-  const detail = walkRscQueries<any>(html, (data) => {
-    // 단건: data.data.id + data.data.title
-    if (data?.data?.id && data?.data?.title) return data.data;
-    // 직접: data.id + data.title
-    if (data?.id && data?.title) return data;
-    return null;
-  });
-
-  if (!detail) {
-    console.warn(`  → 상세 RSC 파싱 실패`);
+    console.warn(`  → 상세 API 실패 (id=${popgaId}): ${err?.message}`);
     return null;
   }
 
@@ -234,9 +217,9 @@ async function fetchDetail(popgaId: string | number, type: string): Promise<Popg
     parts.push(`태그: ${(detail.tags as string[]).join(', ')}`);
   if (instagramUrl)                 parts.push(`인스타그램: ${instagramUrl}`);
 
-  // AI 메이트 섹션 (mate, aiMate, analysis 등 다양한 필드명 시도)
+  // AI 메이트 섹션
   const mate =
-    detail.aiSupplement ??   // 팝가 실제 필드명
+    detail.aiSupplement ??
     detail.mate ??
     detail.aiMate ??
     detail.ai_mate ??
@@ -247,16 +230,13 @@ async function fetchDetail(popgaId: string | number, type: string): Promise<Popg
     detail.crowd_info ??
     null;
 
-  // 디버그: 상세 오브젝트 최상위 키 출력 (AI 메이트 필드명 파악용)
-  console.log(`  → detail 최상위 키: ${Object.keys(detail).join(', ')}`);
-
   const hasMate = mate !== null;
   if (hasMate) {
     const mateText = typeof mate === 'string' ? mate : JSON.stringify(mate);
     parts.push(`AI 분석:\n${mateText}`);
-    console.log(`  → AI 메이트 발견 (${typeof mate}): ${mateText.substring(0, 100)}`);
+    console.log(`  → AI 메이트 발견: ${mateText.substring(0, 100)}`);
   } else {
-    console.log(`  → AI 메이트 섹션 없음 → 주차 정보 null`);
+    console.log(`  → AI 메이트 없음 → 주차 정보 null`);
   }
 
   return { obj: detail, searchText: parts.join('\n'), instagramUrl, hasMate };
@@ -306,8 +286,8 @@ async function processEvent(item: any, index: number): Promise<boolean> {
   console.log(`  venue: ${venue} / address: ${address}`);
   console.log(`  imageUrl: ${popgaImageUrl ?? '(없음)'}`);
 
-  // ── 상세 페이지 ───────────────────────────────────────────────────────────
-  const detail = await fetchDetail(popgaId, type);
+  // ── 상세 API ──────────────────────────────────────────────────────────────
+  const detail = await fetchDetail(popgaId);
 
   // 상세에서 가져온 보정값
   const detailVenue = detail?.obj?.addressDetail || venue;
