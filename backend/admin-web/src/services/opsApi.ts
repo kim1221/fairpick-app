@@ -119,6 +119,18 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     maxRunHours: 2,
     sourceKeywords: ['embed', 'embedding'],
   },
+  {
+    name: 'popga-collector',
+    label: '팝가 수집',
+    description: 'popga.co.kr 신규 팝업 자동 수집',
+    schedule: '매일 06:00',
+    scheduleHour: 6,
+    scheduleMinute: 0,
+    scheduleDayOfWeek: null,
+    expectedIntervalHours: 24,
+    maxRunHours: 2,
+    sourceKeywords: ['popga', 'popga-collector', 'popga_collector'],
+  },
   // end-soon-notifications: 기능 보류 중 (scheduler.ts도 주석 처리됨)
   {
     name: 'ai-hot-rating',

@@ -15,6 +15,7 @@ import { runHotRating } from '../scripts/ai-hot-rating';
 import { embedNewEvents } from '../jobs/embedNewEvents';
 import { sendEndSoonNotifications } from '../jobs/sendEndSoonNotifications';
 import { runAutoFeaturedScore } from '../jobs/autoFeaturedScore';
+import { runPopgaCollector } from '../jobs/popgaCollector';
 import { runningJobs } from './jobState';
 import { withJobLog } from './jobLogger';
 
@@ -40,6 +41,7 @@ const JOB_RUNNERS: Record<string, () => Promise<unknown>> = {
   'price-info': () => withJobLog('price-info', () => runPriceInfoBackfill({ dryRun: false })),
   'end-soon-notifications': sendEndSoonNotifications,
   'ai-hot-rating': () => withJobLog('ai-hot-rating', runHotRating),
+  'popga-collector': () => withJobLog('popga-collector', runPopgaCollector),
 };
 
 export const KNOWN_JOB_NAMES = Object.keys(JOB_RUNNERS);

@@ -10,6 +10,7 @@ import { enrichInternalFields } from './jobs/enrichInternalFields';
 import { runHotRating } from './scripts/ai-hot-rating';
 import { embedNewEvents } from './jobs/embedNewEvents';
 import { sendEndSoonNotifications } from './jobs/sendEndSoonNotifications';
+import { runPopgaCollector } from './jobs/popgaCollector';
 import { runAutoFeaturedScore } from './jobs/autoFeaturedScore';
 import { runningJobs } from './lib/jobState';
 import { withJobLog } from './lib/jobLogger';
@@ -329,6 +330,14 @@ export function initScheduler() {
     // });
     // console.log('[Scheduler] registered: End-soon notifications @ 09:00 KST');
 
+    // 매일 06:00 KST - 팝가 이벤트 수집
+    cron.schedule('0 6 * * *', async () => {
+      await runJobSafely('popga-collector', () => withJobLog('popga-collector', runPopgaCollector));
+    }, {
+      timezone: 'Asia/Seoul'
+    });
+    console.log('[Scheduler] registered: Popga collector @ 06:00 KST');
+
     // 매주 월요일 09:00 KST - AI Hot Rating (전시/공연/축제 핫함 평가)
     cron.schedule('0 9 * * 1', async () => {
       await runJobSafely('ai-hot-rating', () => withJobLog('ai-hot-rating', runHotRating));
@@ -364,6 +373,7 @@ export function initScheduler() {
     console.log('  - 03:30 KST: Price info backfill (extract from API payloads)');
     console.log('  - 04:15 KST: Phase 2 Internal Fields (metadata.internal generation)');
     console.log('  - 05:00 KST: Embed new events (벡터 임베딩 생성)');
+    console.log('  - 06:00 KST: Popga collector (팝가 신규 이벤트 수집)');
     // console.log('  - 09:00 KST: End-soon notifications (찜한 이벤트 D-3 알림) — 보류');
     console.log('  - 09:00 KST (Mon): AI Hot Rating (전시/공연/축제 핫함 평가)');
     console.log('  - 15:00 KST: Light collect pipeline (collect + dedupe only, geo/AI 생략)');

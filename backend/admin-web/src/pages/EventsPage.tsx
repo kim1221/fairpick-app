@@ -2238,7 +2238,7 @@ export default function EventsPage() {
                       </label>
                       <input
                         type="text"
-                        value={selectedEvent.metadata?.display?.popup?.goods_items?.join(', ') || ''}
+                        value={(Array.isArray(selectedEvent.metadata?.display?.popup?.goods_items) ? selectedEvent.metadata.display.popup.goods_items.join(', ') : '') || ''}
                         onChange={(e) => {
                           const goods_items = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
                           setSelectedEvent({

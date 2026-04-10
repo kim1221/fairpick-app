@@ -675,7 +675,9 @@ function mapEventResponse(event: EventResponse | undefined): EventCardData | und
       return menu || undefined;
     })(),
     collabDescription: safeMetaStr(popupMeta.collab_description),
-    waitingHint: safeMetaStr(popupMeta.waiting_hint?.text),
+    waitingHint: popupMeta.waiting_hint?.level === 'unknown'
+      ? undefined
+      : safeMetaStr(popupMeta.waiting_hint?.text),
     goodsItems: Array.isArray(popupMeta.goods_items)
       ? (popupMeta.goods_items as string[]).filter((s) => typeof s === 'string' && s.trim()).join(', ') || undefined
       : safeMetaStr(popupMeta.goods_items),

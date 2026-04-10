@@ -8457,7 +8457,8 @@ async function buildSectionPools(
             ? await buildTodayPickPoolV2(pool, location)
             : await buildTodayPickPool(pool, location);
         } else if (theme.slug === 'budget_pick') {
-          events = await recommender.getBudgetPick(pool, location, limit);
+          // fetchLimit으로 큰 풀 확보: 앞 섹션 중복 제거 후에도 충분한 후보가 남도록
+          events = await recommender.getBudgetPick(pool, location, fetchLimit);
         } else if (theme.slug === 'date_pick') {
           // fetchLimit으로 큰 풀 확보: 앞 섹션 중복 제거 후에도 충분한 후보가 남도록
           events = await recommender.getDatePick(pool, location, fetchLimit);

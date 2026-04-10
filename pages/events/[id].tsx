@@ -713,6 +713,15 @@ function EventDetailPage() {
             );
           })()}
 
+          {/* 광고 — Key Info Grid 직후, 상세 정보 섹션 전 */}
+          <View style={[styles.adBannerContainer, { height: adRendered ? 96 : 0 }]}>
+            <InlineAd
+              adGroupId="ait.v2.live.6526c6e693454a28"
+              impressFallbackOnMount={true}
+              onAdRendered={() => setAdRendered(true)}
+            />
+          </View>
+
           {/* 카테고리별 상세 정보 */}
           {renderCategoryMeta(event, styles)}
 
@@ -799,15 +808,6 @@ function EventDetailPage() {
             </>
           )}
 
-        </View>
-
-        {/* 광고 — 스크롤 콘텐츠 마지막 요소, 광고 아래 스크롤 불가 */}
-        <View style={[styles.adBannerContainer, { height: adRendered ? 96 : 0 }]}>
-          <InlineAd
-            adGroupId="ait.v2.live.6526c6e693454a28"
-            impressFallbackOnMount={true}
-            onAdRendered={() => setAdRendered(true)}
-          />
         </View>
 
       </ScrollView>

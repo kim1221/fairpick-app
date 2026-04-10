@@ -259,6 +259,15 @@ export default function CreateEventPage() {
                   if (!updatedMetadata.display) updatedMetadata.display = {};
                   if (!updatedMetadata.display[category]) updatedMetadata.display[category] = {};
 
+                  // 배열이어야 할 필드가 AI 응답에서 문자열로 올 경우 정규화
+                  const ARRAY_META_FIELDS = ['goods_items', 'signature_menu', 'brands'];
+                  const normalizeMetaValue = (f: string, v: any) => {
+                    if (ARRAY_META_FIELDS.some(af => f.endsWith(af)) && typeof v === 'string') {
+                      return v.split(',').map((s: string) => s.trim()).filter(Boolean);
+                    }
+                    return v;
+                  };
+
                   // 중첩된 필드 처리 (예: fnb_items.signature_menu)
                   if (field.includes('.')) {
                     const fieldParts = field.split('.');
@@ -267,9 +276,9 @@ export default function CreateEventPage() {
                       if (!current[fieldParts[i]]) current[fieldParts[i]] = {};
                       current = current[fieldParts[i]];
                     }
-                    current[fieldParts[fieldParts.length - 1]] = enriched[key];
+                    current[fieldParts[fieldParts.length - 1]] = normalizeMetaValue(field, enriched[key]);
                   } else {
-                    updatedMetadata.display[category][field] = enriched[key];
+                    updatedMetadata.display[category][field] = normalizeMetaValue(field, enriched[key]);
                   }
                 }
               }
@@ -2731,7 +2740,7 @@ export default function CreateEventPage() {
                   </label>
                   <input
                     type="text"
-                    value={formData.metadata?.display?.popup?.goods_items?.join(', ') || ''}
+                    value={(Array.isArray(formData.metadata?.display?.popup?.goods_items) ? formData.metadata.display.popup.goods_items.join(', ') : '') || ''}
                     onChange={(e) => {
                       const goods_items = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
                       setFormData({
