@@ -19,7 +19,8 @@ import { extractEventInfoEnhanced } from '../lib/aiExtractor';
 // ─── 설정 ──────────────────────────────────────────────────────────────────
 
 const MAX_PER_RUN = 50;
-const API_BASE = process.env.API_BASE_URL || 'http://localhost:5001';
+// 서버와 동일한 포트 사용 (index.ts의 PORT 기본값과 맞춤)
+const API_BASE = process.env.API_BASE_URL || `http://localhost:${process.env.PORT ?? 4000}`;
 const ADMIN_KEY = process.env.ADMIN_KEY || 'fairpick-admin-2024';
 
 const POPGA_API_BASE = 'https://api.popga.co.kr/user';
@@ -348,6 +349,7 @@ async function processEvent(item: any, index: number): Promise<boolean> {
     },
   };
 
+  console.log(`[${JOB_NAME}]   → POST ${API_BASE}/admin/events/popup (key=${ADMIN_KEY.substring(0, 8)}...)`);
   try {
     const apiRes = await axios.post(`${API_BASE}/admin/events/popup`, payload, {
       headers: { 'Content-Type': 'application/json', 'X-Admin-Key': ADMIN_KEY },
@@ -359,7 +361,11 @@ async function processEvent(item: any, index: number): Promise<boolean> {
   } catch (err: any) {
     const status = err?.response?.status;
     const data = err?.response?.data;
-    console.error(`[${JOB_NAME}]   ❌ 등록 실패 HTTP=${status}:`, JSON.stringify(data)?.substring(0, 200));
+    const code = err?.code;
+    console.error(
+      `[${JOB_NAME}]   ❌ 등록 실패 HTTP=${status} code=${code} msg="${err?.message}":`,
+      JSON.stringify(data)?.substring(0, 400),
+    );
     return false;
   }
 }
