@@ -212,15 +212,29 @@ function HorizontalSectionSkeleton() {
 // Android에서 부모 리렌더 시 Native Ad View가 리셋되는 문제 방지
 // ─────────────────────────────────────────────────────────────
 const AdSlot = React.memo(() => {
-  const [rendered, setRendered] = useState(false);
+  const [status, setStatus] = useState<'loading' | 'rendered' | 'failed'>('loading');
+
+  if (status === 'failed') return null;
+
   return (
-    <View style={{ width: '100%', marginVertical: rendered ? 8 : 0 }}>
+    <View style={{
+      width: '100%',
+      // Android: height=0이면 native ad view가 초기화 안 됨 → 1px 확보 후 opacity=0으로 숨김
+      // rendered 후에는 height를 명시하지 않아 InlineAd가 자체 크기로 표시
+      height: status === 'rendered'
+        ? undefined
+        : Platform.OS === 'android' ? 1 : 0,
+      opacity: status === 'rendered' ? 1 : 0,
+      marginVertical: status === 'rendered' ? 8 : 0,
+      // Android: overflow: 'hidden'이 native ad SDK 렌더링을 차단할 수 있음
+      overflow: Platform.OS === 'android' ? 'visible' : 'hidden',
+    }}>
       <InlineAd
         adGroupId="ait.v2.live.b3363cb4c82643e9"
         impressFallbackOnMount={true}
-        onAdRendered={() => setRendered(true)}
-        onAdFailedToRender={() => setRendered(false)}
-        onNoFill={() => setRendered(false)}
+        onAdRendered={() => setStatus('rendered')}
+        onAdFailedToRender={() => setStatus('failed')}
+        onNoFill={() => setStatus('failed')}
       />
     </View>
   );

@@ -240,6 +240,7 @@ function EventDetailPage() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [activeSheet, setActiveSheet] = useState<'price' | 'hours' | 'overview' | null>(null);
   const [adRendered, setAdRendered] = useState(false);
+  const [adFailed, setAdFailed] = useState(false);
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   // event 로드 후 snapshot 추출 → useLike에 전달 (찜 시 로컬 snapshot 저장)
   const eventSnapshot = React.useMemo(() => event ? {
@@ -714,20 +715,31 @@ function EventDetailPage() {
           })()}
 
           {/* 광고 — Key Info Grid 직후, 상세 정보 섹션 전
-               Android: height:0 이면 native ad view가 초기화 안 됨 → opacity로 제어
-               iOS: 렌더 전 height:0 유지 (공간 차지 없음) */}
-          <View style={[
-            styles.adBannerContainer,
-            Platform.OS === 'android'
-              ? { height: 96, opacity: adRendered ? 1 : 0 }
-              : { height: adRendered ? 96 : 0 },
-          ]}>
-            <InlineAd
-              adGroupId="ait.v2.live.6526c6e693454a28"
-              impressFallbackOnMount={true}
-              onAdRendered={() => setAdRendered(true)}
-            />
-          </View>
+               Android: height=0이면 native ad SDK가 초기화 안 됨
+               - loading: height=1, opacity=0 (SDK 초기화 허용, 사용자에게 안 보임)
+               - rendered: height=96, opacity=1
+               - failed: height=0 (공간 제거)
+               iOS: 렌더 전 height=0 (공간 차지 없음) */}
+          {!adFailed && (
+            <View style={[
+              styles.adBannerContainer,
+              Platform.OS === 'android'
+                ? {
+                    height: adRendered ? 96 : 1,
+                    opacity: adRendered ? 1 : 0,
+                    overflow: 'visible',
+                  }
+                : { height: adRendered ? 96 : 0 },
+            ]}>
+              <InlineAd
+                adGroupId="ait.v2.live.6526c6e693454a28"
+                impressFallbackOnMount={true}
+                onAdRendered={() => setAdRendered(true)}
+                onAdFailedToRender={() => setAdFailed(true)}
+                onNoFill={() => setAdFailed(true)}
+              />
+            </View>
+          )}
 
           {/* 카테고리별 상세 정보 */}
           {renderCategoryMeta(event, styles)}
@@ -1383,7 +1395,6 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   },
   adBannerContainer: {
     width: '100%',
-    overflow: 'hidden',
   },
   ctaHint: {
     fontSize: 11,
