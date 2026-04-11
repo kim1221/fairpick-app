@@ -54,6 +54,11 @@ function normalizeDate(raw: string | undefined | null): string | null {
   return raw.substring(0, 10);
 }
 
+/** "@수원" → "(수원)" 변환. 제목 끝의 @지역 패턴만 변환. */
+function normalizeTitle(raw: string): string {
+  return raw.replace(/\s*@(\S+)$/, ' ($1)');
+}
+
 function normalizeImageUrl(path: string | undefined): string | null {
   if (!path) return null;
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
@@ -380,8 +385,9 @@ async function processEvent(item: any, index: number): Promise<boolean> {
   const popgaId: string | number =
     item.id ?? item.eventId ?? item.popupId ?? item.seq ?? item._id ?? `unknown-${index}`;
   const type: string = item.type ?? item.category ?? item.eventType ?? 'STORE';
-  const title: string =
+  const rawTitle: string =
     item.name ?? item.title ?? item.eventName ?? item.popupName ?? `팝업_${popgaId}`;
+  const title = normalizeTitle(rawTitle); // "@수원" → "(수원)"
 
   console.log(`[${JOB_NAME}] [${index + 1}] "${title}" (popga:${popgaId})`);
 
