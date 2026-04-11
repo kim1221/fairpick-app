@@ -727,8 +727,9 @@ function EventDetailPage() {
                 styles.adBannerContainer,
                 Platform.OS === 'android'
                   ? {
-                      height: 96,           // 항상 96px — native ad SDK가 실제 크기 필요
-                      opacity: adRendered ? 1 : 0.01,  // 0이면 Android native view 비활성화
+                      height: 96,
+                      // opacity 사용 금지: Android SurfaceView/WebView 기반
+                      // native ad SDK는 부모 opacity < 1 시 렌더링 실패
                       overflow: 'visible',
                     }
                   : { height: adRendered ? 96 : 0 },

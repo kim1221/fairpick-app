@@ -223,11 +223,11 @@ const AdSlot = React.memo(() => {
       collapsable={false}
       style={{
         width: '100%',
-        // Android: 배너 크기(96px) 확보 — native ad SDK가 실제 크기를 필요로 함
-        // opacity: 0은 Android native layer에서 view를 비활성화할 수 있어 0.01 사용
-        // (실질적으로 안 보이지만 native layer는 visible로 처리)
+        // Android: opacity 사용 금지 — native ad SDK 내부 SurfaceView/WebView가
+        // 부모 opacity < 1 환경에서 hardware layer 합성 충돌로 렌더링 실패
+        // → opacity 없이 height:96 확보, 실패 시 return null로 공간 제거
+        // iOS: height:0 → undefined 전환으로 자연스럽게 처리
         height: isAndroid ? 96 : (status === 'rendered' ? undefined : 0),
-        opacity: status === 'rendered' ? 1 : (isAndroid ? 0.01 : 1),
         marginVertical: status === 'rendered' ? 8 : 0,
         overflow: isAndroid ? 'visible' : 'hidden',
       }}
