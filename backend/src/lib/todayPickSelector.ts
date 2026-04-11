@@ -14,6 +14,7 @@ export const USE_TODAY_PICK_V2 = process.env.TODAY_PICK_V2 !== 'false';
 const QUALITY_WHERE = `
   is_deleted = false
   AND status != 'cancelled'
+  AND start_at <= NOW()
   AND end_at >= NOW()
   AND image_url IS NOT NULL
   AND image_url NOT LIKE '%placeholder%'

@@ -912,16 +912,19 @@ app.post('/api/user-events', async (req, res) => {
 
     if (scoreDelta !== 0) {
       await pool.query(
-        `WITH cat AS (
+        `WITH resolved_user AS (
+           SELECT id FROM users WHERE id = $1::uuid OR anonymous_id = $1::uuid LIMIT 1
+         ),
+         cat AS (
            SELECT ce.main_category
            FROM canonical_events ce
            WHERE ce.id = $2
              AND ce.main_category IS NOT NULL
-             AND EXISTS (SELECT 1 FROM users WHERE id = $1)
+             AND EXISTS (SELECT 1 FROM resolved_user)
          )
          INSERT INTO user_preferences (user_id, category_scores, preferred_tags, last_updated)
          SELECT
-           $1,
+           (SELECT id FROM resolved_user),
            jsonb_build_object((SELECT main_category FROM cat), GREATEST(0, $3::int)),
            ARRAY[]::text[],
            NOW()
@@ -8212,13 +8215,13 @@ function saveTodayPickToDB(cacheKey: string, data: { eventId: string; kstDate: s
 // 섹션별 stable 슬롯 수: 재빌드 후에도 이전 상위 이벤트가 우선 노출되도록 고정
 // rotation 슬롯(limit - stableCount개)은 나머지 후보에서 shuffle 채움
 const STABLE_SLOT_COUNTS: Record<string, number> = {
-  trending:     6,
-  date_pick:    6,
-  budget_pick:  4,
-  discovery:    4,
-  beginner:     4,
-  this_weekend: 4,
-  walkable:     4,
+  trending:     3,
+  date_pick:    3,
+  budget_pick:  2,
+  discovery:    2,
+  beginner:     2,
+  this_weekend: 2,
+  walkable:     2,
 };
 
 /**
@@ -8801,13 +8804,87 @@ app.get('/api/home/sections', async (req, res) => {
       };
     });
 
+    // ── "나를 위한 추천" 벡터 개인화 섹션 ──────────────────────────────────
+    // 최근 3일 클릭 이벤트 >= 2개인 유저에게만 생성 (per-request, 캐시 bypass)
+    let forYouSection: { slug: string; title: string; subtitle: string | null; events: any[] } | null = null;
+    if (recentClickedIds.size >= 2) {
+      try {
+        const recentIdsArr = [...recentClickedIds];
+        // 최근 클릭 이벤트의 embedding 벡터 조회
+        const embRows = await pool.query<{ id: string; embedding: string | null }>(
+          `SELECT id, embedding::text FROM canonical_events
+           WHERE id = ANY($1::uuid[]) AND embedding IS NOT NULL AND is_deleted = false`,
+          [recentIdsArr],
+        );
+
+        if (embRows.rows.length >= 2) {
+          // PostgreSQL vector → "[0.1,0.2,...]" 문자열 파싱
+          const embeddings = embRows.rows
+            .map(r => {
+              try { return JSON.parse(r.embedding!) as number[]; } catch { return null; }
+            })
+            .filter((e): e is number[] => e !== null);
+
+          if (embeddings.length >= 2) {
+            // 클릭 이벤트 임베딩 centroid (element-wise average)
+            const dims = embeddings[0].length;
+            const centroid = new Array<number>(dims).fill(0);
+            for (const emb of embeddings) {
+              for (let i = 0; i < dims; i++) centroid[i] += emb[i];
+            }
+            for (let i = 0; i < dims; i++) centroid[i] /= embeddings.length;
+            const centroidLiteral = toVectorLiteral(centroid);
+
+            // shownIds + recentClickedIds 제외 후 코사인 거리 기반 최근접 이웃 조회
+            const excludeIds = [...shownIds, ...recentClickedIds];
+            const forYouRows = await pool.query(
+              `SELECT *
+               FROM canonical_events
+               WHERE is_deleted = false
+                 AND start_at <= NOW()
+                 AND end_at >= NOW()
+                 AND embedding IS NOT NULL
+                 AND id != ALL($2::uuid[])
+               ORDER BY embedding <=> $1::vector
+               LIMIT 8`,
+              [centroidLiteral, excludeIds],
+            );
+
+            const forYouEvents = forYouRows.rows.map(mapEventForFrontend).filter(Boolean);
+            if (forYouEvents.length >= 2) {
+              forYouSection = {
+                slug: 'for_you',
+                title: '나를 위한 추천',
+                subtitle: '최근 관심사를 바탕으로 추려봤어요',
+                events: forYouEvents,
+              };
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[home/sections] for_you vector section failed:', err);
+      }
+    }
+
+    // for_you 섹션: today_pick 바로 다음에 삽입 (없으면 맨 앞)
+    let finalSections = sections;
+    if (forYouSection) {
+      const todayPickIdx = sections.findIndex((s: any) => s.slug === 'today_pick');
+      const insertIdx = todayPickIdx >= 0 ? todayPickIdx + 1 : 0;
+      finalSections = [
+        ...sections.slice(0, insertIdx),
+        forYouSection,
+        ...sections.slice(insertIdx),
+      ];
+    }
+
     // impression 일괄 기록 (fire-and-forget)
     // event-level 24h cooldown: recentImpressionIds에 없는 이벤트만 기록
     if (resolvedUserId) {
-      const IMPRESSION_SECTIONS = ['trending', 'budget_pick', 'date_pick', 'discovery', 'beginner'];
+      const IMPRESSION_SECTIONS = ['trending', 'budget_pick', 'date_pick', 'discovery', 'beginner', 'for_you'];
       const newRows: [string, string, string][] = [];
       const insertedEventIds = new Set<string>(); // 이번 응답에서 이벤트 중복 방지
-      sections.forEach(sec => {
+      finalSections.forEach((sec: any) => {
         if (IMPRESSION_SECTIONS.includes(sec.slug)) {
           sec.events.forEach((e: any) => {
             if (e?.id && !recentImpressionIds.has(e.id) && !insertedEventIds.has(e.id)) {
@@ -8826,7 +8903,7 @@ app.get('/api/home/sections', async (req, res) => {
       }
     }
 
-    res.json({ success: true, sections });
+    res.json({ success: true, sections: finalSections });
   } catch (error: any) {
     console.error('[home/sections] Error:', error);
     res.status(500).json({ success: false, error: error.message });
