@@ -233,7 +233,7 @@ const AdSlot = React.memo(() => {
       }}
     >
       <InlineAd
-        adGroupId="ait.v2.live.6526c6e693454a28"
+        adGroupId="ait.v2.live.b3363cb4c82643e9"
         impressFallbackOnMount={true}
         onAdRendered={() => setStatus('rendered')}
         onAdFailedToRender={() => setStatus('failed')}
