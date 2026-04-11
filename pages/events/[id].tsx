@@ -721,16 +721,19 @@ function EventDetailPage() {
                - failed: height=0 (공간 제거)
                iOS: 렌더 전 height=0 (공간 차지 없음) */}
           {!adFailed && (
-            <View style={[
-              styles.adBannerContainer,
-              Platform.OS === 'android'
-                ? {
-                    height: adRendered ? 96 : 1,
-                    opacity: adRendered ? 1 : 0,
-                    overflow: 'visible',
-                  }
-                : { height: adRendered ? 96 : 0 },
-            ]}>
+            <View
+              collapsable={false}
+              style={[
+                styles.adBannerContainer,
+                Platform.OS === 'android'
+                  ? {
+                      height: 96,           // 항상 96px — native ad SDK가 실제 크기 필요
+                      opacity: adRendered ? 1 : 0.01,  // 0이면 Android native view 비활성화
+                      overflow: 'visible',
+                    }
+                  : { height: adRendered ? 96 : 0 },
+              ]}
+            >
               <InlineAd
                 adGroupId="ait.v2.live.6526c6e693454a28"
                 impressFallbackOnMount={true}
