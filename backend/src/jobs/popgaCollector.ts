@@ -5,13 +5,14 @@
  *  1. popga REST API (api.popga.co.kr) → 전체 진행중·예정 이벤트 목록 (페이지네이션)
  *  2. 위에서부터 순회하며 중복(popga ID 또는 title) 건너뜀
  *  3. 상세 API 호출 → Gemini AI 정보 추출
- *  4. 이미지 R2 업로드 → POST /admin/events/popup 등록
+ *  4. 이미지 R2 업로드 → DB 직접 삽입 (HTTP 자기호출 방지)
  *
  * 스케줄: 매일 06:00 KST (scheduler.ts)
  * 수동 실행: Admin 운영센터 → "팝가 수집" → 지금 실행
  */
 
 import axios from 'axios';
+import crypto from 'crypto';
 import { pool } from '../db';
 import { uploadEventImage } from '../lib/imageUpload';
 import { extractEventInfoEnhanced } from '../lib/aiExtractor';
@@ -19,9 +20,6 @@ import { extractEventInfoEnhanced } from '../lib/aiExtractor';
 // ─── 설정 ──────────────────────────────────────────────────────────────────
 
 const MAX_PER_RUN = 50;
-// 서버와 동일한 포트 사용 (index.ts의 PORT 기본값과 맞춤)
-const API_BASE = process.env.API_BASE_URL || `http://localhost:${process.env.PORT ?? 4000}`;
-const ADMIN_KEY = process.env.ADMIN_KEY || 'fairpick-admin-2024';
 
 const POPGA_API_BASE = 'https://api.popga.co.kr/user';
 const DETAIL_BASE = 'https://popga.co.kr';
@@ -214,6 +212,156 @@ async function fetchDetail(popgaId: string | number): Promise<PopgaDetail | null
   return { obj: detail, searchText: parts.join('\n'), instagramUrl, hasMate };
 }
 
+// ─── DB 직접 삽입 ──────────────────────────────────────────────────────────
+//
+// HTTP 자기호출(POST /admin/events/popup) 대신 DB에 직접 삽입.
+// 이벤트 루프 블로킹으로 인해 자기 서버 HTTP 요청이 timeout되는 문제 방지.
+
+interface InsertParams {
+  title: string;
+  category: string;
+  startAt: string;
+  endAt: string;
+  venue: string;
+  address: string | null;
+  imageUrl: string | null;
+  imageStorage: string;
+  imageOrigin: string | undefined;
+  imageKey: string | null;
+  overview: string | null;
+  instagramUrl: string | null;
+  is_free: boolean | null;
+  price_info: string | null;
+  price_min: number | null;
+  price_max: number | null;
+  opening_hours: any;
+  parking_available: boolean | null;
+  parking_info: string | null;
+  source_tags: string[];
+  derived_tags: string[];
+  external_links: Record<string, string>;
+  metadata: any;
+}
+
+async function insertEventDirect(p: InsertParams): Promise<string | null> {
+  const id = crypto.randomUUID();
+  const contentKey = crypto
+    .createHash('sha256')
+    .update(`${p.title}-${p.startAt}-${p.endAt}-${p.venue}`)
+    .digest('hex')
+    .substring(0, 32);
+
+  // is_ending_soon
+  const [ey, em, ed] = p.endAt.split('-').map(Number);
+  const endDate = new Date(ey, em - 1, ed);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const daysUntilEnd = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  const isEndingSoon = daysUntilEnd <= 7 && daysUntilEnd >= 0;
+
+  // 지오코딩
+  let lat: number | null = null;
+  let lng: number | null = null;
+  let region: string | null = null;
+  let geoSource: string | null = null;
+  let geoConfidence: string | null = null;
+  let geoReason: string | null = null;
+
+  if (p.address || p.venue) {
+    try {
+      const { geocodeBestEffort } = await import('../lib/geocode');
+      const geo = await geocodeBestEffort({ address: p.address ?? undefined, venue: p.venue });
+      lat = geo.lat;
+      lng = geo.lng;
+      region = geo.region;
+      const srcMap: Record<string, string> = {
+        kakao_address: 'kakao', kakao_keyword: 'kakao', nominatim: 'nominatim', failed: 'manual',
+      };
+      geoSource = srcMap[geo.source] || 'manual';
+      geoConfidence = geo.confidence;
+      geoReason = geo.reason;
+    } catch (e: any) {
+      geoSource = 'manual';
+      geoConfidence = 'D';
+      geoReason = `geocode_error: ${e?.message ?? String(e)}`;
+    }
+  }
+
+  // price_info 기본값 (팝업은 null로 들어오므로 fallback 사용)
+  const fallbackPriceInfo = p.category === '팝업' ? null : p.price_info;
+  const finalPriceInfo = fallbackPriceInfo;
+  const finalIsFree = p.is_free;   // 팝업은 null, 전시는 AI 판단값
+
+  const sourcesData = [{
+    source: 'admin',
+    createdBy: JOB_NAME,
+    instagramUrl: p.instagramUrl || null,
+    createdAt: new Date().toISOString(),
+  }];
+
+  const qualityFlags = {
+    has_real_image: !!(p.imageUrl && !p.imageUrl.includes('/defaults/')),
+    has_exact_address: !!p.address,
+    geo_ok: !!(lat && lng),
+    has_overview: !!p.overview,
+    has_price_info: !!finalPriceInfo,
+  };
+
+  const result = await pool.query(
+    `INSERT INTO canonical_events (
+      id, content_key, title, display_title, start_at, end_at, venue, address,
+      region, lat, lng, main_category, sub_category, image_url, is_free, price_info,
+      overview, is_ending_soon, popularity_score, buzz_score, is_featured, featured_order,
+      featured_at, sources, source_priority_winner, is_deleted, deleted_reason,
+      image_storage, image_origin, image_source_page_url, image_key, image_metadata,
+      geo_source, geo_confidence, geo_reason, geo_updated_at,
+      external_links, status, price_min, price_max, source_tags, derived_tags,
+      opening_hours, parking_available, parking_info, quality_flags,
+      metadata, created_at, updated_at
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
+      $19,$20,$21,$22,$23,$24::jsonb,$25,$26,$27,
+      $28,$29,$30,$31,$32::jsonb,
+      $33,$34,$35,$36,
+      $37::jsonb,$38,$39,$40,$41::jsonb,$42::jsonb,
+      $43::jsonb,$44,$45,$46::jsonb,
+      $47::jsonb, NOW(), NOW()
+    ) RETURNING id`,
+    [
+      id, contentKey, p.title, null,
+      p.startAt, p.endAt, p.venue, p.address || null,
+      region, lat, lng,
+      p.category, null,
+      p.imageUrl || null,
+      finalIsFree, finalPriceInfo,
+      p.overview || null,
+      isEndingSoon,
+      500, 0, false, null, null,
+      JSON.stringify(sourcesData),
+      'manual', false, null,
+      p.imageStorage || 'external',
+      p.imageOrigin || null,
+      null,
+      p.imageKey || null,
+      '{}',
+      geoSource, geoConfidence, geoReason,
+      geoSource ? new Date() : null,
+      JSON.stringify(p.external_links || {}),
+      'active',
+      p.price_min || null, p.price_max || null,
+      JSON.stringify(p.source_tags || []),
+      JSON.stringify(p.derived_tags || []),
+      p.opening_hours ? JSON.stringify(p.opening_hours) : null,
+      p.parking_available ?? null,
+      p.parking_info || null,
+      JSON.stringify(qualityFlags),
+      p.metadata ? JSON.stringify(p.metadata) : null,
+    ],
+  );
+
+  return result.rows[0]?.id ?? null;
+}
+
 // ─── 단일 이벤트 처리 ──────────────────────────────────────────────────────
 
 async function processEvent(item: any, index: number): Promise<boolean> {
@@ -310,62 +458,54 @@ async function processEvent(item: any, index: number): Promise<boolean> {
   ];
 
   const popupDisplay = aiInfo?.popup_display ?? null;
-  const payload: Record<string, any> = {
-    title,
-    startAt,
-    endAt,
-    venue: detailVenue || title,
-    address: detailAddress || null,
-    imageUrl: uploadedImageUrl,
-    imageStorage,
-    imageOrigin: imageStorage === 'cdn' ? 'official_site' : undefined,
-    imageKey: uploadedImageKey,
-    overview: aiInfo?.overview_raw ?? aiInfo?.overview ?? null,
-    instagramUrl,
-    is_free: category === '팝업' ? null : (aiInfo?.price_min === 0 ? true : null),
-    price_info: category === '팝업' ? null : (
-      aiInfo?.price_min === 0 ? '무료'
-        : (aiInfo?.price_min != null ? `최소 ${aiInfo.price_min.toLocaleString()}원` : null)
-    ),
-    price_min: category === '팝업' ? null : (aiInfo?.price_min ?? null),
-    price_max: category === '팝업' ? null : (aiInfo?.price_max ?? null),
-    opening_hours: aiInfo?.opening_hours ??
-      (detailOperationTime.length > 0
-        ? { weekday: detailOperationTime[0], weekend: detailOperationTime[0] }
-        : null),
-    parking_available: aiInfo?.parking_available ?? null,
-    parking_info: aiInfo?.parking_info ?? null,
-    source_tags: sourceTags,
-    derived_tags: aiInfo?.derived_tags ?? [],
-    external_links: {
-      popga: `${DETAIL_BASE}/popup/${popgaId}`,
-      ...(instagramUrl ? { instagram: instagramUrl } : {}),
-    },
-    metadata: {
-      display: popupDisplay ? { popup: popupDisplay } : undefined,
-      popga_id: String(popgaId),
-      popga_type: type,
-      source: 'popga_collector',
-    },
-  };
 
-  console.log(`[${JOB_NAME}]   → POST ${API_BASE}/admin/events/popup (key=${ADMIN_KEY.substring(0, 8)}...)`);
+  // DB 직접 삽입 (HTTP self-call 대신)
   try {
-    const apiRes = await axios.post(`${API_BASE}/admin/events/popup`, payload, {
-      headers: { 'Content-Type': 'application/json', 'X-Admin-Key': ADMIN_KEY },
-      timeout: 30_000,
+    const createdId = await insertEventDirect({
+      title,
+      category,
+      startAt,
+      endAt,
+      venue: detailVenue || title,
+      address: detailAddress || null,
+      imageUrl: uploadedImageUrl,
+      imageStorage,
+      imageOrigin: imageStorage === 'cdn' ? 'official_site' : undefined,
+      imageKey: uploadedImageKey,
+      overview: aiInfo?.overview_raw ?? aiInfo?.overview ?? null,
+      instagramUrl,
+      is_free: category === '팝업' ? null : (aiInfo?.price_min === 0 ? true : null),
+      price_info: category === '팝업' ? null : (
+        aiInfo?.price_min === 0 ? '무료'
+          : (aiInfo?.price_min != null ? `최소 ${aiInfo.price_min.toLocaleString()}원` : null)
+      ),
+      price_min: category === '팝업' ? null : (aiInfo?.price_min ?? null),
+      price_max: category === '팝업' ? null : (aiInfo?.price_max ?? null),
+      opening_hours: aiInfo?.opening_hours ??
+        (detailOperationTime.length > 0
+          ? { weekday: detailOperationTime[0], weekend: detailOperationTime[0] }
+          : null),
+      parking_available: aiInfo?.parking_available ?? null,
+      parking_info: aiInfo?.parking_info ?? null,
+      source_tags: sourceTags,
+      derived_tags: aiInfo?.derived_tags ?? [],
+      external_links: {
+        popga: `${DETAIL_BASE}/popup/${popgaId}`,
+        ...(instagramUrl ? { instagram: instagramUrl } : {}),
+      },
+      metadata: {
+        display: popupDisplay ? { popup: popupDisplay } : undefined,
+        popga_id: String(popgaId),
+        popga_type: type,
+        source: JOB_NAME,
+      },
     });
-    const createdId: string = apiRes.data?.item?.id ?? apiRes.data?.id ?? '(unknown)';
+
+    if (!createdId) throw new Error('INSERT returned no id');
     console.log(`[${JOB_NAME}]   ✅ 등록 완료 — id: ${createdId}`);
     return true;
   } catch (err: any) {
-    const status = err?.response?.status;
-    const data = err?.response?.data;
-    const code = err?.code;
-    console.error(
-      `[${JOB_NAME}]   ❌ 등록 실패 HTTP=${status} code=${code} msg="${err?.message}":`,
-      JSON.stringify(data)?.substring(0, 400),
-    );
+    console.error(`[${JOB_NAME}]   ❌ DB 삽입 실패: ${err?.message}`);
     return false;
   }
 }
