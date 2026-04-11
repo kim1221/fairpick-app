@@ -713,8 +713,15 @@ function EventDetailPage() {
             );
           })()}
 
-          {/* 광고 — Key Info Grid 직후, 상세 정보 섹션 전 */}
-          <View style={[styles.adBannerContainer, { height: adRendered ? 96 : 0 }]}>
+          {/* 광고 — Key Info Grid 직후, 상세 정보 섹션 전
+               Android: height:0 이면 native ad view가 초기화 안 됨 → opacity로 제어
+               iOS: 렌더 전 height:0 유지 (공간 차지 없음) */}
+          <View style={[
+            styles.adBannerContainer,
+            Platform.OS === 'android'
+              ? { height: 96, opacity: adRendered ? 1 : 0 }
+              : { height: adRendered ? 96 : 0 },
+          ]}>
             <InlineAd
               adGroupId="ait.v2.live.6526c6e693454a28"
               impressFallbackOnMount={true}
