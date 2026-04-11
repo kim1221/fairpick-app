@@ -19,7 +19,9 @@ import { extractEventInfoEnhanced } from '../lib/aiExtractor';
 
 // ─── 설정 ──────────────────────────────────────────────────────────────────
 
-const MAX_PER_RUN = 50;
+// 전체 목록을 순회하며 신규 이벤트를 모두 수집 (상한 없음)
+// Gemini 비용 방지용 일별 안전장치: 하루 1회 실행 + 이미 등록된 건 skip
+const MAX_PER_RUN = 500;
 
 const POPGA_API_BASE = 'https://api.popga.co.kr/user';
 const DETAIL_BASE = 'https://popga.co.kr';
@@ -75,12 +77,22 @@ async function downloadImage(url: string): Promise<Buffer | null> {
   }
 }
 
-async function isDuplicate(popgaId: string | number, title: string): Promise<boolean> {
+async function isDuplicate(
+  popgaId: string | number,
+  title: string,
+  venue: string,
+  startAt: string,
+  endAt: string,
+): Promise<boolean> {
   const result = await pool.query(
     `SELECT id FROM canonical_events
-     WHERE (source_tags @> $1::jsonb OR title = $2)
-       AND is_deleted = false LIMIT 1`,
-    [JSON.stringify([`popga:${popgaId}`]), title],
+     WHERE (
+       source_tags @> $1::jsonb
+       OR title = $2
+       OR (venue ILIKE $3 AND start_at::date = $4::date AND end_at::date = $5::date)
+     )
+     AND is_deleted = false LIMIT 1`,
+    [JSON.stringify([`popga:${popgaId}`]), title, venue, startAt, endAt],
   );
   return result.rowCount! > 0;
 }
@@ -373,11 +385,6 @@ async function processEvent(item: any, index: number): Promise<boolean> {
 
   console.log(`[${JOB_NAME}] [${index + 1}] "${title}" (popga:${popgaId})`);
 
-  if (await isDuplicate(popgaId, title)) {
-    console.log(`[${JOB_NAME}]   → 중복 — 건너뜀`);
-    return false;
-  }
-
   const category = toCategory(type);
   const startAt =
     normalizeDate(item.openDate ?? item.startAt ?? item.startDate) ??
@@ -392,6 +399,11 @@ async function processEvent(item: any, index: number): Promise<boolean> {
   const rawImagePath: string | undefined = item.file?.path ?? item.thumbnail ?? item.imageUrl;
   const popgaImageUrl = normalizeImageUrl(rawImagePath);
   const popgaTags: string[] = Array.isArray(item.tags) ? item.tags : [];
+
+  if (await isDuplicate(popgaId, title, venue, startAt, endAt)) {
+    console.log(`[${JOB_NAME}]   → 중복 — 건너뜀`);
+    return false;
+  }
 
   // 상세 API
   const detail = await fetchDetail(popgaId);
