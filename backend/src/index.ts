@@ -948,6 +948,12 @@ app.post('/api/user-events', async (req, res) => {
       );
     }
     
+    // click/save/view 행동 시 해당 유저의 클릭 이력 캐시 무효화
+    // → 다음 home/sections 요청에서 새 클릭이 즉시 반영됨 (for_you 섹션 생성 조건)
+    if (['click', 'save', 'view'].includes(actionType)) {
+      userClickCacheMap.delete(userId);
+    }
+
     res.json({
       success: true,
       message: '행동 로그가 기록되었습니다.',
