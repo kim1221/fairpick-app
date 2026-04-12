@@ -8813,6 +8813,7 @@ app.get('/api/home/sections', async (req, res) => {
     // ── "나를 위한 추천" 벡터 개인화 섹션 ──────────────────────────────────
     // 최근 3일 클릭 이벤트 >= 2개인 유저에게만 생성 (per-request, 캐시 bypass)
     let forYouSection: { slug: string; title: string; subtitle: string | null; events: any[] } | null = null;
+    console.log(`[for_you] userId=${userId ?? 'none'} recentClicks=${recentClickedIds.size}`);
     if (recentClickedIds.size >= 2) {
       try {
         const recentIdsArr = [...recentClickedIds];
@@ -8822,6 +8823,7 @@ app.get('/api/home/sections', async (req, res) => {
            WHERE id = ANY($1::uuid[]) AND embedding IS NOT NULL AND is_deleted = false`,
           [recentIdsArr],
         );
+        console.log(`[for_you] clicked=${recentIdsArr.length} withEmb=${embRows.rows.length}`);
 
         if (embRows.rows.length >= 2) {
           // PostgreSQL vector → "[0.1,0.2,...]" 문자열 파싱
@@ -8830,6 +8832,7 @@ app.get('/api/home/sections', async (req, res) => {
               try { return JSON.parse(r.embedding!) as number[]; } catch { return null; }
             })
             .filter((e): e is number[] => e !== null);
+          console.log(`[for_you] parsed=${embeddings.length}`);
 
           if (embeddings.length >= 2) {
             // 클릭 이벤트 임베딩 centroid (element-wise average)
@@ -8855,8 +8858,10 @@ app.get('/api/home/sections', async (req, res) => {
                LIMIT 8`,
               [centroidLiteral, excludeIds],
             );
+            console.log(`[for_you] similar=${forYouRows.rows.length}`);
 
             const forYouEvents = forYouRows.rows.map(mapEventForFrontend).filter(Boolean);
+            console.log(`[for_you] mapped=${forYouEvents.length}`);
             if (forYouEvents.length >= 2) {
               forYouSection = {
                 slug: 'for_you',
