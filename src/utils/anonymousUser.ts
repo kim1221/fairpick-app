@@ -49,21 +49,28 @@ export async function getOrCreateAnonymousId(): Promise<string> {
   }
 }
 
+// 세션 내 userId 캐시 — 최초 resolve된 값을 고정하여 호출마다 다른 값 반환 방지
+let _sessionUserId: string | null = null;
+
 /**
  * 현재 사용자 ID 가져오기 (로그인 여부 확인)
+ * 세션 내에서 한 번 resolve된 값을 캐싱하여 일관성 보장
  */
 export async function getCurrentUserId(): Promise<string> {
+  if (_sessionUserId) return _sessionUserId;
   try {
     // 1순위: 로그인 사용자 ID
     const userId = await Storage.getItem(STORAGE_KEYS.USER_ID);
     if (userId) {
       console.log('[AnonymousUser] Logged in user:', userId);
+      _sessionUserId = userId;
       return userId;
     }
-    
+
     // 2순위: 익명 사용자 ID
     const anonymousId = await getOrCreateAnonymousId();
     console.log('[AnonymousUser] Anonymous user:', anonymousId);
+    _sessionUserId = anonymousId;
     return anonymousId;
   } catch (error) {
     console.error('[AnonymousUser] Failed to get current user ID:', error);
@@ -90,11 +97,10 @@ export async function isLoggedIn(): Promise<boolean> {
 export async function saveLoginInfo(userId: string, tossUserKey?: number): Promise<void> {
   try {
     await Storage.setItem(STORAGE_KEYS.USER_ID, userId);
-    
+    _sessionUserId = userId; // 로그인 시 캐시 즉시 갱신
     if (tossUserKey) {
       await Storage.setItem(STORAGE_KEYS.TOSS_USER_KEY, tossUserKey.toString());
     }
-    
     console.log('[AnonymousUser] Saved login info:', { userId, tossUserKey });
   } catch (error) {
     console.error('[AnonymousUser] Failed to save login info:', error);
@@ -109,6 +115,7 @@ export async function logout(): Promise<void> {
   try {
     await Storage.removeItem(STORAGE_KEYS.USER_ID);
     await Storage.removeItem(STORAGE_KEYS.TOSS_USER_KEY);
+    _sessionUserId = null; // 로그아웃 시 캐시 초기화 (이후 익명 ID로 fallback)
     console.log('[AnonymousUser] Logged out');
   } catch (error) {
     console.error('[AnonymousUser] Failed to logout:', error);
