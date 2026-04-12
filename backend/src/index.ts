@@ -8317,6 +8317,8 @@ async function getUserClickHistory(userId: string): Promise<UserClickHistory> {
   }
 
   // 1쿼리: 14일 이내 모든 클릭 → 인메모리에서 4가지 Set + 카테고리 Map 추출
+  // users 테이블의 id/anonymous_id 연결을 통해 두 ID 모두의 클릭 이력 통합 조회
+  // (앱에서 anonymous_id와 users.id가 혼용되는 경우 대응)
   const result = await pool.query(
     `SELECT
        ue.event_id,
@@ -8325,7 +8327,14 @@ async function getUserClickHistory(userId: string): Promise<UserClickHistory> {
        ce.main_category
      FROM user_events ue
      LEFT JOIN canonical_events ce ON ue.event_id = ce.id
-     WHERE ue.user_id = $1
+     WHERE ue.user_id = ANY(
+       SELECT unnest(ARRAY[$1::uuid] ||
+         ARRAY(SELECT COALESCE(anonymous_id, id) FROM users
+               WHERE id = $1::uuid AND anonymous_id IS NOT NULL) ||
+         ARRAY(SELECT id FROM users
+               WHERE anonymous_id = $1::uuid)
+       )
+     )
        AND ue.action_type = 'click'
        AND ue.created_at > NOW() - INTERVAL '14 days'
      GROUP BY ue.event_id, ue.section_slug, ce.main_category`,
@@ -8393,7 +8402,14 @@ async function getUserClickHistory(userId: string): Promise<UserClickHistory> {
          ROW_NUMBER() OVER (PARTITION BY ue.event_id ORDER BY ue.created_at DESC) AS rn
        FROM user_events ue
        LEFT JOIN canonical_events ce ON ue.event_id = ce.id
-       WHERE ue.user_id = $1
+       WHERE ue.user_id = ANY(
+               SELECT unnest(ARRAY[$1::uuid] ||
+                 ARRAY(SELECT COALESCE(anonymous_id, id) FROM users
+                       WHERE id = $1::uuid AND anonymous_id IS NOT NULL) ||
+                 ARRAY(SELECT id FROM users
+                       WHERE anonymous_id = $1::uuid)
+               )
+             )
          AND ue.action_type IN ('save', 'unsave')
          AND ue.created_at > NOW() - INTERVAL '14 days'
      ) sub
