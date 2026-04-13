@@ -16,6 +16,7 @@ import { embedNewEvents } from '../jobs/embedNewEvents';
 import { sendEndSoonNotifications } from '../jobs/sendEndSoonNotifications';
 import { runAutoFeaturedScore } from '../jobs/autoFeaturedScore';
 import { runPopgaCollector } from '../jobs/popgaCollector';
+import { runArtmapCollector } from '../jobs/artmapCollector';
 import { runningJobs } from './jobState';
 import { withJobLog } from './jobLogger';
 
@@ -42,6 +43,7 @@ const JOB_RUNNERS: Record<string, () => Promise<unknown>> = {
   'end-soon-notifications': sendEndSoonNotifications,
   'ai-hot-rating': () => withJobLog('ai-hot-rating', runHotRating),
   'popga-collector': () => withJobLog('popga-collector', runPopgaCollector),
+  'artmap-collector': () => withJobLog('artmap-collector', runArtmapCollector),
 };
 
 export const KNOWN_JOB_NAMES = Object.keys(JOB_RUNNERS);

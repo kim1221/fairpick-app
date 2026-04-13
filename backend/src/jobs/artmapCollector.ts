@@ -132,7 +132,23 @@ async function isDuplicate(
      WHERE (
        source_tags @> $1::jsonb
        OR title = $2
-       OR (venue ILIKE $3 AND start_at::date = $4::date AND end_at::date = $5::date)
+       OR (
+         start_at::date = $4::date
+         AND end_at::date = $5::date
+         AND $3 != '' AND venue != ''
+         AND (
+           venue ILIKE $3
+           OR venue ILIKE '%' || $3 || '%'
+           OR $3 ILIKE '%' || venue || '%'
+           OR (
+             similarity(title, $2) > 0.6
+             AND (
+               venue ILIKE '%' || split_part($3, ' ', 1) || '%'
+               OR $3 ILIKE '%' || split_part(venue, ' ', 1) || '%'
+             )
+           )
+         )
+       )
      )
      AND is_deleted = false LIMIT 1`,
     [JSON.stringify([`artmap:${artmapIdx}`]), title, venue, startAt, endAt],

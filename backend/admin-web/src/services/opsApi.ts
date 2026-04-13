@@ -131,6 +131,18 @@ const STATIC_JOB_DEFS: StaticJobDef[] = [
     maxRunHours: 2,
     sourceKeywords: ['popga', 'popga-collector', 'popga_collector'],
   },
+  {
+    name: 'artmap-collector',
+    label: '아트맵 수집',
+    description: 'art-map.co.kr 전시 자동 수집',
+    schedule: '매일 07:00',
+    scheduleHour: 7,
+    scheduleMinute: 0,
+    scheduleDayOfWeek: null,
+    expectedIntervalHours: 24,
+    maxRunHours: 2,
+    sourceKeywords: ['artmap', 'artmap-collector', 'artmap_collector'],
+  },
   // end-soon-notifications: 기능 보류 중 (scheduler.ts도 주석 처리됨)
   {
     name: 'ai-hot-rating',
