@@ -47,33 +47,61 @@ interface EventRow {
 // ─────────────────────────────────────────────────────────────
 
 const SLOT_MATRIX: SlotSpec[][] = [
-  // page % 4 === 0
+  // page % 8 === 0
   [
     { type: 'HERO',    framing_type: 'ending_soon',    framing_label: '이번 주 마감',   fetchCount: 5, takeCount: 1 },
     { type: 'BUNDLE',  framing_type: 'weekend_picks',  framing_label: '이번 주말 추천', fetchCount: 8, takeCount: 6 },
     { type: 'RANKING', framing_type: 'top_exhibition', framing_label: '전시 TOP',       fetchCount: 8, takeCount: 5 },
+    { type: 'BUNDLE',  framing_type: 'free_picks',     framing_label: '무료로 즐겨요',  fetchCount: 8, takeCount: 6 },
+  ],
+  // page % 8 === 1
+  [
+    { type: 'HERO',    framing_type: 'trending_buzz',  framing_label: '지금 가장 화제', fetchCount: 5, takeCount: 1 },
+    { type: 'BUNDLE',  framing_type: 'newly_opened',   framing_label: '새로 열렸어요',  fetchCount: 8, takeCount: 6 },
+    { type: 'RANKING', framing_type: 'top_popup',      framing_label: '팝업 TOP',       fetchCount: 8, takeCount: 5 },
     { type: 'BUNDLE',  framing_type: 'budget_picks',   framing_label: '가성비 추천',    fetchCount: 8, takeCount: 6 },
   ],
-  // page % 4 === 1
+  // page % 8 === 2
   [
-    { type: 'HERO',    framing_type: 'trending_buzz',   framing_label: '지금 가장 화제', fetchCount: 5, takeCount: 1 },
-    { type: 'BUNDLE',  framing_type: 'newly_opened',    framing_label: '새로 열렸어요',  fetchCount: 8, takeCount: 6 },
-    { type: 'RANKING', framing_type: 'top_popup',       framing_label: '팝업 TOP',       fetchCount: 8, takeCount: 5 },
-    { type: 'BUNDLE',  framing_type: 'free_picks',      framing_label: '무료로 즐겨요',  fetchCount: 8, takeCount: 6 },
+    { type: 'HERO',    framing_type: 'newly_opened',    framing_label: '막 오픈했어요',  fetchCount: 5, takeCount: 1 },
+    { type: 'BUNDLE',  framing_type: 'trending_buzz',   framing_label: '요즘 핫한 곳',  fetchCount: 8, takeCount: 6 },
+    { type: 'RANKING', framing_type: 'top_performance', framing_label: '공연 TOP',       fetchCount: 8, takeCount: 5 },
+    { type: 'BUNDLE',  framing_type: 'weekend_picks',   framing_label: '주말에 가볼 곳', fetchCount: 8, takeCount: 6 },
   ],
-  // page % 4 === 2
+  // page % 8 === 3
   [
-    { type: 'HERO',    framing_type: 'newly_opened',     framing_label: '새로 열렸어요', fetchCount: 5, takeCount: 1 },
-    { type: 'BUNDLE',  framing_type: 'trending_buzz',    framing_label: '지금 화제',     fetchCount: 8, takeCount: 6 },
-    { type: 'RANKING', framing_type: 'top_performance',  framing_label: '공연 TOP',      fetchCount: 8, takeCount: 5 },
-    { type: 'BUNDLE',  framing_type: 'weekend_picks',    framing_label: '이번 주말',     fetchCount: 8, takeCount: 6 },
+    { type: 'HERO',    framing_type: 'budget_picks',    framing_label: '부담 없이 즐겨요', fetchCount: 5, takeCount: 1 },
+    { type: 'BUNDLE',  framing_type: 'ending_soon',     framing_label: '곧 끝나요',        fetchCount: 8, takeCount: 6 },
+    { type: 'RANKING', framing_type: 'top_exhibition',  framing_label: '인기 전시',        fetchCount: 8, takeCount: 5 },
+    { type: 'BUNDLE',  framing_type: 'free_picks',      framing_label: '0원으로 즐기기',   fetchCount: 8, takeCount: 6 },
   ],
-  // page % 4 === 3
+  // page % 8 === 4
   [
-    { type: 'HERO',    framing_type: 'free_picks',      framing_label: '무료로 즐겨요', fetchCount: 5, takeCount: 1 },
-    { type: 'BUNDLE',  framing_type: 'ending_soon',     framing_label: '마감 임박',     fetchCount: 8, takeCount: 6 },
-    { type: 'RANKING', framing_type: 'top_exhibition',  framing_label: '전시 TOP',      fetchCount: 8, takeCount: 5 },
-    { type: 'BUNDLE',  framing_type: 'newly_opened',    framing_label: '최근 오픈',     fetchCount: 8, takeCount: 6 },
+    { type: 'HERO',    framing_type: 'free_picks',      framing_label: '무료 입장',      fetchCount: 5, takeCount: 1 },
+    { type: 'BUNDLE',  framing_type: 'newly_opened',    framing_label: '이번 달 오픈',   fetchCount: 8, takeCount: 6 },
+    { type: 'RANKING', framing_type: 'top_popup',       framing_label: '팝업 인기순',    fetchCount: 8, takeCount: 5 },
+    { type: 'BUNDLE',  framing_type: 'trending_buzz',   framing_label: '화제 중인 곳',   fetchCount: 8, takeCount: 6 },
+  ],
+  // page % 8 === 5
+  [
+    { type: 'HERO',    framing_type: 'weekend_picks',   framing_label: '이번 주말 픽',   fetchCount: 5, takeCount: 1 },
+    { type: 'BUNDLE',  framing_type: 'budget_picks',    framing_label: '알뜰하게 즐기기', fetchCount: 8, takeCount: 6 },
+    { type: 'RANKING', framing_type: 'top_performance', framing_label: '공연 인기순',    fetchCount: 8, takeCount: 5 },
+    { type: 'BUNDLE',  framing_type: 'ending_soon',     framing_label: '마감 D-7',       fetchCount: 8, takeCount: 6 },
+  ],
+  // page % 8 === 6
+  [
+    { type: 'HERO',    framing_type: 'trending_buzz',   framing_label: '지금 뜨는 곳',   fetchCount: 5, takeCount: 1 },
+    { type: 'BUNDLE',  framing_type: 'free_picks',      framing_label: '공짜로 즐겨요',  fetchCount: 8, takeCount: 6 },
+    { type: 'RANKING', framing_type: 'top_exhibition',  framing_label: '전시 인기순',    fetchCount: 8, takeCount: 5 },
+    { type: 'BUNDLE',  framing_type: 'weekend_picks',   framing_label: '주말 나들이',    fetchCount: 8, takeCount: 6 },
+  ],
+  // page % 8 === 7
+  [
+    { type: 'HERO',    framing_type: 'ending_soon',     framing_label: '마지막 기회',    fetchCount: 5, takeCount: 1 },
+    { type: 'BUNDLE',  framing_type: 'newly_opened',    framing_label: '신규 오픈',      fetchCount: 8, takeCount: 6 },
+    { type: 'RANKING', framing_type: 'top_popup',       framing_label: '팝업 스토어 TOP', fetchCount: 8, takeCount: 5 },
+    { type: 'BUNDLE',  framing_type: 'budget_picks',    framing_label: '1만원대 즐기기', fetchCount: 8, takeCount: 6 },
   ],
 ];
 
@@ -226,7 +254,7 @@ router.get('/', async (req, res) => {
       .slice(0, 500);
 
     // 슬롯 매트릭스 선택
-    const slots: SlotSpec[] = SLOT_MATRIX[page % 4]!.map((s) => ({ ...s }));
+    const slots: SlotSpec[] = SLOT_MATRIX[page % 8]!.map((s) => ({ ...s }));
 
     // 개인화: userId 있으면 마지막 BUNDLE 슬롯을 유저 상위 카테고리로 교체
     let personalizedCategory: string | undefined;
@@ -277,7 +305,7 @@ router.get('/', async (req, res) => {
       }
 
       cards.push({
-        id: `slot-${slotIdx}-${slot.framing_type}`,
+        id: `slot-${page}-${slotIdx}-${slot.framing_type}`,
         content_type: slot.type,
         framing_type: slot.framing_type,
         framing_label: slot.framing_label,

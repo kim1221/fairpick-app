@@ -717,6 +717,7 @@ function HomePageInner() {
         ListFooterComponent={<View style={{ height: 100 }} />}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={Platform.OS !== 'android'}
+        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
         onScrollBeginDrag={handleAiNoticeConfirm}
         onEndReached={loadMoreFeed}
         onEndReachedThreshold={0.3}
