@@ -11,7 +11,6 @@ import { runHotRating } from './scripts/ai-hot-rating';
 import { embedNewEvents } from './jobs/embedNewEvents';
 import { sendEndSoonNotifications } from './jobs/sendEndSoonNotifications';
 import { runPopgaCollector } from './jobs/popgaCollector';
-import { runArtmapCollector } from './jobs/artmapCollector';
 import { runAutoFeaturedScore } from './jobs/autoFeaturedScore';
 import { generateContentPool } from './jobs/generateContentPool';
 import { runningJobs } from './lib/jobState';
@@ -102,7 +101,7 @@ async function runMissedJobsOnStartup(): Promise<void> {
       { name: 'phase2-internal-fields', schedH:  4, schedM: 15, expectedH: 24, fn: () => withJobLog('phase2-internal-fields', enrichInternalFields) },
       { name: 'embed-new-events',       schedH:  5, schedM:  0, expectedH: 24, fn: () => withJobLog('embed-new-events', embedNewEvents) },
       { name: 'ai-hot-rating',          schedH:  9, schedM:  0, expectedH: 168, fn: () => withJobLog('ai-hot-rating', runHotRating) },
-      { name: 'artmap-collector',       schedH:  7, schedM:  0, expectedH: 24,  fn: () => withJobLog('artmap-collector', runArtmapCollector) },
+      { name: 'artmap-collector',       schedH:  7, schedM:  0, expectedH: 24,  fn: async () => { const { runArtmapCollector } = await import('./jobs/artmapCollector'); return withJobLog('artmap-collector', runArtmapCollector); } },
       // collect-15 제거 — 새벽 3시 1회 수집으로 통합
     ];
 
@@ -348,8 +347,9 @@ export function initScheduler() {
     });
     console.log('[Scheduler] registered: Popga collector @ 06:00 KST');
 
-    // 매일 07:00 KST - 아트맵 전시 수집
+    // 매일 07:00 KST - 아트맵 전시 수집 (동적 import — 서버 시작 영향 방지)
     cron.schedule('0 7 * * *', async () => {
+      const { runArtmapCollector } = await import('./jobs/artmapCollector');
       await runJobSafely('artmap-collector', () => withJobLog('artmap-collector', runArtmapCollector));
     }, {
       timezone: 'Asia/Seoul'
