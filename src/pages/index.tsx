@@ -346,6 +346,7 @@ function HomePageInner() {
       setUserId(uid);
 
       await loadSections(loc, uid);
+      loadMoreFeed(); // 섹션 로드 완료 후 첫 매거진 배치 백그라운드 프리페치
 
       // GPS가 2초 내에 못 왔지만 이후 완료된 경우 전체 섹션 재로드
       if (!loc) {
