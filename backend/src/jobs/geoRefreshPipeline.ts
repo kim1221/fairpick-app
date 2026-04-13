@@ -230,14 +230,14 @@ export async function runGeoRefreshPipeline(options: { lightMode?: boolean; sche
     let step5Status: 'OK' | 'FAILED' = 'OK';
     
     try {
-      // AI Enrichment 실행 (미처리 이벤트 중 최신 200개/일로 제한)
+      // AI Enrichment 실행 (ai_enriched_at IS NULL인 미처리 이벤트 중 최신순 200개/일)
+      // collectedAfter 없이 실행 → 이전 날 누락분도 순차 처리
       // 대규모 백필은 수동: ts-node aiEnrichmentBackfill.ts --limit 1000
       const { aiEnrichmentBackfill } = await import('./aiEnrichmentBackfill');
       await aiEnrichmentBackfill({
         limit: 200,
         testMode: false,
         useNaverSearch: true,
-        collectedAfter: new Date(pipelineStart), // 당일 수집분만 보강
       });
       
       const step5End = Date.now();

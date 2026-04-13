@@ -20,6 +20,9 @@ import { getCurrentUserId } from '../utils/anonymousUser';
 import { getAiNoticeShown, setAiNoticeShown } from '../utils/storage';
 import { reverseGeocode } from '../utils/geocoding';
 import { LikesProvider } from '../contexts/LikesContext';
+import { MagazineCard } from '../components/MagazineCard';
+import { TrendCard } from '../components/TrendCard';
+import { fetchFeed, type FeedCard } from '../services/feedService';
 
 import type { ScoredEvent, Location } from '../types/recommendation';
 
@@ -60,7 +63,9 @@ type FeedItem =
   | { type: 'skeleton'; skeletonType: 'today_pick' | 'horizontal'; id: string }
   | { type: 'empty' }
   | { type: 'section'; section: ProcessedSection }
-  | { type: 'ad' };
+  | { type: 'ad' }
+  | { type: 'magazine'; card: FeedCard }
+  | { type: 'feed_loading' };
 
 // ─────────────────────────────────────────────────────────────
 // 섹션별 핵심 신호 계산 (컴포넌트 외부 — 재생성 없음)
@@ -304,6 +309,13 @@ function HomePageInner() {
   const [isOffline, setIsOffline] = useState(false);
   const excludedIds = useRef<Set<string>>(new Set());
 
+  // 매거진 피드 상태
+  const [feedCards, setFeedCards] = useState<FeedCard[]>([]);
+  const [feedCursor, setFeedCursor] = useState<string | null>(null);
+  const [feedHasMore, setFeedHasMore] = useState(true);
+  const [feedLoading, setFeedLoading] = useState(false);
+  const feedSeenEventIds = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     initializeUser();
     checkAiNotice();
@@ -417,12 +429,41 @@ function HomePageInner() {
     _homeCache = null;
     try {
       excludedIds.current.clear();
+      // 피드 초기화
+      setFeedCards([]);
+      setFeedCursor(null);
+      setFeedHasMore(true);
+      feedSeenEventIds.current.clear();
       const loc = await requestLocation();
       await loadSections(loc, userId);
     } finally {
       setRefreshing(false);
     }
   }, [userId]);
+
+  const loadMoreFeed = useCallback(async () => {
+    if (feedLoading || !feedHasMore) return;
+    setFeedLoading(true);
+    try {
+      const res = await fetchFeed({
+        cursor: feedCursor ?? undefined,
+        limit: 5,
+        excludeIds: Array.from(feedSeenEventIds.current),
+      });
+      if (res.cards.length > 0) {
+        setFeedCards((prev) => [...prev, ...res.cards]);
+        res.cards.forEach((card) =>
+          card.events.forEach((e) => feedSeenEventIds.current.add(e.id)),
+        );
+      }
+      setFeedCursor(res.next_cursor);
+      setFeedHasMore(res.has_more);
+    } catch {
+      // 피드 로딩 실패는 무시 (기존 섹션에 영향 없음)
+    } finally {
+      setFeedLoading(false);
+    }
+  }, [feedLoading, feedHasMore, feedCursor]);
 
   // ─────────────────────────────────────────────────────────────
   // 중복 제거 + 신호 계산을 useMemo로 처리 — 렌더 중 연산 제거
@@ -523,8 +564,15 @@ function HomePageInner() {
         items.push({ type: 'ad' });
       }
     }
+    // 기존 섹션 뒤에 매거진 피드 카드 자연스럽게 이어붙이기
+    for (const card of feedCards) {
+      items.push({ type: 'magazine', card });
+    }
+    if (feedLoading) {
+      items.push({ type: 'feed_loading' });
+    }
     return items;
-  }, [sections, processedSections]);
+  }, [sections, processedSections, feedCards, feedLoading]);
 
   const renderFeedItem = useCallback(({ item }: { item: FeedItem }) => {
     if (item.type === 'skeleton') {
@@ -559,8 +607,36 @@ function HomePageInner() {
     if (item.type === 'ad') {
       return <AdSlot />;
     }
+    if (item.type === 'magazine') {
+      const { card } = item;
+      if (card.content_type === 'TREND') {
+        return (
+          <TrendCard
+            title={card.title}
+            events={card.events}
+            onPress={(id) => handleEventPress(id, card.framing_type)}
+          />
+        );
+      }
+      return (
+        <MagazineCard
+          contentType={card.content_type}
+          title={card.title}
+          body={card.body}
+          events={card.events}
+          onPress={(id) => handleEventPress(id, card.framing_type)}
+        />
+      );
+    }
+    if (item.type === 'feed_loading') {
+      return (
+        <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+          <AnimateSkeleton style={{ width: '90%', height: 120, borderRadius: 16 }} />
+        </View>
+      );
+    }
     return renderSection(item.section);
-  }, [styles, adaptive, isOffline, renderSection]);
+  }, [styles, adaptive, isOffline, renderSection, handleEventPress]);
 
   const listHeader = useMemo(() => (
     <>
@@ -606,6 +682,8 @@ function HomePageInner() {
         keyExtractor={(item) => {
           if (item.type === 'section') return item.section.slug;
           if (item.type === 'skeleton') return item.id;
+          if (item.type === 'magazine') return `magazine-${item.card.id}`;
+          if (item.type === 'feed_loading') return 'feed_loading';
           return item.type;
         }}
         ListHeaderComponent={listHeader}
@@ -613,6 +691,8 @@ function HomePageInner() {
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={Platform.OS !== 'android'}
         onScrollBeginDrag={handleAiNoticeConfirm}
+        onEndReached={loadMoreFeed}
+        onEndReachedThreshold={0.3}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       />
 

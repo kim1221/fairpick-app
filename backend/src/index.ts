@@ -32,6 +32,7 @@ import recommendationsRouter from './routes/recommendations';
 import userEventsRouter from './routes/userEvents';
 import authRouter from './routes/auth';
 import userSyncRouter from './routes/userSync';
+import homeFeedRouter from './routes/homeFeed';
 import * as recommender from './lib/recommender';
 import { calculateConsensusLight, calculateStructuralScore } from './lib/hotScoreCalculator';
 import { calculateDataCompleteness, DataCompletenessScore } from './lib/dataQuality';
@@ -412,6 +413,9 @@ app.use('/recommendations', recommendationsRouter);
 // Phase 2.5: User Events API (사용자 행동 로그)
 app.use('/api/user-events', userEventsRouter);
 
+// 매거진 피드 API
+app.use('/api/home/feed', homeFeedRouter);
+
 // ============================================================
 // Phase 3: 룰 기반 추천 시스템 API
 // ============================================================
@@ -461,11 +465,14 @@ app.get('/api/recommendations/v2/today', async (req, res) => {
       ? { lat: parseFloat(lat as string), lng: parseFloat(lng as string) }
       : undefined;
     
-    // 사용자 취향 조회 (로그인 시)
+    // 사용자 취향 조회 (로그인 시) — id/anonymous_id 둘 다 허용
     let userPrefs: recommender.UserPreference | undefined;
     if (userId) {
       const prefsResult = await pool.query(
-        'SELECT category_scores, preferred_tags FROM user_preferences WHERE user_id = $1',
+        `SELECT up.category_scores, up.preferred_tags
+         FROM user_preferences up
+         JOIN users u ON up.user_id = u.id
+         WHERE u.id = $1::uuid OR u.anonymous_id = $1::uuid`,
         [userId]
       );
       if (prefsResult.rows.length > 0) {
@@ -588,9 +595,12 @@ app.get('/api/recommendations/v2/personalized', async (req, res) => {
       });
     }
     
-    // 사용자 취향 조회
+    // 사용자 취향 조회 — id/anonymous_id 둘 다 허용
     const prefsResult = await pool.query(
-      'SELECT category_scores, preferred_tags FROM user_preferences WHERE user_id = $1',
+      `SELECT up.category_scores, up.preferred_tags
+       FROM user_preferences up
+       JOIN users u ON up.user_id = u.id
+       WHERE u.id = $1::uuid OR u.anonymous_id = $1::uuid`,
       [userId]
     );
     

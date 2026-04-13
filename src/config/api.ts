@@ -27,6 +27,9 @@ export const API_ENDPOINTS = {
   // 홈 섹션 (curation_themes 기반 통합 API)
   homeSections: '/api/home/sections',
 
+  // 매거진 피드
+  homeFeed: '/api/home/feed',
+
   // 사용자 행동 로그
   userEvents: '/api/user-events',
   
