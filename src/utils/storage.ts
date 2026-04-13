@@ -134,6 +134,7 @@ const STORAGE_KEYS = {
   TODAY_BANNER: 'fairpick_today_banner_v1',
   AI_CACHE_BYPASS: 'fairpick_ai_cache_bypass_dev', // 개발용 캐시 바이패스 플래그
   AI_NOTICE_SHOWN: 'fairpick_ai_notice_shown', // 생성형 AI 사전 고지 표시 여부
+  FEED_STATE: 'fairpick_feed_state_v1',
 } as const;
 
 // DEV: Storage 객체 존재 확인 (한 번만)
@@ -1086,4 +1087,93 @@ export async function clearAllTodayBannerCache(): Promise<void> {
   }
 
   await clearAiCopyCache();
+}
+
+// ============================================================
+// 피드 상태 영속화 (세션 간 exclude_ids + nextPage 유지, 일별 리셋)
+// ============================================================
+
+interface FeedStateData {
+  version: 1;
+  date: string;         // 'YYYY-MM-DD' (UTC)
+  excludeIds: string[]; // 최대 2000개
+  nextPage: number;
+}
+
+/** UTC 기준 오늘 날짜 'YYYY-MM-DD' */
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * 피드 상태 조회 — 날짜 바뀌면 자동 리셋
+ */
+export async function getFeedState(): Promise<{
+  excludeIds: string[];
+  nextPage: number;
+  wasReset: boolean;
+}> {
+  try {
+    const raw = await TossStorage.getItem(STORAGE_KEYS.FEED_STATE);
+    if (!raw) {
+      return { excludeIds: [], nextPage: 0, wasReset: false };
+    }
+
+    const parsed: FeedStateData = JSON.parse(raw);
+
+    if (parsed.version !== 1 || parsed.date !== todayUtc()) {
+      // 날짜가 바뀌었거나 구조가 다르면 리셋
+      return { excludeIds: [], nextPage: 0, wasReset: true };
+    }
+
+    return {
+      excludeIds: Array.isArray(parsed.excludeIds) ? parsed.excludeIds : [],
+      nextPage: typeof parsed.nextPage === 'number' ? parsed.nextPage : 0,
+      wasReset: false,
+    };
+  } catch {
+    return { excludeIds: [], nextPage: 0, wasReset: false };
+  }
+}
+
+/**
+ * 피드 진행 상태 저장
+ * - 기존 excludeIds에 newIds 추가 (최대 2000개 유지)
+ * - nextPage 갱신
+ */
+export async function advanceFeedState(newIds: string[], nextPage: number): Promise<void> {
+  try {
+    const current = await getFeedState();
+    const merged = [...current.excludeIds, ...newIds];
+    // 최대 2000개, 오래된 항목 제거 (앞에서 자름)
+    const trimmed = merged.length > 2000 ? merged.slice(merged.length - 2000) : merged;
+
+    const data: FeedStateData = {
+      version: 1,
+      date: todayUtc(),
+      excludeIds: trimmed,
+      nextPage,
+    };
+
+    await TossStorage.setItem(STORAGE_KEYS.FEED_STATE, JSON.stringify(data));
+  } catch (error) {
+    console.warn('[Storage][advanceFeedState] Failed (non-critical):', error);
+  }
+}
+
+/**
+ * 피드 상태 수동 리셋 (pull-to-refresh 시)
+ */
+export async function resetFeedState(): Promise<void> {
+  try {
+    const data: FeedStateData = {
+      version: 1,
+      date: todayUtc(),
+      excludeIds: [],
+      nextPage: 0,
+    };
+    await TossStorage.setItem(STORAGE_KEYS.FEED_STATE, JSON.stringify(data));
+  } catch (error) {
+    console.warn('[Storage][resetFeedState] Failed (non-critical):', error);
+  }
 }

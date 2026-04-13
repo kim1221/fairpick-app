@@ -1,10 +1,11 @@
 /**
- * 매거진 피드 API
+ * 매거진 피드 API — 슬롯 기반 동적 생성
  *
- * GET /api/home/feed
- * - 커서 기반 무한 스크롤 페이지네이션
- * - content_pool에서 TREND/BUNDLE/SPOTLIGHT 카드 조회
- * - exclude_ids로 이미 본 이벤트가 포함된 카드 필터링
+ * GET /api/home/feed?page=0&exclude_ids=uuid1,uuid2&user_id=xxx
+ *
+ * - page: 슬롯 매트릭스 위치 (0~N, SLOT_MATRIX[page % 4] 반복)
+ * - exclude_ids: 이미 본 이벤트 UUID CSV (최대 500개)
+ * - user_id: 개인화용 (선택)
  */
 
 import express from 'express';
@@ -12,17 +13,16 @@ import { pool } from '../db';
 
 const router = express.Router();
 
-interface ContentPoolRow {
-  id: string;
-  content_type: 'TREND' | 'BUNDLE' | 'SPOTLIGHT';
+// ─────────────────────────────────────────────────────────────
+// 타입
+// ─────────────────────────────────────────────────────────────
+
+interface SlotSpec {
+  type: 'HERO' | 'BUNDLE' | 'RANKING';
   framing_type: string;
-  title: string;
-  body: string | null;
-  event_ids: string[];
-  target_region: string | null;
-  priority: number;
-  generated_at: string;
-  metadata: Record<string, unknown>;
+  framing_label: string;
+  fetchCount: number; // DB에서 가져올 후보 수
+  takeCount: number;  // 카드에 담을 이벤트 수
 }
 
 interface EventRow {
@@ -42,74 +42,250 @@ interface EventRow {
   derived_tags: string[] | null;
 }
 
-/**
- * GET /api/home/feed
- *
- * Query params:
- * - cursor: string (마지막으로 받은 카드의 generated_at ISO 문자열, 없으면 처음부터)
- * - limit: number (기본 5)
- * - exclude_ids: string (이미 본 이벤트 UUID 콤마 구분, 최대 100개)
- */
+// ─────────────────────────────────────────────────────────────
+// 슬롯 매트릭스 (page % 4 반복)
+// ─────────────────────────────────────────────────────────────
+
+const SLOT_MATRIX: SlotSpec[][] = [
+  // page % 4 === 0
+  [
+    { type: 'HERO',    framing_type: 'ending_soon',    framing_label: '이번 주 마감',   fetchCount: 5, takeCount: 1 },
+    { type: 'BUNDLE',  framing_type: 'weekend_picks',  framing_label: '이번 주말 추천', fetchCount: 8, takeCount: 6 },
+    { type: 'RANKING', framing_type: 'top_exhibition', framing_label: '전시 TOP',       fetchCount: 8, takeCount: 5 },
+    { type: 'BUNDLE',  framing_type: 'budget_picks',   framing_label: '가성비 추천',    fetchCount: 8, takeCount: 6 },
+  ],
+  // page % 4 === 1
+  [
+    { type: 'HERO',    framing_type: 'trending_buzz',   framing_label: '지금 가장 화제', fetchCount: 5, takeCount: 1 },
+    { type: 'BUNDLE',  framing_type: 'newly_opened',    framing_label: '새로 열렸어요',  fetchCount: 8, takeCount: 6 },
+    { type: 'RANKING', framing_type: 'top_popup',       framing_label: '팝업 TOP',       fetchCount: 8, takeCount: 5 },
+    { type: 'BUNDLE',  framing_type: 'free_picks',      framing_label: '무료로 즐겨요',  fetchCount: 8, takeCount: 6 },
+  ],
+  // page % 4 === 2
+  [
+    { type: 'HERO',    framing_type: 'newly_opened',     framing_label: '새로 열렸어요', fetchCount: 5, takeCount: 1 },
+    { type: 'BUNDLE',  framing_type: 'trending_buzz',    framing_label: '지금 화제',     fetchCount: 8, takeCount: 6 },
+    { type: 'RANKING', framing_type: 'top_performance',  framing_label: '공연 TOP',      fetchCount: 8, takeCount: 5 },
+    { type: 'BUNDLE',  framing_type: 'weekend_picks',    framing_label: '이번 주말',     fetchCount: 8, takeCount: 6 },
+  ],
+  // page % 4 === 3
+  [
+    { type: 'HERO',    framing_type: 'free_picks',      framing_label: '무료로 즐겨요', fetchCount: 5, takeCount: 1 },
+    { type: 'BUNDLE',  framing_type: 'ending_soon',     framing_label: '마감 임박',     fetchCount: 8, takeCount: 6 },
+    { type: 'RANKING', framing_type: 'top_exhibition',  framing_label: '전시 TOP',      fetchCount: 8, takeCount: 5 },
+    { type: 'BUNDLE',  framing_type: 'newly_opened',    framing_label: '최근 오픈',     fetchCount: 8, takeCount: 6 },
+  ],
+];
+
+// ─────────────────────────────────────────────────────────────
+// framing_type → SQL WHERE 절 + ORDER BY
+// ─────────────────────────────────────────────────────────────
+
+interface FramingQuery {
+  where: string;
+  orderBy: string;
+  extraParams?: (nextSaturday: string, nextSunday: string) => unknown[];
+}
+
+function getFramingQuery(framingType: string): FramingQuery {
+  switch (framingType) {
+    case 'ending_soon':
+      return {
+        where: `end_at BETWEEN NOW() AND NOW() + INTERVAL '7 days'`,
+        orderBy: 'end_at ASC',
+      };
+    case 'trending_buzz':
+      return {
+        where: `buzz_score > 30`,
+        orderBy: 'buzz_score DESC',
+      };
+    case 'newly_opened':
+      return {
+        where: `start_at >= NOW() - INTERVAL '21 days'`,
+        orderBy: 'start_at DESC',
+      };
+    case 'free_picks':
+      return {
+        where: `is_free = true`,
+        orderBy: 'buzz_score DESC',
+      };
+    case 'weekend_picks':
+      return {
+        where: `start_at <= $NEXT_SUNDAY AND end_at >= $NEXT_SATURDAY`,
+        orderBy: 'buzz_score DESC',
+      };
+    case 'budget_picks':
+      return {
+        where: `(is_free = true OR price_min <= 15000)`,
+        orderBy: 'buzz_score DESC',
+      };
+    case 'top_exhibition':
+      return {
+        where: `main_category = '전시'`,
+        orderBy: 'buzz_score DESC',
+      };
+    case 'top_popup':
+      return {
+        where: `main_category = '팝업'`,
+        orderBy: 'buzz_score DESC',
+      };
+    case 'top_performance':
+      return {
+        where: `main_category IN ('공연', '뮤지컬', '연극')`,
+        orderBy: 'buzz_score DESC',
+      };
+    default:
+      // personalized (user_id 있을 때 교체됨) — fallback: buzz_score DESC
+      return {
+        where: `true`,
+        orderBy: 'buzz_score DESC',
+      };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 슬롯 이벤트 조회
+// ─────────────────────────────────────────────────────────────
+
+async function fetchSlotEvents(
+  slot: SlotSpec,
+  usedIds: Set<string>,
+  personalizedCategory?: string,
+): Promise<EventRow[]> {
+  const framingType = slot.framing_type === 'personalized' && personalizedCategory
+    ? 'personalized'
+    : slot.framing_type;
+
+  // usedIds를 배열로 변환 (UUID 배열 파라미터용)
+  const excludeArr = Array.from(usedIds);
+
+  let whereClause: string;
+  let orderByClause: string;
+  const params: unknown[] = [excludeArr, slot.fetchCount];
+
+  if (framingType === 'personalized' && personalizedCategory) {
+    whereClause = `main_category = $3`;
+    orderByClause = 'buzz_score DESC';
+    params.push(personalizedCategory);
+  } else if (slot.framing_type === 'weekend_picks') {
+    // 다음 주말 계산
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=일, 6=토
+    const daysUntilSat = dayOfWeek === 0 ? 6 : 6 - dayOfWeek;
+    const nextSaturday = new Date(now);
+    nextSaturday.setDate(now.getDate() + daysUntilSat);
+    nextSaturday.setHours(0, 0, 0, 0);
+    const nextSunday = new Date(nextSaturday);
+    nextSunday.setDate(nextSaturday.getDate() + 1);
+    nextSunday.setHours(23, 59, 59, 999);
+
+    whereClause = `start_at <= $3 AND end_at >= $4`;
+    orderByClause = 'buzz_score DESC';
+    params.push(nextSunday.toISOString(), nextSaturday.toISOString());
+  } else {
+    const fq = getFramingQuery(slot.framing_type);
+    whereClause = fq.where;
+    orderByClause = fq.orderBy;
+  }
+
+  const query = `
+    SELECT id, title, main_category, sub_category, region,
+           start_at, end_at, image_url, venue, buzz_score,
+           is_free, price_min, overview, derived_tags
+    FROM canonical_events
+    WHERE is_deleted = false
+      AND end_at > NOW()
+      AND NOT (id = ANY($1::uuid[]))
+      AND ${whereClause}
+    ORDER BY ${orderByClause}
+    LIMIT $2
+  `;
+
+  const result = await pool.query<EventRow>(query, params);
+  return result.rows.slice(0, slot.takeCount);
+}
+
+// ─────────────────────────────────────────────────────────────
+// GET /api/home/feed
+// ─────────────────────────────────────────────────────────────
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 router.get('/', async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query['limit'] as string) || 5, 10);
-    const cursor = req.query['cursor'] as string | undefined;
+    // 파라미터 파싱
+    const page = Math.max(0, parseInt(req.query['page'] as string) || 0);
     const excludeIdsRaw = (req.query['exclude_ids'] as string) || '';
+    const userId = (req.query['user_id'] as string) || '';
 
-    // exclude_ids 파싱 (UUID 형식 검증)
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    // exclude_ids 파싱 (UUID 검증, 최대 500개)
     const excludeIds = excludeIdsRaw
       .split(',')
       .map((id) => id.trim())
-      .filter((id) => uuidRegex.test(id))
-      .slice(0, 100);
+      .filter((id) => UUID_REGEX.test(id))
+      .slice(0, 500);
 
-    // 1. content_pool에서 카드 조회 (커서 기반)
-    const cursorCondition = cursor
-      ? `AND (priority DESC, generated_at DESC) < (
-           SELECT priority, generated_at FROM content_pool WHERE id = $3::uuid
-         )`
-      : '';
+    // 슬롯 매트릭스 선택
+    const slots: SlotSpec[] = SLOT_MATRIX[page % 4]!.map((s) => ({ ...s }));
 
-    // 커서 조건 없이 단순 페이지네이션 (priority DESC, generated_at DESC)
-    let cardQuery: string;
-    let cardParams: unknown[];
-
-    if (cursor) {
-      cardQuery = `
-        SELECT id, content_type, framing_type, title, body, event_ids,
-               target_region, priority, generated_at, metadata
-        FROM content_pool
-        WHERE expires_at > NOW()
-          AND (priority, generated_at) < (
-            SELECT priority, generated_at FROM content_pool WHERE id = $1::uuid
-          )
-        ORDER BY priority DESC, generated_at DESC
-        LIMIT $2
-      `;
-      cardParams = [cursor, limit];
-    } else {
-      cardQuery = `
-        SELECT id, content_type, framing_type, title, body, event_ids,
-               target_region, priority, generated_at, metadata
-        FROM content_pool
-        WHERE expires_at > NOW()
-        ORDER BY priority DESC, generated_at DESC
-        LIMIT $1
-      `;
-      cardParams = [limit];
+    // 개인화: userId 있으면 마지막 BUNDLE 슬롯을 유저 상위 카테고리로 교체
+    let personalizedCategory: string | undefined;
+    if (userId) {
+      try {
+        const topCatResult = await pool.query<{ main_category: string; cnt: string }>(
+          `SELECT ce.main_category, COUNT(*) as cnt
+           FROM user_events ue
+           JOIN canonical_events ce ON ce.id = ue.event_id
+           WHERE ue.user_id = $1
+             AND ue.action_type IN ('click', 'save', 'dwell', 'sheet_open')
+             AND ue.created_at > NOW() - INTERVAL '30 days'
+           GROUP BY ce.main_category ORDER BY cnt DESC LIMIT 1`,
+          [userId],
+        );
+        const topCat = topCatResult.rows[0]?.main_category;
+        if (topCat) {
+          personalizedCategory = topCat;
+          const lastBundleIdx = slots.map((s) => s.type).lastIndexOf('BUNDLE');
+          if (lastBundleIdx >= 0) {
+            slots[lastBundleIdx] = {
+              ...slots[lastBundleIdx]!,
+              framing_type: 'personalized',
+              framing_label: `내 취향 ${topCat}`,
+            };
+          }
+        }
+      } catch (err: any) {
+        // 개인화 실패는 무시하고 기본 슬롯 사용
+        console.warn('[HomeFeed] 개인화 조회 실패 (무시):', err?.message);
+      }
     }
 
-    const cardResult = await pool.query<ContentPoolRow>(cardQuery, cardParams);
-    let cards = cardResult.rows;
+    // 응답 내 글로벌 dedup
+    const usedIds = new Set<string>(excludeIds);
 
-    // 2. exclude_ids 필터링 (이미 본 이벤트 포함 카드 제외)
-    if (excludeIds.length > 0) {
-      const excludeSet = new Set(excludeIds);
-      cards = cards.filter((card) => {
-        // 카드 이벤트의 절반 이상이 이미 본 이벤트면 제외
-        const seenCount = card.event_ids.filter((id) => excludeSet.has(id)).length;
-        return seenCount < Math.ceil(card.event_ids.length / 2);
+    // 슬롯별 이벤트 조회 (순차 — dedup 정합성 유지)
+    const cards: object[] = [];
+    for (let slotIdx = 0; slotIdx < slots.length; slotIdx++) {
+      const slot = slots[slotIdx]!;
+      const events = await fetchSlotEvents(slot, usedIds, personalizedCategory);
+
+      if (events.length === 0) continue;
+
+      // 응답에 담은 이벤트 ID를 usedIds에 추가
+      for (const e of events) {
+        usedIds.add(e.id);
+      }
+
+      cards.push({
+        id: `slot-${slotIdx}-${slot.framing_type}`,
+        content_type: slot.type,
+        framing_type: slot.framing_type,
+        framing_label: slot.framing_label,
+        title: null,
+        body: null,
+        events,
+        target_region: null,
+        metadata: {},
       });
     }
 
@@ -117,49 +293,10 @@ router.get('/', async (req, res) => {
       return res.json({ cards: [], next_cursor: null, has_more: false });
     }
 
-    // 3. 카드에 연결된 이벤트 상세 정보 조회
-    const allEventIds = Array.from(new Set(cards.flatMap((c) => c.event_ids)));
-
-    const eventResult = await pool.query<EventRow>(
-      `SELECT id, title, main_category, sub_category, region,
-              start_at, end_at, image_url, venue, buzz_score,
-              is_free, price_min, overview, derived_tags
-       FROM canonical_events
-       WHERE id = ANY($1::uuid[])
-         AND is_deleted = false`,
-      [allEventIds],
-    );
-
-    const eventMap = new Map<string, EventRow>(
-      eventResult.rows.map((e) => [e.id, e]),
-    );
-
-    // 4. 응답 조립
-    const responseCards = cards.map((card) => {
-      const events = card.event_ids
-        .map((id) => eventMap.get(id))
-        .filter((e): e is EventRow => e !== null && e !== undefined);
-
-      return {
-        id: card.id,
-        content_type: card.content_type,
-        framing_type: card.framing_type,
-        title: card.title,
-        body: card.body,
-        events,
-        target_region: card.target_region,
-        metadata: card.metadata,
-      };
-    });
-
-    // 5. 다음 커서 = 마지막 카드의 id
-    const lastCard = cards[cards.length - 1]!;
-    const nextCursor = cards.length >= limit ? lastCard.id : null;
-
     return res.json({
-      cards: responseCards,
-      next_cursor: nextCursor,
-      has_more: nextCursor !== null,
+      cards,
+      next_cursor: String(page + 1),
+      has_more: true,
     });
   } catch (err: any) {
     console.error('[HomeFeed] 피드 조회 오류:', err?.message);

@@ -17,11 +17,12 @@ import { Accuracy, getCurrentLocation, GetCurrentLocationPermissionError, Inline
 import recommendationService from '../services/recommendationService';
 import userEventService from '../services/userEventService';
 import { getCurrentUserId } from '../utils/anonymousUser';
-import { getAiNoticeShown, setAiNoticeShown } from '../utils/storage';
+import { getAiNoticeShown, setAiNoticeShown, getFeedState, advanceFeedState, resetFeedState } from '../utils/storage';
 import { reverseGeocode } from '../utils/geocoding';
 import { LikesProvider } from '../contexts/LikesContext';
 import { MagazineCard } from '../components/MagazineCard';
 import { TrendCard } from '../components/TrendCard';
+import { HeroCard } from '../components/HeroCard';
 import { fetchFeed, type FeedCard } from '../services/feedService';
 
 import type { ScoredEvent, Location } from '../types/recommendation';
@@ -311,7 +312,7 @@ function HomePageInner() {
 
   // 매거진 피드 상태
   const [feedCards, setFeedCards] = useState<FeedCard[]>([]);
-  const [feedCursor, setFeedCursor] = useState<string | null>(null);
+  const [feedPage, setFeedPage] = useState<number>(0);
   const [feedHasMore, setFeedHasMore] = useState(true);
   const [feedLoading, setFeedLoading] = useState(false);
   const feedSeenEventIds = useRef<Set<string>>(new Set());
@@ -332,6 +333,13 @@ function HomePageInner() {
   }, []);
 
   const initializeUser = async () => {
+    // 피드 상태 복원 (캐시 히트 여부와 관계없이 항상 수행)
+    const feedState = await getFeedState();
+    if (!feedState.wasReset && feedState.excludeIds.length > 0) {
+      feedSeenEventIds.current = new Set(feedState.excludeIds);
+      setFeedPage(feedState.nextPage);
+    }
+
     if (_homeCache && Date.now() < _homeCache.expiresAt) return;
 
     try {
@@ -430,9 +438,10 @@ function HomePageInner() {
     _homeCache = null;
     try {
       excludedIds.current.clear();
-      // 피드 초기화
+      // 피드 초기화 + 스토리지 리셋
+      await resetFeedState();
       setFeedCards([]);
-      setFeedCursor(null);
+      setFeedPage(0);
       setFeedHasMore(true);
       feedSeenEventIds.current.clear();
       const loc = await requestLocation();
@@ -447,24 +456,30 @@ function HomePageInner() {
     setFeedLoading(true);
     try {
       const res = await fetchFeed({
-        cursor: feedCursor ?? undefined,
-        limit: 5,
+        page: feedPage,
         excludeIds: Array.from(feedSeenEventIds.current),
+        userId,
       });
       if (res.cards.length > 0) {
         setFeedCards((prev) => [...prev, ...res.cards]);
+        const newIds: string[] = [];
         res.cards.forEach((card) =>
-          card.events.forEach((e) => feedSeenEventIds.current.add(e.id)),
+          card.events.forEach((e) => {
+            feedSeenEventIds.current.add(e.id);
+            newIds.push(e.id);
+          }),
         );
+        const nextPage = parseInt(res.next_cursor ?? String(feedPage + 1));
+        setFeedPage(nextPage);
+        advanceFeedState(newIds, nextPage).catch(() => {}); // fire-and-forget
       }
-      setFeedCursor(res.next_cursor);
       setFeedHasMore(res.has_more);
     } catch {
       // 피드 로딩 실패는 무시 (기존 섹션에 영향 없음)
     } finally {
       setFeedLoading(false);
     }
-  }, [feedLoading, feedHasMore, feedCursor]);
+  }, [feedLoading, feedHasMore, feedPage, userId]);
 
   // ─────────────────────────────────────────────────────────────
   // 중복 제거 + 신호 계산을 useMemo로 처리 — 렌더 중 연산 제거
@@ -610,19 +625,30 @@ function HomePageInner() {
     }
     if (item.type === 'magazine') {
       const { card } = item;
-      if (card.content_type === 'TREND') {
+      if (card.content_type === 'HERO') {
+        if (!card.events[0]) return null;
+        return (
+          <HeroCard
+            framingLabel={card.framing_label ?? ''}
+            event={card.events[0]}
+            onPress={(id) => handleEventPress(id, card.framing_type)}
+          />
+        );
+      }
+      if (card.content_type === 'TREND' || card.content_type === 'RANKING') {
         return (
           <TrendCard
-            title={card.title}
+            title={card.framing_label ?? card.title ?? ''}
             events={card.events}
             onPress={(id) => handleEventPress(id, card.framing_type)}
           />
         );
       }
+      // BUNDLE / SPOTLIGHT
       return (
         <MagazineCard
-          contentType={card.content_type}
-          title={card.title}
+          contentType="BUNDLE"
+          title={card.framing_label ?? card.title ?? ''}
           body={card.body}
           events={card.events}
           onPress={(id) => handleEventPress(id, card.framing_type)}
