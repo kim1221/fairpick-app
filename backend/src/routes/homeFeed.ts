@@ -68,36 +68,42 @@ function seededShuffle<T>(arr: T[], seed: string): T[] {
 // ─────────────────────────────────────────────────────────────
 
 const HERO_POOL: SlotSpec[] = [
-  { type: 'HERO', framing_type: 'ending_soon',     framing_label: '오늘 안 가면 못 봐요',          fetchCount: 5, takeCount: 1 },
-  { type: 'HERO', framing_type: 'trending_buzz',   framing_label: '요즘 다들 여기 가더라고요',      fetchCount: 5, takeCount: 1 },
-  { type: 'HERO', framing_type: 'must_see_ending', framing_label: '인기 많은데 곧 끝나요',          fetchCount: 5, takeCount: 1 },
-  { type: 'HERO', framing_type: 'newly_opened',    framing_label: '아직 아는 사람 없어요',          fetchCount: 5, takeCount: 1 },
-  { type: 'HERO', framing_type: 'long_run_hit',    framing_label: '꾸준히 찾는 데는 이유가 있어요', fetchCount: 5, takeCount: 1 },
-  { type: 'HERO', framing_type: 'hidden_gem',      framing_label: '나만 먼저 가볼 수 있는',         fetchCount: 5, takeCount: 1 },
-  { type: 'HERO', framing_type: 'musical',         framing_label: '무대가 달라요',                  fetchCount: 5, takeCount: 1 },
-  { type: 'HERO', framing_type: 'concert',         framing_label: '직접 봐야 아는 무대',            fetchCount: 5, takeCount: 1 },
+  { type: 'HERO', framing_type: 'ending_soon',     framing_label: '오늘 마감인데 아직 안 가셨어요?',     fetchCount: 5, takeCount: 1 },
+  { type: 'HERO', framing_type: 'trending_buzz',   framing_label: '요즘 다들 여기 가더라고요',           fetchCount: 5, takeCount: 1 },
+  { type: 'HERO', framing_type: 'must_see_ending', framing_label: '이 인기에 곧 끝난다니요',             fetchCount: 5, takeCount: 1 },
+  { type: 'HERO', framing_type: 'newly_opened',    framing_label: '제일 먼저 알아버렸어요',              fetchCount: 5, takeCount: 1 },
+  { type: 'HERO', framing_type: 'long_run_hit',    framing_label: '꾸준히 찾는 데는 이유가 있어요',      fetchCount: 5, takeCount: 1 },
+  { type: 'HERO', framing_type: 'hidden_gem',      framing_label: '나만 먼저 가볼 수 있는',              fetchCount: 5, takeCount: 1 },
+  { type: 'HERO', framing_type: 'musical',         framing_label: '이런 뮤지컬이 있었어요?',             fetchCount: 5, takeCount: 1 },
+  { type: 'HERO', framing_type: 'concert',         framing_label: '현장에서만 느낄 수 있어요',           fetchCount: 5, takeCount: 1 },
+  // 전시/팝업 비중 보완
+  { type: 'HERO', framing_type: 'hot_exhibition',  framing_label: '이 전시 안 보면 이야기가 안 돼요',   fetchCount: 5, takeCount: 1 },
+  { type: 'HERO', framing_type: 'hot_popup',       framing_label: '이 팝업 아는 사람이 없어요, 아직은', fetchCount: 5, takeCount: 1 },
 ];
 
 const BUNDLE_POOL: SlotSpec[] = [
-  { type: 'BUNDLE', framing_type: 'weekend_picks', framing_label: '이번 주말 뭐해요?',      fetchCount: 8, takeCount: 6 },
-  { type: 'BUNDLE', framing_type: 'free_picks',    framing_label: '공짜인데 진짜 좋아요',   fetchCount: 8, takeCount: 6 },
-  { type: 'BUNDLE', framing_type: 'budget_picks',  framing_label: '이 가격이 맞나요',       fetchCount: 8, takeCount: 6 },
-  { type: 'BUNDLE', framing_type: 'theater',       framing_label: '배우와 1미터 거리에서',  fetchCount: 8, takeCount: 6 },
-  { type: 'BUNDLE', framing_type: 'classical',     framing_label: '클래식은 어렵다고요?',   fetchCount: 8, takeCount: 6 },
-  { type: 'BUNDLE', framing_type: 'traditional',   framing_label: 'K-클래식이 있다면',      fetchCount: 8, takeCount: 6 },
-  { type: 'BUNDLE', framing_type: 'dance',         framing_label: '몸으로 말하는 무대',     fetchCount: 8, takeCount: 6 },
-  { type: 'BUNDLE', framing_type: 'newly_opened',  framing_label: '방금 열었어요',          fetchCount: 8, takeCount: 6 },
-  { type: 'BUNDLE', framing_type: 'hidden_gem',    framing_label: '아직 줄 안 서도 돼요',   fetchCount: 8, takeCount: 6 },
+  { type: 'BUNDLE', framing_type: 'weekend_picks',     framing_label: '이번 주말 여기 가봐요',          fetchCount: 8, takeCount: 6 },
+  { type: 'BUNDLE', framing_type: 'free_picks',        framing_label: '이게 진짜 무료예요?',            fetchCount: 8, takeCount: 6 },
+  { type: 'BUNDLE', framing_type: 'budget_picks',      framing_label: '이 가격이 실화예요',             fetchCount: 8, takeCount: 6 },
+  { type: 'BUNDLE', framing_type: 'theater',           framing_label: '배우와 1미터 거리에서',          fetchCount: 8, takeCount: 6 },
+  { type: 'BUNDLE', framing_type: 'classical',         framing_label: '클래식은 어렵다고요?',           fetchCount: 8, takeCount: 6 },
+  { type: 'BUNDLE', framing_type: 'traditional',       framing_label: 'K-클래식의 진짜 맛',             fetchCount: 8, takeCount: 6 },
+  { type: 'BUNDLE', framing_type: 'dance',             framing_label: '몸이 하는 말, 무용',             fetchCount: 8, takeCount: 6 },
+  { type: 'BUNDLE', framing_type: 'newly_opened',      framing_label: '이번 주 새로 생겼어요',          fetchCount: 8, takeCount: 6 },
+  { type: 'BUNDLE', framing_type: 'hidden_gem',        framing_label: '줄 안 서도 돼요, 아직은',        fetchCount: 8, takeCount: 6 },
+  // 전시/팝업 비중 보완
+  { type: 'BUNDLE', framing_type: 'exhibition_bundle', framing_label: '전시, 이렇게 좋은 게 있었어요?', fetchCount: 8, takeCount: 6 },
+  { type: 'BUNDLE', framing_type: 'popup_bundle',      framing_label: '지금 이 팝업 놓치면 못 봐요',   fetchCount: 8, takeCount: 6 },
 ];
 
 const RANKING_POOL: SlotSpec[] = [
-  { type: 'RANKING', framing_type: 'top_exhibition',     framing_label: '전시 인기순',   fetchCount: 8, takeCount: 5 },
-  { type: 'RANKING', framing_type: 'top_popup',          framing_label: '팝업 인기순',   fetchCount: 8, takeCount: 5 },
-  { type: 'RANKING', framing_type: 'musical',            framing_label: '뮤지컬 인기순', fetchCount: 8, takeCount: 5 },
-  { type: 'RANKING', framing_type: 'classical',          framing_label: '클래식 인기순', fetchCount: 8, takeCount: 5 },
-  { type: 'RANKING', framing_type: 'theater',            framing_label: '연극 인기순',   fetchCount: 8, takeCount: 5 },
-  { type: 'RANKING', framing_type: 'concert',            framing_label: '콘서트 인기순', fetchCount: 8, takeCount: 5 },
-  { type: 'RANKING', framing_type: 'special_exhibition', framing_label: '특별전 인기순', fetchCount: 8, takeCount: 5 },
+  { type: 'RANKING', framing_type: 'top_exhibition',     framing_label: '지금 가장 핫한 전시',          fetchCount: 8, takeCount: 5 },
+  { type: 'RANKING', framing_type: 'top_popup',          framing_label: '요즘 팝업 뭐 가요?',           fetchCount: 8, takeCount: 5 },
+  { type: 'RANKING', framing_type: 'musical',            framing_label: '이달의 뮤지컬 순위',           fetchCount: 8, takeCount: 5 },
+  { type: 'RANKING', framing_type: 'classical',          framing_label: '클래식 지금 이게 최고예요',    fetchCount: 8, takeCount: 5 },
+  { type: 'RANKING', framing_type: 'theater',            framing_label: '소극장 연극, 지금 뭐가 좋아요?', fetchCount: 8, takeCount: 5 },
+  { type: 'RANKING', framing_type: 'concert',            framing_label: '지금 가장 핫한 콘서트',        fetchCount: 8, takeCount: 5 },
+  { type: 'RANKING', framing_type: 'special_exhibition', framing_label: '한번밖에 없는 특별전',         fetchCount: 8, takeCount: 5 },
 ];
 
 // ─────────────────────────────────────────────────────────────
@@ -152,6 +158,16 @@ function getFramingSQL(framingType: string): FramingSQL {
       return { where: `sub_category IN ('무용(서양/한국무용)', '무용', '대중무용')`, orderBy: 'buzz_score DESC' };
     case 'special_exhibition':
       return { where: `sub_category = '특별전'`, orderBy: 'buzz_score DESC' };
+    case 'hot_exhibition':
+      // HERO 전용: 전시 중 buzz 상위 (전국적으로 화제인 전시)
+      return { where: `main_category = '전시' AND buzz_score > 50`, orderBy: 'buzz_score DESC' };
+    case 'hot_popup':
+      // HERO 전용: 팝업 buzz 상위
+      return { where: `main_category = '팝업' AND buzz_score > 30`, orderBy: 'buzz_score DESC' };
+    case 'exhibition_bundle':
+      return { where: `main_category = '전시'`, orderBy: 'buzz_score DESC' };
+    case 'popup_bundle':
+      return { where: `main_category = '팝업'`, orderBy: 'buzz_score DESC' };
     default:
       return { where: 'true', orderBy: 'buzz_score DESC' };
   }

@@ -6,7 +6,7 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Platform, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
+import { FlatList, Image, Platform, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
 import { Icon, AnimateSkeleton } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
@@ -424,6 +424,17 @@ function HomePageInner() {
         userId: currentUid,
         expiresAt: Date.now() + HOME_CACHE_TTL_MS,
       };
+      // 첫 화면에 보이는 이미지 프리페치 — 사용자가 보기 전에 미리 캐시
+      // 각 섹션 앞 6개만 프리페치 (오버헤드 최소화)
+      requestAnimationFrame(() => {
+        response.sections.forEach((section) => {
+          section.events.slice(0, 6).forEach((event) => {
+            if (event.thumbnail_url) {
+              Image.prefetch(event.thumbnail_url).catch(() => {});
+            }
+          });
+        });
+      });
     } else if (stale === null) {
       // 캐시도 없고 API도 실패한 경우에만 에러 표시
       setSections([]);
@@ -487,6 +498,14 @@ function HomePageInner() {
         const nextPage = parseInt(res.next_cursor ?? String(feedPage + 1));
         setFeedPage(nextPage);
         advanceFeedState(newIds, nextPage).catch(() => {}); // fire-and-forget
+        // 다음 스크롤 전에 이미지 미리 캐시 — 스크롤 시 즉시 표시
+        requestAnimationFrame(() => {
+          res.cards.forEach((card) => {
+            card.events.forEach((e) => {
+              if (e.image_url) Image.prefetch(e.image_url).catch(() => {});
+            });
+          });
+        });
       }
       setFeedHasMore(res.has_more);
     } catch {
