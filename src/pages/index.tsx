@@ -31,6 +31,21 @@ export const Route = createRoute('/', {
   component: HomePage,
 });
 
+// sido(시도) 행정구역명 → DB region 단축명 변환
+// geocoding API의 sido 필드(예: "서울특별시") → canonical_events.region(예: "서울")
+function sidoToRegion(sido: string): string {
+  const map: Record<string, string> = {
+    '서울특별시': '서울', '경기도': '경기', '부산광역시': '부산',
+    '인천광역시': '인천', '대구광역시': '대구', '광주광역시': '광주',
+    '대전광역시': '대전', '울산광역시': '울산', '세종특별자치시': '세종',
+    '강원도': '강원', '강원특별자치도': '강원',
+    '충청북도': '충북', '충청남도': '충남',
+    '전라북도': '전북', '전북특별자치도': '전북', '전라남도': '전남',
+    '경상북도': '경북', '경상남도': '경남', '제주특별자치도': '제주',
+  };
+  return map[sido] ?? sido.replace(/(특별시|광역시|특별자치시|특별자치도|도)$/, '').trim();
+}
+
 // 모듈 레벨 캐시: 컴포넌트가 언마운트돼도 데이터 유지 (탭 전환 복귀 대응)
 interface HomeCache {
   sections: HomeSection[];
@@ -305,6 +320,7 @@ function HomePageInner() {
   const [userId, setUserId] = useState(validCache?.userId ?? '');
   const [location, setLocation] = useState<Location | undefined>(validCache?.location);
   const [currentAddress, setCurrentAddress] = useState('');
+  const [userRegion, setUserRegion] = useState('');  // DB region명 (예: "서울", "경기")
   const [refreshing, setRefreshing] = useState(false);
   const [showAiNotice, setShowAiNotice] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
@@ -392,6 +408,9 @@ function HomePageInner() {
       setLocation(loc);
       reverseGeocode(loc.lat, loc.lng).then((geo) => {
         setCurrentAddress(geo.success && geo.address ? geo.address : '위치 정보');
+        if (geo.success && geo.sido) {
+          setUserRegion(sidoToRegion(geo.sido));
+        }
       }).catch(() => {});
       return loc;
     } catch (error) {
@@ -490,6 +509,7 @@ function HomePageInner() {
         page: feedPage,
         excludeIds: Array.from(feedSeenEventIds.current),
         userId,
+        region: userRegion || undefined,
       });
       if (res.cards.length > 0) {
         setFeedCards((prev) => [...prev, ...res.cards]);
@@ -519,7 +539,7 @@ function HomePageInner() {
       feedLoadingRef.current = false;
       setFeedLoading(false);
     }
-  }, [feedHasMore, feedPage, userId]); // feedLoading 제거 (ref로 대체)
+  }, [feedHasMore, feedPage, userId, userRegion]); // feedLoading 제거 (ref로 대체)
 
   // loadMoreFeed는 deps 변경 시마다 새 참조 생성 (useCallback).
   // initializeUser/handleRefresh는 first-render closure를 캡처하므로

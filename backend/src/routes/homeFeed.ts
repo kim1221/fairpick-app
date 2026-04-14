@@ -182,6 +182,7 @@ async function fetchSlotEventsRaw(
   slot: SlotSpec,
   excludeIds: string[],
   personalizedCategory?: string,
+  nearbyRegion?: string,
 ): Promise<EventRow[]> {
   const params: unknown[] = [excludeIds, slot.fetchCount];
   let whereClause: string;
@@ -191,6 +192,10 @@ async function fetchSlotEventsRaw(
     whereClause = `main_category = $3 AND buzz_score > 20`;
     orderByClause = 'buzz_score DESC';
     params.push(personalizedCategory);
+  } else if (slot.framing_type === 'nearby_region' && nearbyRegion) {
+    whereClause = `region = $3 AND buzz_score > 20`;
+    orderByClause = 'buzz_score DESC';
+    params.push(nearbyRegion);
   } else if (slot.framing_type === 'weekend_picks') {
     const now = new Date();
     const dow = now.getDay();
@@ -249,6 +254,8 @@ router.get('/', async (req, res) => {
     const page = Math.max(0, parseInt(req.query['page'] as string) || 0);
     const excludeIdsRaw = (req.query['exclude_ids'] as string) || '';
     const userId = (req.query['user_id'] as string) || '';
+    // region: 프론트에서 sido를 정규화해서 넘김 (예: "서울", "경기", "부산")
+    const region = ((req.query['region'] as string) || '').trim();
 
     const excludeIds = excludeIdsRaw
       .split(',')
@@ -258,19 +265,38 @@ router.get('/', async (req, res) => {
 
     // 오늘 날짜 기반 일일 셔플
     const today = new Date().toISOString().slice(0, 10);
-    const heroPool  = seededShuffle(HERO_POOL,    today + '-hero');
-    const bundlePool = seededShuffle(BUNDLE_POOL, today + '-bundle');
+    const heroPool    = seededShuffle(HERO_POOL,    today + '-hero');
+    const bundlePool  = seededShuffle(BUNDLE_POOL,  today + '-bundle');
     const rankingPool = seededShuffle(RANKING_POOL, today + '-ranking');
 
-    // page마다 고유 슬롯 4개 선택
-    const heroSlot    = heroPool[page % heroPool.length]!;
-    const bundleSlot1 = bundlePool[(page * 2) % bundlePool.length]!;
-    const rankingSlot = rankingPool[page % rankingPool.length]!;
-    const bundleSlot2 = bundlePool[(page * 2 + 1) % bundlePool.length]!;
-    const slots: SlotSpec[] = [heroSlot, bundleSlot1, rankingSlot, bundleSlot2];
+    // ── 슬롯 구성 (4개) ──────────────────────────────────────────
+    // 슬롯 0 (HERO)    : 일반 buzz 풀 — 항상 알고리즘
+    // 슬롯 1 (BUNDLE)  : 위치 기반 (region 있으면) / 없으면 일반 풀
+    // 슬롯 2 (RANKING) : 일반 랭킹 풀 — 항상 알고리즘
+    // 슬롯 3 (BUNDLE)  : 개인화 top-2 카테고리 (페이지 홀짝 교대) / 없으면 일반 풀
+    // → 50% 알고리즘 / 25% 위치 / 25% 개인화 균형
 
-    // 개인화: userId 있으면 마지막 BUNDLE을 유저 상위 카테고리로 교체
+    const heroSlot    = heroPool[page % heroPool.length]!;
+    const rankingSlot = rankingPool[page % rankingPool.length]!;
+
+    // 슬롯 1: 위치 기반 OR 일반 풀
+    const nearbySlot: SlotSpec = region
+      ? {
+          type: 'BUNDLE',
+          framing_type: 'nearby_region',
+          framing_label: `${region}에서 지금 뭐해요?`,
+          fetchCount: 8,
+          takeCount: 6,
+        }
+      : bundlePool[(page * 2) % bundlePool.length]!;
+
+    // 슬롯 3: 개인화 기본값 (일반 풀 → 개인화 쿼리 후 교체)
     let personalizedCategory: string | undefined;
+    let personalSlot: SlotSpec = bundlePool[(page * 2 + 1) % bundlePool.length]!;
+
+    const slots: SlotSpec[] = [heroSlot, nearbySlot, rankingSlot, personalSlot];
+
+    // 개인화: userId 있으면 상위 카테고리 2개 조회 → 페이지 홀짝으로 교대
     if (userId) {
       try {
         const r = await pool.query<{ main_category: string }>(
@@ -280,29 +306,30 @@ router.get('/', async (req, res) => {
            WHERE ue.user_id = $1
              AND ue.action_type IN ('click', 'save', 'dwell', 'sheet_open')
              AND ue.created_at > NOW() - INTERVAL '30 days'
-           GROUP BY ce.main_category ORDER BY cnt DESC LIMIT 1`,
+           GROUP BY ce.main_category ORDER BY cnt DESC LIMIT 2`,
           [userId],
         );
-        const topCat = r.rows[0]?.main_category;
-        if (topCat) {
-          personalizedCategory = topCat;
-          const lastBundleIdx = slots.map((s) => s.type).lastIndexOf('BUNDLE');
-          if (lastBundleIdx >= 0) {
-            slots[lastBundleIdx] = {
-              ...slots[lastBundleIdx]!,
-              framing_type: 'personalized',
-              framing_label: `내 취향 ${topCat}`,
-            };
-          }
+        const topCats = r.rows.map((row) => row.main_category);
+        if (topCats.length > 0) {
+          // 페이지 홀짝으로 top-1 / top-2 교대 → 매 페이지 다른 카테고리 노출
+          personalizedCategory = topCats[page % topCats.length];
+          slots[3] = {
+            type: 'BUNDLE',
+            framing_type: 'personalized',
+            framing_label: `내 취향 ${personalizedCategory}`,
+            fetchCount: 8,
+            takeCount: 6,
+          };
         }
       } catch {
-        // 개인화 실패 무시
+        // 개인화 실패 → 일반 풀 슬롯 유지
       }
     }
 
     // 슬롯별 이벤트 조회 — 4쿼리 병렬 실행 후 클라이언트 dedup
+    const nearbyRegion = region || undefined;
     const rawResults = await Promise.all(
-      slots.map((slot) => fetchSlotEventsRaw(slot, excludeIds, personalizedCategory)),
+      slots.map((slot) => fetchSlotEventsRaw(slot, excludeIds, personalizedCategory, nearbyRegion)),
     );
 
     const usedIds = new Set<string>(excludeIds);

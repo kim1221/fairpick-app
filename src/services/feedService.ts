@@ -70,15 +70,15 @@ export function feedEventToScoredEvent(e: FeedEvent): ScoredEvent {
 }
 
 export async function fetchFeed(params: {
-  cursor?: string;    // 기존 호환 유지 (page number로 재해석)
-  page?: number;      // 신규 (cursor보다 우선)
-  limit?: number;     // 미사용 (슬롯 고정), 호환성 유지
+  cursor?: string;
+  page?: number;
+  limit?: number;
   excludeIds?: string[];
   userId?: string;
+  region?: string;  // DB region 이름 (예: "서울", "경기", "부산")
 }): Promise<FeedResponse> {
-  const { cursor, page, excludeIds = [], userId } = params;
+  const { cursor, page, excludeIds = [], userId, region } = params;
 
-  // page가 명시적으로 주어지면 우선 사용, 아니면 cursor를 page number로 해석
   const pageNum = page !== undefined ? page : (parseInt(cursor ?? '0') || 0);
 
   const query = new URLSearchParams();
@@ -88,6 +88,9 @@ export async function fetchFeed(params: {
   }
   if (userId) {
     query.set('user_id', userId);
+  }
+  if (region) {
+    query.set('region', region);
   }
 
   const controller = new AbortController();
