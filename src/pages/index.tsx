@@ -79,7 +79,7 @@ type FeedItem =
   | { type: 'skeleton'; skeletonType: 'today_pick' | 'horizontal'; id: string }
   | { type: 'empty' }
   | { type: 'section'; section: ProcessedSection }
-  | { type: 'ad' }
+  | { type: 'ad'; id: string }
   | { type: 'magazine'; card: FeedCard }
   | { type: 'feed_loading' };
 
@@ -648,12 +648,14 @@ function HomePageInner() {
     // FlatList가 스크롤 위치를 잃는 점프 현상이 발생함 → 섹션 뒤에 순서대로 붙임
     for (let i = 0; i < processedSections.length; i++) {
       items.push({ type: 'section', section: processedSections[i]! });
-      if (i === 1) items.push({ type: 'ad' });
+      if (i === 1) items.push({ type: 'ad', id: 'section-1' });
     }
 
     // 피드 카드는 섹션 전체 이후에 추가 (스크롤 점프 없음)
-    for (const card of feedCards) {
-      items.push({ type: 'magazine', card });
+    // 3개 컴포넌트마다 광고 1개 삽입
+    for (let i = 0; i < feedCards.length; i++) {
+      items.push({ type: 'magazine', card: feedCards[i]! });
+      if ((i + 1) % 3 === 0) items.push({ type: 'ad', id: `feed-${i}` });
     }
 
     if (feedLoading) items.push({ type: 'feed_loading' });
@@ -814,6 +816,7 @@ function HomePageInner() {
           if (item.type === 'skeleton') return item.id;
           if (item.type === 'magazine') return `magazine-${item.card.id}`;
           if (item.type === 'feed_loading') return 'feed_loading';
+          if (item.type === 'ad') return `ad-${item.id}`;
           return item.type;
         }}
         ListHeaderComponent={listHeader}
