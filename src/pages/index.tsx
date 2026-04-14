@@ -81,7 +81,8 @@ type FeedItem =
   | { type: 'section'; section: ProcessedSection }
   | { type: 'ad'; id: string }
   | { type: 'magazine'; card: FeedCard }
-  | { type: 'feed_loading' };
+  | { type: 'feed_loading' }
+  | { type: 'feed_end'; eventCount: number };
 
 // ─────────────────────────────────────────────────────────────
 // 섹션별 핵심 신호 계산 (컴포넌트 외부 — 재생성 없음)
@@ -663,10 +664,15 @@ function HomePageInner() {
       if ((i + 1) % 3 === 0) items.push({ type: 'ad', id: `feed-${i}` });
     }
 
-    if (feedLoading) items.push({ type: 'feed_loading' });
+    if (feedLoading) {
+      items.push({ type: 'feed_loading' });
+    } else if (!feedHasMore && feedCards.length > 0) {
+      const eventCount = feedCards.reduce((sum, card) => sum + card.events.length, 0);
+      items.push({ type: 'feed_end', eventCount });
+    }
 
     return items;
-  }, [sections, processedSections, feedCards, feedLoading]);
+  }, [sections, processedSections, feedCards, feedLoading, feedHasMore]);
 
   const renderFeedItem = useCallback(({ item }: { item: FeedItem }) => {
     if (item.type === 'skeleton') {
@@ -772,8 +778,45 @@ function HomePageInner() {
         </View>
       );
     }
+    if (item.type === 'feed_end') {
+      return (
+        <View style={{ paddingHorizontal: 20, paddingVertical: 32, alignItems: 'center' }}>
+          {/* 구분선 + 타이틀 */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', marginBottom: 20 }}>
+            <View style={{ flex: 1, height: 1, backgroundColor: adaptive.grey200 }} />
+            <Text style={{ marginHorizontal: 12, color: adaptive.grey600, fontSize: 13, fontWeight: '600' }}>
+              오늘 이벤트는 다 봤어요
+            </Text>
+            <View style={{ flex: 1, height: 1, backgroundColor: adaptive.grey200 }} />
+          </View>
+          {/* 이벤트 수 */}
+          <Text style={{ fontSize: 15, fontWeight: '700', color: adaptive.grey900, marginBottom: 6 }}>
+            {item.eventCount.toLocaleString()}개의 이벤트를 둘러봤어요
+          </Text>
+          {/* 업데이트 안내 */}
+          <Text style={{ fontSize: 13, color: adaptive.grey500, marginBottom: 24 }}>
+            매일 새 이벤트가 업데이트돼요
+          </Text>
+          {/* 버튼 2개 */}
+          <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
+            <Pressable
+              onPress={scrollToTop}
+              style={{ flex: 1, paddingVertical: 11, borderRadius: 10, borderWidth: 1, borderColor: adaptive.grey300, alignItems: 'center' }}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '600', color: adaptive.grey700 }}>↑ 맨 위로</Text>
+            </Pressable>
+            <Pressable
+              onPress={handleRefresh}
+              style={{ flex: 1, paddingVertical: 11, borderRadius: 10, borderWidth: 1, borderColor: adaptive.grey300, alignItems: 'center' }}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '600', color: adaptive.grey700 }}>새로 고침</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
     return renderSection(item.section);
-  }, [styles, adaptive, isOffline, renderSection, handleEventPress]);
+  }, [styles, adaptive, isOffline, renderSection, handleEventPress, scrollToTop, handleRefresh]);
 
   const listHeader = useMemo(() => (
     <>
@@ -822,6 +865,7 @@ function HomePageInner() {
           if (item.type === 'skeleton') return item.id;
           if (item.type === 'magazine') return `magazine-${item.card.id}`;
           if (item.type === 'feed_loading') return 'feed_loading';
+          if (item.type === 'feed_end') return 'feed_end';
           if (item.type === 'ad') return `ad-${item.id}`;
           return item.type;
         }}
