@@ -588,6 +588,7 @@ function HomePageInner() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.horizontalList}
           removeClippedSubviews={true}
+          nestedScrollEnabled={true}
         >
           {events.map((event, idx) => (
             <SectionCard
