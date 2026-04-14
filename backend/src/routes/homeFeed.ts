@@ -192,10 +192,6 @@ async function fetchSlotEventsRaw(
     whereClause = `main_category = $3 AND buzz_score > 20`;
     orderByClause = 'buzz_score DESC';
     params.push(personalizedCategory);
-  } else if (slot.framing_type === 'nearby_region' && nearbyRegion) {
-    whereClause = `region = $3 AND buzz_score > 20`;
-    orderByClause = 'buzz_score DESC';
-    params.push(nearbyRegion);
   } else if (slot.framing_type === 'weekend_picks') {
     const now = new Date();
     const dow = now.getDay();
@@ -220,6 +216,14 @@ async function fetchSlotEventsRaw(
     orderByClause = sql.orderBy;
   }
 
+  // 위치 소프트 부스트: nearbyRegion 있으면 해당 지역 이벤트를 앞으로
+  // 지역 이벤트가 부족하면 자연스럽게 전국 이벤트로 채워짐 (공백 없음)
+  let locationOrderExpr = '1'; // 부스트 없음 (상수 → 정렬에 영향 없음)
+  if (nearbyRegion) {
+    params.push(nearbyRegion);
+    locationOrderExpr = `CASE WHEN region = $${params.length} THEN 0 ELSE 1 END`;
+  }
+
   // HERO 카드는 이미지가 핵심 — 이미지 없는 이벤트 제외
   const heroImageCond = slot.type === 'HERO'
     ? `AND image_url IS NOT NULL AND image_url != ''`
@@ -235,7 +239,7 @@ async function fetchSlotEventsRaw(
       AND NOT (id = ANY($1::uuid[]))
       ${heroImageCond}
       AND ${whereClause}
-    ORDER BY ${orderByClause}
+    ORDER BY ${locationOrderExpr}, ${orderByClause}
     LIMIT $2
   `;
 
@@ -270,31 +274,21 @@ router.get('/', async (req, res) => {
     const rankingPool = seededShuffle(RANKING_POOL, today + '-ranking');
 
     // ── 슬롯 구성 (4개) ──────────────────────────────────────────
-    // 슬롯 0 (HERO)    : 일반 buzz 풀 — 항상 알고리즘
-    // 슬롯 1 (BUNDLE)  : 위치 기반 (region 있으면) / 없으면 일반 풀
-    // 슬롯 2 (RANKING) : 일반 랭킹 풀 — 항상 알고리즘
-    // 슬롯 3 (BUNDLE)  : 개인화 top-2 카테고리 (페이지 홀짝 교대) / 없으면 일반 풀
-    // → 50% 알고리즘 / 25% 위치 / 25% 개인화 균형
+    // 슬롯 0 (HERO)    : HERO 풀 — 위치 소프트 부스트
+    // 슬롯 1 (BUNDLE)  : BUNDLE 풀 — 위치 소프트 부스트
+    // 슬롯 2 (RANKING) : RANKING 풀 — 위치 소프트 부스트
+    // 슬롯 3 (BUNDLE)  : 개인화 top-2 카테고리 (페이지 홀짝 교대) / 없으면 BUNDLE 풀
+    // → 모든 슬롯에 위치 소프트 부스트 적용 (지역 이벤트 우선, 부족하면 전국 보충)
 
     const heroSlot    = heroPool[page % heroPool.length]!;
+    const bundleSlot1 = bundlePool[(page * 2) % bundlePool.length]!;
     const rankingSlot = rankingPool[page % rankingPool.length]!;
-
-    // 슬롯 1: 위치 기반 OR 일반 풀
-    const nearbySlot: SlotSpec = region
-      ? {
-          type: 'BUNDLE',
-          framing_type: 'nearby_region',
-          framing_label: `${region}에서 지금 뭐해요?`,
-          fetchCount: 8,
-          takeCount: 6,
-        }
-      : bundlePool[(page * 2) % bundlePool.length]!;
 
     // 슬롯 3: 개인화 기본값 (일반 풀 → 개인화 쿼리 후 교체)
     let personalizedCategory: string | undefined;
     let personalSlot: SlotSpec = bundlePool[(page * 2 + 1) % bundlePool.length]!;
 
-    const slots: SlotSpec[] = [heroSlot, nearbySlot, rankingSlot, personalSlot];
+    const slots: SlotSpec[] = [heroSlot, bundleSlot1, rankingSlot, personalSlot];
 
     // 개인화: userId 있으면 상위 카테고리 2개 조회 → 페이지 홀짝으로 교대
     if (userId) {
@@ -327,6 +321,7 @@ router.get('/', async (req, res) => {
     }
 
     // 슬롯별 이벤트 조회 — 4쿼리 병렬 실행 후 클라이언트 dedup
+    // nearbyRegion: 모든 슬롯에 위치 소프트 부스트 전달 (지역 이벤트 우선 정렬)
     const nearbyRegion = region || undefined;
     const rawResults = await Promise.all(
       slots.map((slot) => fetchSlotEventsRaw(slot, excludeIds, personalizedCategory, nearbyRegion)),
