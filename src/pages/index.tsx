@@ -344,7 +344,7 @@ function HomePageInner() {
     }
 
     if (_homeCache && Date.now() < _homeCache.expiresAt) {
-      loadMoreFeed(); // 캐시 히트해도 첫 피드 배치 로드
+      void loadMoreFeedRef.current(); // 캐시 히트해도 첫 피드 배치 로드
       return;
     }
 
@@ -360,7 +360,7 @@ function HomePageInner() {
       setUserId(uid);
 
       await loadSections(loc, uid);
-      loadMoreFeed(); // 섹션 로드 완료 후 첫 매거진 배치 백그라운드 프리페치
+      void loadMoreFeedRef.current(); // 섹션 로드 완료 후 최신 loadMoreFeed로 피드 로드
 
       // GPS가 2초 내에 못 왔지만 이후 완료된 경우 전체 섹션 재로드
       if (!loc) {
@@ -373,6 +373,7 @@ function HomePageInner() {
     } catch (error) {
       console.error('[Home] init error:', error);
       await loadSections();
+      void loadMoreFeedRef.current(); // 오류 복구 후에도 피드 로드 시도
     }
   };
 
@@ -473,6 +474,7 @@ function HomePageInner() {
       feedSeenEventIds.current.clear();
       const loc = await requestLocation();
       await loadSections(loc, userId);
+      void loadMoreFeedRef.current(); // 새로고침 후 피드도 재로드
     } finally {
       setRefreshing(false);
     }
@@ -518,6 +520,12 @@ function HomePageInner() {
       setFeedLoading(false);
     }
   }, [feedHasMore, feedPage, userId]); // feedLoading 제거 (ref로 대체)
+
+  // loadMoreFeed는 deps 변경 시마다 새 참조 생성 (useCallback).
+  // initializeUser/handleRefresh는 first-render closure를 캡처하므로
+  // 항상 최신 버전을 호출하도록 ref에 동기화.
+  const loadMoreFeedRef = useRef(loadMoreFeed);
+  useEffect(() => { loadMoreFeedRef.current = loadMoreFeed; }, [loadMoreFeed]);
 
   // ─────────────────────────────────────────────────────────────
   // 중복 제거 + 신호 계산을 useMemo로 처리 — 렌더 중 연산 제거
