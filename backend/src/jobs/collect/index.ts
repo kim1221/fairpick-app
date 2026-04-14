@@ -16,6 +16,11 @@ import crypto from 'crypto';
  * 각 단계는 독립적으로 실행되며, 실패해도 다음 단계 계속 진행
  */
 
+// 컬렉션 단계별 최대 실행 시간 (60분)
+// 개별 HTTP 요청은 10초 타임아웃이 있지만, 수천 개 항목을 순차 처리 시 루프 전체가 수 시간 걸릴 수 있음
+// Promise.race로 타임아웃 시 백그라운드에서 계속 실행되지만 파이프라인은 다음 단계로 진행
+const COLLECTION_STEP_TIMEOUT_MS = 60 * 60 * 1000; // 60분
+
 interface CollectionStep {
   name: string;
   modulePath: string;
@@ -56,6 +61,7 @@ export async function runCollectionJob(options?: { schedulerJobName?: string }):
   // 각 단계 실행
   for (const step of COLLECTION_STEPS) {
     const stepStartTime = Date.now();
+    let stepTimeoutId: ReturnType<typeof setTimeout> | undefined;
     console.log(`[CollectJob] Running step: ${step.name}...`);
 
     try {
@@ -68,12 +74,19 @@ export async function runCollectionJob(options?: { schedulerJobName?: string }):
         continue;
       }
 
-      // 함수 실행
-      await func();
+      // 함수 실행 (60분 타임아웃 — 타임아웃 시 백그라운드에서 계속 실행되지만 다음 단계로 진행)
+      const stepTimeoutPromise = new Promise<never>((_, reject) => {
+        stepTimeoutId = setTimeout(() => {
+          reject(new Error(`Step timeout: ${step.name} exceeded ${COLLECTION_STEP_TIMEOUT_MS / 60000}min limit`));
+        }, COLLECTION_STEP_TIMEOUT_MS);
+      });
+      await Promise.race([func(), stepTimeoutPromise]);
+      clearTimeout(stepTimeoutId);
       const elapsed = ((Date.now() - stepStartTime) / 1000).toFixed(1);
       successCount++;
       console.log(`[CollectJob] ✓ ${step.name} - Success (${elapsed}s)`);
     } catch (error: any) {
+      clearTimeout(stepTimeoutId);
       const elapsed = ((Date.now() - stepStartTime) / 1000).toFixed(1);
 
       if (error?.code === 'MODULE_NOT_FOUND') {

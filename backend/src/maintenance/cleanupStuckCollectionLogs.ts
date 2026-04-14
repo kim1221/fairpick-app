@@ -1,7 +1,10 @@
 import { pool } from '../db';
 import { runningJobs } from '../lib/jobState';
 
-const DEFAULT_STUCK_MINUTES = 720; // geo-refresh-03은 최대 12h 실행될 수 있음
+// 파이프라인 단계별 최대 실행 시간이 60분으로 제한되므로
+// 전체 5단계(collect + geo×2 + dedupe + AI enrichment) = 최대 300분(5h)이면 충분
+// 이전: 720분 (12h) → 현재: 300분 (5h)
+const DEFAULT_STUCK_MINUTES = 300;
 
 function getStuckMinutes(): number {
   const raw = Number(process.env.FAILSAFE_STUCK_MINUTES ?? DEFAULT_STUCK_MINUTES);

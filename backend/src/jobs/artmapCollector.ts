@@ -17,6 +17,7 @@ import crypto from 'crypto';
 import { pool } from '../db';
 import { uploadEventImage } from '../lib/imageUpload';
 import { extractEventInfoEnhanced } from '../lib/aiExtractor';
+import { generateDisplayTitle } from '../utils/titleNormalizer';
 
 // ─── 설정 ──────────────────────────────────────────────────────────────────
 
@@ -135,18 +136,22 @@ async function isDuplicate(
        OR (
          start_at::date = $4::date
          AND end_at::date = $5::date
-         AND $3 != '' AND venue != ''
          AND (
-           venue ILIKE $3
-           OR venue ILIKE '%' || $3 || '%'
-           OR $3 ILIKE '%' || venue || '%'
-           OR (
-             similarity(title, $2) > 0.6
-             AND (
-               venue ILIKE '%' || split_part($3, ' ', 1) || '%'
-               OR $3 ILIKE '%' || split_part(venue, ' ', 1) || '%'
+           -- 둘 다 venue 있으면 venue 겹침 + 선택적 title 유사도
+           ($3 != '' AND venue != '' AND (
+             venue ILIKE $3
+             OR venue ILIKE '%' || $3 || '%'
+             OR $3 ILIKE '%' || venue || '%'
+             OR (
+               similarity(title, $2) > 0.6
+               AND (
+                 venue ILIKE '%' || split_part($3, ' ', 1) || '%'
+                 OR $3 ILIKE '%' || split_part(venue, ' ', 1) || '%'
+               )
              )
-           )
+           ))
+           -- 한쪽 venue가 비면 title 유사도만으로 판단 (《》 표기 차이 등)
+           OR (($3 = '' OR venue = '') AND similarity(title, $2) > 0.85)
          )
        )
      )
@@ -400,9 +405,12 @@ interface InsertParams {
 
 async function insertEventDirect(p: InsertParams): Promise<string | null> {
   const id = crypto.randomUUID();
+  // 《》〈〉 등 장식 브래킷을 제거한 정규화 제목으로 content_key 생성
+  // → "지구울림 - 헤르츠앤도우" 와 "《지구울림 - 헤르츠앤도우》" 가 동일 key를 가짐
+  const normalizedTitle = generateDisplayTitle(p.title);
   const contentKey = crypto
     .createHash('sha256')
-    .update(`${p.title}-${p.startAt}-${p.endAt}-${p.venue}`)
+    .update(`${normalizedTitle}-${p.startAt}-${p.endAt}-${p.venue}`)
     .digest('hex')
     .substring(0, 32);
 
