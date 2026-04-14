@@ -575,26 +575,18 @@ function HomePageInner() {
     }
 
     const items: FeedItem[] = [];
-    let feedIdx = 0;
 
+    // 섹션 고정 배치
+    // 섹션 사이에 피드 카드를 끼워넣으면 피드 로딩 시 기존 아이템 인덱스가 밀려
+    // FlatList가 스크롤 위치를 잃는 점프 현상이 발생함 → 섹션 뒤에 순서대로 붙임
     for (let i = 0; i < processedSections.length; i++) {
       items.push({ type: 'section', section: processedSections[i]! });
-
-      // 광고는 섹션 두 번째 바로 뒤
       if (i === 1) items.push({ type: 'ad' });
-
-      // 섹션 뒤에 피드 카드 삽입:
-      // 첫 번째 섹션(today_pick) 뒤: 1개 (HERO — 시각적 훅)
-      // 나머지: 2개씩
-      const insertCount = i === 0 ? 1 : 2;
-      for (let j = 0; j < insertCount && feedIdx < feedCards.length; j++) {
-        items.push({ type: 'magazine', card: feedCards[feedIdx++]! });
-      }
     }
 
-    // 섹션 다 소진 후 남은 피드 카드 (무한 스크롤 계속)
-    while (feedIdx < feedCards.length) {
-      items.push({ type: 'magazine', card: feedCards[feedIdx++]! });
+    // 피드 카드는 섹션 전체 이후에 추가 (스크롤 점프 없음)
+    for (const card of feedCards) {
+      items.push({ type: 'magazine', card });
     }
 
     if (feedLoading) items.push({ type: 'feed_loading' });

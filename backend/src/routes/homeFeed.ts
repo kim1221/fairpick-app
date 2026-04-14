@@ -118,7 +118,8 @@ function getFramingSQL(framingType: string): FramingSQL {
     case 'trending_buzz':
       return { where: `buzz_score > 30`, orderBy: 'buzz_score DESC' };
     case 'newly_opened':
-      return { where: `start_at >= NOW() - INTERVAL '21 days'`, orderBy: 'start_at DESC' };
+      // start_at <= NOW(): 이미 시작한 이벤트만 ("방금 열었어요"는 아직 안 열린 건 해당 없음)
+      return { where: `start_at BETWEEN NOW() - INTERVAL '21 days' AND NOW()`, orderBy: 'start_at DESC' };
     case 'free_picks':
       return { where: `is_free = true`, orderBy: 'buzz_score DESC' };
     case 'budget_picks':
@@ -126,7 +127,8 @@ function getFramingSQL(framingType: string): FramingSQL {
     case 'weekend_picks':
       return { where: '', orderBy: 'buzz_score DESC', isWeekend: true };
     case 'hidden_gem':
-      return { where: `start_at >= NOW() - INTERVAL '14 days' AND buzz_score BETWEEN 5 AND 25`, orderBy: 'start_at DESC' };
+      // 현재 진행 중이거나 30일 내 시작 예정, 아직 덜 알려진 이벤트 ("아직 줄 안 서도 돼요")
+      return { where: `start_at <= NOW() + INTERVAL '30 days' AND buzz_score BETWEEN 5 AND 30`, orderBy: 'start_at ASC' };
     case 'must_see_ending':
       return { where: `end_at BETWEEN NOW() AND NOW() + INTERVAL '7 days' AND buzz_score > 40`, orderBy: 'end_at ASC' };
     case 'long_run_hit':
@@ -155,16 +157,16 @@ function getFramingSQL(framingType: string): FramingSQL {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 슬롯 이벤트 조회
+// 슬롯 이벤트 조회 (병렬 실행용)
+// excludeIds: string[] 형태로 받고, fetchCount 개 반환 (takeCount 제한은 호출 측에서)
 // ─────────────────────────────────────────────────────────────
 
-async function fetchSlotEvents(
+async function fetchSlotEventsRaw(
   slot: SlotSpec,
-  usedIds: Set<string>,
+  excludeIds: string[],
   personalizedCategory?: string,
 ): Promise<EventRow[]> {
-  const excludeArr = Array.from(usedIds);
-  const params: unknown[] = [excludeArr, slot.fetchCount];
+  const params: unknown[] = [excludeIds, slot.fetchCount];
   let whereClause: string;
   let orderByClause: string;
 
@@ -187,11 +189,10 @@ async function fetchSlotEvents(
     params.push(sun.toISOString(), sat.toISOString());
   } else {
     const sql = getFramingSQL(slot.framing_type);
-    whereClause = sql.where ? `${sql.where} AND buzz_score > 20` : `buzz_score > 20`;
-    // hidden_gem은 buzz_score 상한이 있으므로 > 20 조건 중복 방지
-    if (slot.framing_type === 'hidden_gem') {
-      whereClause = `start_at >= NOW() - INTERVAL '14 days' AND buzz_score BETWEEN 5 AND 25`;
-    }
+    // hidden_gem은 getFramingSQL에 이미 buzz 범위 조건 있으므로 > 20 추가 불필요
+    whereClause = slot.framing_type === 'hidden_gem'
+      ? sql.where
+      : (sql.where ? `${sql.where} AND buzz_score > 20` : `buzz_score > 20`);
     orderByClause = sql.orderBy;
   }
 
@@ -209,7 +210,7 @@ async function fetchSlotEvents(
   `;
 
   const result = await pool.query<EventRow>(query, params);
-  return result.rows.slice(0, slot.takeCount);
+  return result.rows; // fetchCount 개 반환 (takeCount 제한은 호출 측)
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -274,16 +275,28 @@ router.get('/', async (req, res) => {
       }
     }
 
-    // 슬롯별 이벤트 조회 (순차 dedup)
+    // 슬롯별 이벤트 조회 — 4쿼리 병렬 실행 후 클라이언트 dedup
+    const rawResults = await Promise.all(
+      slots.map((slot) => fetchSlotEventsRaw(slot, excludeIds, personalizedCategory)),
+    );
+
     const usedIds = new Set<string>(excludeIds);
     const cards: object[] = [];
 
     for (let i = 0; i < slots.length; i++) {
       const slot = slots[i]!;
-      const events = await fetchSlotEvents(slot, usedIds, personalizedCategory);
-      if (events.length === 0) continue;
+      const rawEvents = rawResults[i]!;
 
-      for (const e of events) usedIds.add(e.id);
+      // 슬롯 간 중복 제거 (클라이언트) + takeCount 제한
+      const events: EventRow[] = [];
+      for (const e of rawEvents) {
+        if (!usedIds.has(e.id) && events.length < slot.takeCount) {
+          usedIds.add(e.id);
+          events.push(e);
+        }
+      }
+
+      if (events.length === 0) continue;
 
       cards.push({
         id: `slot-${page}-${i}-${slot.framing_type}`,
