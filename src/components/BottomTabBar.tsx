@@ -6,6 +6,7 @@ import { useAdaptive } from '@toss/tds-react-native/private';
 
 interface BottomTabBarProps {
   currentTab: 'home' | 'explore' | 'mypage';
+  onHomeTabPress?: () => void; // 홈 탭 진입 시 최상단 스크롤 (다른 탭에서 복귀 포함)
 }
 
 const TAB_ICONS = {
@@ -50,7 +51,7 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   },
 });
 
-export const BottomTabBar: React.FC<BottomTabBarProps> = ({ currentTab }) => {
+export const BottomTabBar: React.FC<BottomTabBarProps> = ({ currentTab, onHomeTabPress }) => {
   const navigation = useNavigation();
   const adaptive = useAdaptive();
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
@@ -62,7 +63,9 @@ export const BottomTabBar: React.FC<BottomTabBarProps> = ({ currentTab }) => {
   ];
 
   const handleTabPress = (tab: typeof tabs[number]) => {
-    if (tab.key === currentTab) return; // 현재 탭 재클릭 → 무시
+    // 홈 탭: 어디서 진입하든 최상단으로 (다른 탭 복귀 + 현재 탭 재클릭 모두)
+    if (tab.key === 'home') onHomeTabPress?.();
+    if (tab.key === currentTab) return;
     navigation.navigate(tab.route);
   };
 

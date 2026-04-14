@@ -325,6 +325,7 @@ function HomePageInner() {
   const [showAiNotice, setShowAiNotice] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const excludedIds = useRef<Set<string>>(new Set());
+  const flatListRef = useRef<FlatList>(null);
 
   // 매거진 피드 상태
   const [feedCards, setFeedCards] = useState<FeedCard[]>([]);
@@ -546,6 +547,10 @@ function HomePageInner() {
   // 항상 최신 버전을 호출하도록 ref에 동기화.
   const loadMoreFeedRef = useRef(loadMoreFeed);
   useEffect(() => { loadMoreFeedRef.current = loadMoreFeed; }, [loadMoreFeed]);
+
+  const scrollToTop = useCallback(() => {
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, []);
 
   // ─────────────────────────────────────────────────────────────
   // 중복 제거 + 신호 계산을 useMemo로 처리 — 렌더 중 연산 제거
@@ -808,6 +813,7 @@ function HomePageInner() {
       )}
 
       <FlatList
+        ref={flatListRef}
         style={styles.scrollView}
         data={feedItems}
         renderItem={renderFeedItem}
@@ -823,13 +829,18 @@ function HomePageInner() {
         ListFooterComponent={<View style={{ height: 100 }} />}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={Platform.OS !== 'android'}
+        // Android 성능 최적화: 기본 windowSize=21(화면 20개 분량)이 너무 커서
+        // 스크롤 누적 시 JS 스레드 과부하 → 5로 줄여 메모리/렌더 부담 감소
+        windowSize={5}
+        maxToRenderPerBatch={3}
+        initialNumToRender={6}
         onScrollBeginDrag={handleAiNoticeConfirm}
         onEndReached={loadMoreFeed}
         onEndReachedThreshold={0.5}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       />
 
-      <BottomTabBar currentTab="home" />
+      <BottomTabBar currentTab="home" onHomeTabPress={scrollToTop} />
     </View>
   );
 }
