@@ -131,8 +131,9 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     // 4. 사용자 레코드 가져오기 또는 생성
-    // userId가 UUID 형식이면 익명, 아니면 Toss User Key로 간주
-    const isAnonymous = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+    // 순수 숫자(toss_user_key)가 아니면 모두 익명으로 처리
+    // UUID, Toss hash 등 문자열 형식 모두 anonymous_id로 저장
+    const isAnonymous = !/^\d+$/.test(userId);
     const internalUserId = await getOrCreateUser(userId, isAnonymous);
 
     // 5. 행동 로그 기록

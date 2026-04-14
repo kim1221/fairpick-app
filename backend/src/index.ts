@@ -465,14 +465,14 @@ app.get('/api/recommendations/v2/today', async (req, res) => {
       ? { lat: parseFloat(lat as string), lng: parseFloat(lng as string) }
       : undefined;
     
-    // 사용자 취향 조회 (로그인 시) — id/anonymous_id 둘 다 허용
+    // 사용자 취향 조회 (로그인 시) — anonymous_id(TEXT) 또는 toss_user_key로 조회
     let userPrefs: recommender.UserPreference | undefined;
     if (userId) {
       const prefsResult = await pool.query(
         `SELECT up.category_scores, up.preferred_tags
          FROM user_preferences up
          JOIN users u ON up.user_id = u.id
-         WHERE u.id = $1::uuid OR u.anonymous_id = $1::uuid`,
+         WHERE u.anonymous_id = $1 OR u.toss_user_key::text = $1`,
         [userId]
       );
       if (prefsResult.rows.length > 0) {
@@ -595,12 +595,12 @@ app.get('/api/recommendations/v2/personalized', async (req, res) => {
       });
     }
     
-    // 사용자 취향 조회 — id/anonymous_id 둘 다 허용
+    // 사용자 취향 조회 — anonymous_id(TEXT) 또는 toss_user_key로 조회
     const prefsResult = await pool.query(
       `SELECT up.category_scores, up.preferred_tags
        FROM user_preferences up
        JOIN users u ON up.user_id = u.id
-       WHERE u.id = $1::uuid OR u.anonymous_id = $1::uuid`,
+       WHERE u.anonymous_id = $1 OR u.toss_user_key::text = $1`,
       [userId]
     );
     
@@ -923,7 +923,7 @@ app.post('/api/user-events', async (req, res) => {
     if (scoreDelta !== 0) {
       await pool.query(
         `WITH resolved_user AS (
-           SELECT id FROM users WHERE id = $1::uuid OR anonymous_id = $1::uuid LIMIT 1
+           SELECT id FROM users WHERE anonymous_id = $1 OR toss_user_key::text = $1 LIMIT 1
          ),
          cat AS (
            SELECT ce.main_category
@@ -1635,30 +1635,12 @@ app.get('/admin/debug/recommendation', requireAdminAuth, async (req, res) => {
     }
 
     // ── 1. userId 해석 ──────────────────────────────────────────────────────
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(inputValue);
+    const isNumeric = /^\d+$/.test(inputValue);
     let userRow: any = null;
     let resolvedBy = '';
 
-    if (isUuid) {
-      // UUID → internal id 우선, 없으면 anonymous_id
-      const r1 = await pool.query(
-        'SELECT id, anonymous_id, toss_user_key FROM users WHERE id = $1',
-        [inputValue],
-      );
-      if (r1.rows.length > 0) {
-        userRow = r1.rows[0];
-        resolvedBy = 'internal_id';
-      } else {
-        const r2 = await pool.query(
-          'SELECT id, anonymous_id, toss_user_key FROM users WHERE anonymous_id = $1',
-          [inputValue],
-        );
-        if (r2.rows.length > 0) {
-          userRow = r2.rows[0];
-          resolvedBy = 'anonymous_id';
-        }
-      }
-    } else {
+    if (isNumeric) {
+      // 숫자 → toss_user_key (로그인 유저)
       const r = await pool.query(
         'SELECT id, anonymous_id, toss_user_key FROM users WHERE toss_user_key = $1',
         [inputValue],
@@ -1666,6 +1648,16 @@ app.get('/admin/debug/recommendation', requireAdminAuth, async (req, res) => {
       if (r.rows.length > 0) {
         userRow = r.rows[0];
         resolvedBy = 'toss_user_key';
+      }
+    } else {
+      // 문자열 → anonymous_id (UUID, Toss hash 모두 포함)
+      const r = await pool.query(
+        'SELECT id, anonymous_id, toss_user_key FROM users WHERE anonymous_id = $1',
+        [inputValue],
+      );
+      if (r.rows.length > 0) {
+        userRow = r.rows[0];
+        resolvedBy = 'anonymous_id';
       }
     }
 
@@ -8337,13 +8329,10 @@ async function getUserClickHistory(userId: string): Promise<UserClickHistory> {
        ce.main_category
      FROM user_events ue
      LEFT JOIN canonical_events ce ON ue.event_id = ce.id
-     WHERE ue.user_id = ANY(
-       SELECT unnest(ARRAY[$1::uuid] ||
-         ARRAY(SELECT COALESCE(anonymous_id, id) FROM users
-               WHERE id = $1::uuid AND anonymous_id IS NOT NULL) ||
-         ARRAY(SELECT id FROM users
-               WHERE anonymous_id = $1::uuid)
-       )
+     WHERE ue.user_id = (
+       SELECT id FROM users
+       WHERE anonymous_id = $1 OR toss_user_key::text = $1
+       LIMIT 1
      )
        AND ue.action_type = 'click'
        AND ue.created_at > NOW() - INTERVAL '14 days'
@@ -8412,13 +8401,10 @@ async function getUserClickHistory(userId: string): Promise<UserClickHistory> {
          ROW_NUMBER() OVER (PARTITION BY ue.event_id ORDER BY ue.created_at DESC) AS rn
        FROM user_events ue
        LEFT JOIN canonical_events ce ON ue.event_id = ce.id
-       WHERE ue.user_id = ANY(
-               SELECT unnest(ARRAY[$1::uuid] ||
-                 ARRAY(SELECT COALESCE(anonymous_id, id) FROM users
-                       WHERE id = $1::uuid AND anonymous_id IS NOT NULL) ||
-                 ARRAY(SELECT id FROM users
-                       WHERE anonymous_id = $1::uuid)
-               )
+       WHERE ue.user_id = (
+               SELECT id FROM users
+               WHERE anonymous_id = $1 OR toss_user_key::text = $1
+               LIMIT 1
              )
          AND ue.action_type IN ('save', 'unsave')
          AND ue.created_at > NOW() - INTERVAL '14 days'
@@ -8592,7 +8578,7 @@ app.get('/api/home/sections', async (req, res) => {
     if (userId) {
       try {
         const r = await pool.query(
-          'SELECT id FROM users WHERE id = $1::uuid OR anonymous_id = $1::uuid LIMIT 1',
+          'SELECT id FROM users WHERE anonymous_id = $1 OR toss_user_key::text = $1 LIMIT 1',
           [userId],
         );
         if (r.rows.length > 0) resolvedUserId = r.rows[0].id;
