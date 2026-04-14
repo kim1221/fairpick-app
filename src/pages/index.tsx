@@ -315,6 +315,9 @@ function HomePageInner() {
   const [feedPage, setFeedPage] = useState<number>(0);
   const [feedHasMore, setFeedHasMore] = useState(true);
   const [feedLoading, setFeedLoading] = useState(false);
+  // ref: setState는 비동기 배치라 연속 onEndReached 호출 시 guard가 뚫릴 수 있음
+  // ref는 동기적으로 체크되므로 동시 실행 방지에 사용
+  const feedLoadingRef = useRef(false);
   const feedSeenEventIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -462,7 +465,9 @@ function HomePageInner() {
   }, [userId]);
 
   const loadMoreFeed = useCallback(async () => {
-    if (feedLoading || !feedHasMore) return;
+    // ref로 동기 체크 — setState 배치로 인한 동시 실행 방지
+    if (feedLoadingRef.current || !feedHasMore) return;
+    feedLoadingRef.current = true;
     setFeedLoading(true);
     try {
       const res = await fetchFeed({
@@ -487,9 +492,10 @@ function HomePageInner() {
     } catch {
       // 피드 로딩 실패는 무시 (기존 섹션에 영향 없음)
     } finally {
+      feedLoadingRef.current = false;
       setFeedLoading(false);
     }
-  }, [feedLoading, feedHasMore, feedPage, userId]);
+  }, [feedHasMore, feedPage, userId]); // feedLoading 제거 (ref로 대체)
 
   // ─────────────────────────────────────────────────────────────
   // 중복 제거 + 신호 계산을 useMemo로 처리 — 렌더 중 연산 제거
@@ -674,6 +680,7 @@ function HomePageInner() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalList}
               removeClippedSubviews
+              nestedScrollEnabled={true}
             >
               {adaptedEvents.map((event, idx) => (
                 <SectionCard
@@ -765,7 +772,7 @@ function HomePageInner() {
         maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
         onScrollBeginDrag={handleAiNoticeConfirm}
         onEndReached={loadMoreFeed}
-        onEndReachedThreshold={0.3}
+        onEndReachedThreshold={0.5}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       />
 

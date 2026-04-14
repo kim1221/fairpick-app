@@ -4,7 +4,7 @@
  * 다양한 스타일의 이벤트 카드를 제공합니다.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, ViewStyle } from 'react-native';
 import type { ScoredEvent } from '../types/recommendation';
 import { useAdaptive } from '@toss/tds-react-native/private';
@@ -314,6 +314,8 @@ const EventCardBase: React.FC<EventCardProps> = ({ event, onPress, variant = 'de
   const adaptive = useAdaptive();
   const styles = useMemo(() => createStyles(adaptive), [adaptive]);
   const { isLiked, toggle } = useLike({ eventId: event.id });
+  // 이미지 로드 전 카테고리 컬러 placeholder 표시용
+  const [imageLoaded, setImageLoaded] = useState(false);
 
   const dateUrgency = useMemo(
     () => getDateUrgency(event.start_date, event.end_date),
@@ -335,11 +337,20 @@ const EventCardBase: React.FC<EventCardProps> = ({ event, onPress, variant = 'de
   const renderImage = () => (
     <View style={[styles.imageContainer, getImageStyle(variant)]}>
       {event.thumbnail_url ? (
-        <Image
-          source={{ uri: event.thumbnail_url }}
-          style={staticStyles.image}
-          resizeMode="cover"
-        />
+        <>
+          {/* 이미지 로드 전 카테고리 컬러 placeholder — 회색 빈 박스 대신 의미 있는 색상 표시 */}
+          {!imageLoaded && (
+            <View style={[StyleSheet.absoluteFill, staticStyles.placeholderImage, { backgroundColor: getCategoryColor(event.category) }]}>
+              <Text style={styles.placeholderText}>{event.category}</Text>
+            </View>
+          )}
+          <Image
+            source={{ uri: event.thumbnail_url }}
+            style={staticStyles.image}
+            resizeMode="cover"
+            onLoad={() => setImageLoaded(true)}
+          />
+        </>
       ) : (
         <View style={[staticStyles.placeholderImage, { backgroundColor: getCategoryColor(event.category) }]}>
           <Text style={styles.placeholderText}>{event.category}</Text>

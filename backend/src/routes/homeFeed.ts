@@ -116,7 +116,8 @@ function getFramingSQL(framingType: string): FramingSQL {
     case 'ending_soon':
       return { where: `end_at BETWEEN NOW() AND NOW() + INTERVAL '7 days'`, orderBy: 'end_at ASC' };
     case 'trending_buzz':
-      return { where: `buzz_score > 30`, orderBy: 'buzz_score DESC' };
+      // "다들 여기 가더라고요" = 전국 인지도 이벤트여야 함 → 상위 25% 수준으로 높임
+      return { where: `buzz_score > 60`, orderBy: 'buzz_score DESC' };
     case 'newly_opened':
       // start_at <= NOW(): 이미 시작한 이벤트만 ("방금 열었어요"는 아직 안 열린 건 해당 없음)
       return { where: `start_at BETWEEN NOW() - INTERVAL '21 days' AND NOW()`, orderBy: 'start_at DESC' };
@@ -190,11 +191,18 @@ async function fetchSlotEventsRaw(
   } else {
     const sql = getFramingSQL(slot.framing_type);
     // hidden_gem은 getFramingSQL에 이미 buzz 범위 조건 있으므로 > 20 추가 불필요
+    // budget_picks는 어린이/지방 소규모 이벤트 과다 진입 방지를 위해 기준 상향
+    const buzzMin = slot.framing_type === 'budget_picks' ? 30 : 20;
     whereClause = slot.framing_type === 'hidden_gem'
       ? sql.where
-      : (sql.where ? `${sql.where} AND buzz_score > 20` : `buzz_score > 20`);
+      : (sql.where ? `${sql.where} AND buzz_score > ${buzzMin}` : `buzz_score > ${buzzMin}`);
     orderByClause = sql.orderBy;
   }
+
+  // HERO 카드는 이미지가 핵심 — 이미지 없는 이벤트 제외
+  const heroImageCond = slot.type === 'HERO'
+    ? `AND image_url IS NOT NULL AND image_url != ''`
+    : '';
 
   const query = `
     SELECT id, title, main_category, sub_category, region,
@@ -204,6 +212,7 @@ async function fetchSlotEventsRaw(
     WHERE is_deleted = false
       AND end_at > NOW()
       AND NOT (id = ANY($1::uuid[]))
+      ${heroImageCond}
       AND ${whereClause}
     ORDER BY ${orderByClause}
     LIMIT $2
