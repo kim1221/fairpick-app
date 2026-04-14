@@ -12,14 +12,14 @@
     "docs:preview": "node scripts/gen-docs.ts --dry"
   },
   "dependencies": {
-    "@apps-in-toss/framework": "^2.0.1",
+    "@apps-in-toss/framework": "^2.4.6",
     "@granite-js/native": "1.0.4",
     "@granite-js/react-native": "1.0.4",
     "@toss/tds-react-native": "2.0.2",
     "axios": "^1.13.4",
+    "brick-module": "0.5.0",
     "react": "19.2.3",
-    "react-native": "0.84.0",
-    "brick-module": "0.5.0"
+    "react-native": "0.84.0"
   },
   "devDependencies": {
     "@babel/core": "7.28.5",

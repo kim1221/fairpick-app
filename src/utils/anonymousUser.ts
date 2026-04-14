@@ -1,10 +1,14 @@
 /**
  * 익명 사용자 관리
- * 
- * Toss MiniApp Storage API를 사용하여 익명 ID를 생성/관리합니다.
+ *
+ * 1순위: getAnonymousKey() — Toss 플랫폼이 발급하는 미니앱별 고유 hash
+ *   - 서버 연동·사용자 동의 불필요, 앱 재설치 후에도 동일 키 보장
+ *   - SDK 2.4.5+, 토스앱 최소 지원 버전 이상에서만 반환
+ * 2순위: Storage UUID — 구버전 앱 또는 getAnonymousKey 오류 시 fallback
+ * 3순위: getDeviceId() — Storage 자체 실패 시 최후 fallback
  */
 
-import { Storage, getDeviceId } from '@apps-in-toss/framework';
+import { Storage, getDeviceId, getAnonymousKey } from '@apps-in-toss/framework';
 
 // Storage 키
 const STORAGE_KEYS = {
@@ -14,8 +18,7 @@ const STORAGE_KEYS = {
 } as const;
 
 /**
- * 간단한 UUID v4 생성 함수
- * (uuid 패키지 대신 경량 구현)
+ * 간단한 UUID v4 생성 함수 (구버전 앱 fallback용)
  */
 function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -26,25 +29,41 @@ function generateUUID(): string {
 }
 
 /**
- * 익명 ID 가져오기 (없으면 자동 생성)
+ * 익명 ID 가져오기
+ *
+ * - getAnonymousKey() 성공 시 Toss hash 반환 (서버 연동 불필요)
+ * - 실패(구버전 앱 등) 시 Storage UUID로 fallback
  */
 export async function getOrCreateAnonymousId(): Promise<string> {
   try {
+    // 1순위: Toss 플랫폼 익명 키
+    const result = await getAnonymousKey();
+    if (result && result !== 'ERROR') {
+      console.log('[AnonymousUser] Using Toss anonymous key (hash)');
+      return result.hash;
+    }
+    if (result === 'ERROR') {
+      console.warn('[AnonymousUser] getAnonymousKey returned ERROR, falling back to UUID');
+    } else {
+      console.warn('[AnonymousUser] getAnonymousKey returned undefined (unsupported app version), falling back to UUID');
+    }
+  } catch (error) {
+    console.warn('[AnonymousUser] getAnonymousKey threw, falling back to UUID:', error);
+  }
+
+  // 2순위: Storage UUID (구버전 앱 호환)
+  try {
     let anonymousId = await Storage.getItem(STORAGE_KEYS.ANONYMOUS_ID);
-    
     if (!anonymousId) {
-      // 새로운 익명 ID 생성
       anonymousId = generateUUID();
       await Storage.setItem(STORAGE_KEYS.ANONYMOUS_ID, anonymousId);
-      console.log('[AnonymousUser] Created new anonymous ID:', anonymousId);
+      console.log('[AnonymousUser] Created new UUID:', anonymousId);
     } else {
-      console.log('[AnonymousUser] Using existing anonymous ID:', anonymousId);
+      console.log('[AnonymousUser] Using existing UUID:', anonymousId);
     }
-    
     return anonymousId;
   } catch (error) {
-    console.error('[AnonymousUser] Failed to get/create anonymous ID:', error);
-    // Storage 실패 시 기기 고유 ID를 fallback으로 사용 (세션 간 일관성 유지)
+    console.error('[AnonymousUser] Storage failed, using deviceId fallback:', error);
     return getDeviceId();
   }
 }
@@ -67,7 +86,7 @@ export async function getCurrentUserId(): Promise<string> {
       return userId;
     }
 
-    // 2순위: 익명 사용자 ID
+    // 2순위: 익명 사용자 ID (Toss hash 또는 UUID)
     const anonymousId = await getOrCreateAnonymousId();
     console.log('[AnonymousUser] Anonymous user:', anonymousId);
     _sessionUserId = anonymousId;
@@ -124,11 +143,12 @@ export async function logout(): Promise<void> {
 }
 
 /**
- * 익명 ID 초기화 (디버그용)
+ * 익명 ID 초기화 (디버그용 — UUID fallback만 초기화, Toss hash는 플랫폼 관리)
  */
 export async function resetAnonymousId(): Promise<void> {
   try {
     await Storage.removeItem(STORAGE_KEYS.ANONYMOUS_ID);
+    _sessionUserId = null;
     console.log('[AnonymousUser] Reset anonymous ID');
   } catch (error) {
     console.error('[AnonymousUser] Failed to reset anonymous ID:', error);
@@ -144,10 +164,10 @@ export async function clearAllUserData(): Promise<void> {
     await Storage.removeItem(STORAGE_KEYS.ANONYMOUS_ID);
     await Storage.removeItem(STORAGE_KEYS.USER_ID);
     await Storage.removeItem(STORAGE_KEYS.TOSS_USER_KEY);
+    _sessionUserId = null;
     console.log('[AnonymousUser] Cleared all user data');
   } catch (error) {
     console.error('[AnonymousUser] Failed to clear user data:', error);
     throw error;
   }
 }
-
