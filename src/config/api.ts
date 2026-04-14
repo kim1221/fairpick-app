@@ -38,7 +38,8 @@ export const API_ENDPOINTS = {
 } as const;
 
 // API 타임아웃 설정
-export const API_TIMEOUT = 10000; // 10초
+// Railway 콜드 스타트(비활성 후 재기동)에 여유 시간 확보
+export const API_TIMEOUT = 15000; // 15초
 
 // API 에러 메시지
 export const API_ERROR_MESSAGES = {

@@ -396,26 +396,36 @@ function HomePageInner() {
   };
 
   const loadSections = async (loc?: Location, uid?: string) => {
-    setSections(null);
+    const currentUid = uid ?? userId;
+
+    // SWR Step 1: 이전 세션 stale 캐시 즉시 렌더링 (skeleton 없이 바로 데이터 표시)
+    // 배민/쿠팡이츠와 동일한 패턴 — API 응답 기다리지 않고 캐시 먼저 보여줌
+    const stale = await recommendationService.getStaleHomeSections();
+    setSections(stale !== null ? stale : null); // stale 있으면 즉시 표시, 없으면 skeleton
+
     const networkStatus = await getNetworkStatus();
     if (networkStatus === 'OFFLINE') {
       setIsOffline(true);
-      setSections([]);
+      if (stale === null) setSections([]); // 캐시도 없고 오프라인 → 에러 표시
       return;
     }
     setIsOffline(false);
-    const currentUid = uid ?? userId;
+
+    // SWR Step 2: 신선한 데이터를 백그라운드에서 fetch → 완료 시 UI 갱신
     const response = await recommendationService.getSections(loc, currentUid);
-    const data = response.success ? response.sections : [];
-    setSections(data);
     if (response.success) {
+      setSections(response.sections);
       _homeCache = {
-        sections: data,
+        sections: response.sections,
         location: loc,
         userId: currentUid,
         expiresAt: Date.now() + HOME_CACHE_TTL_MS,
       };
+    } else if (stale === null) {
+      // 캐시도 없고 API도 실패한 경우에만 에러 표시
+      setSections([]);
     }
+    // API 실패 + stale 있음 → stale 유지 (에러 화면 없음)
   };
 
   const handleEventPress = useCallback((eventId: string, sectionSlug?: string, rankPosition?: number) => {

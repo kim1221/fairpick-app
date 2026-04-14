@@ -542,12 +542,41 @@ export async function getSections(
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json() as any;
     if (data.success) {
-      await saveCachedRecommendation(CACHE_KEYS.HOME_SECTIONS, cacheParams, data, 5);
+      // TTL 30분: Railway 콜드스타트 빈도 줄이기 + 앱 재진입 시 캐시 히트율 향상
+      await saveCachedRecommendation(CACHE_KEYS.HOME_SECTIONS, cacheParams, data, 30);
     }
     return data;
   } catch (error: any) {
     console.error('[RecommendationService] getSections error:', error);
     return { success: false, sections: [] };
+  }
+}
+
+/**
+ * 홈 섹션 스테일 캐시 즉시 조회 (TTL 무시, 24시간 내)
+ *
+ * SWR(Stale-While-Revalidate) 패턴용:
+ * API 결과를 기다리지 않고 이전 세션 데이터를 즉시 렌더링해
+ * 사용자가 빈 화면/스켈레톤을 보지 않도록 함.
+ */
+export async function getStaleHomeSections(): Promise<Array<{
+  slug: string;
+  title: string;
+  subtitle: string | null;
+  events: any[];
+}> | null> {
+  try {
+    const raw = await Storage.getItem(CACHE_KEYS.HOME_SECTIONS);
+    if (!raw) return null;
+    const entry: RecommendationCacheEntry = JSON.parse(raw);
+    if (entry.version !== CACHE_VERSION) return null;
+    const ageMs = Date.now() - new Date(entry.cachedAt).getTime();
+    if (ageMs > 24 * 60 * 60 * 1000) return null; // 24시간 초과 → 너무 오래됨
+    const sections = entry.data?.sections;
+    if (!Array.isArray(sections) || sections.length === 0) return null;
+    return sections;
+  } catch {
+    return null;
   }
 }
 
@@ -609,6 +638,7 @@ export async function clearRecommendationCache(cacheKey: keyof typeof CACHE_KEYS
 
 const recommendationService = {
   getSections,
+  getStaleHomeSections,
   getTodayPick,
   getTrending,
   getNearby,
