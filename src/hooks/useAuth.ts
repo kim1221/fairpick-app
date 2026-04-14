@@ -22,6 +22,7 @@ import {
   clearStoredUser,
   StoredUser,
 } from '../utils/authStorage';
+import { getOrCreateAnonymousId } from '../utils/anonymousUser';
 import { getLikesV2, getRecentV2 } from '../utils/storage';
 import { toServerLikeItem, toServerRecentItem } from '../types/serverSync';
 
@@ -75,7 +76,12 @@ export function useAuth() {
 
       setState({ isLoggedIn: true, user: data.user, isLoading: false });
 
-      // 4. 로컬 데이터 서버 마이그레이션 (백그라운드, 실패해도 무시)
+      // 4. 익명 행동 이력 → 로그인 계정으로 이전 (백그라운드)
+      linkAnonymousToLogin(data.user.userKey).catch((e) => {
+        if (__DEV__) console.warn('[useAuth][link-anonymous] 실패 (무시):', e?.message);
+      });
+
+      // 5. 로컬 데이터 서버 마이그레이션 (백그라운드, 실패해도 무시)
       migrateLocalDataToServer().catch((e) => {
         if (__DEV__) console.warn('[useAuth][migrate] 실패 (무시):', e.message);
       });
@@ -107,6 +113,16 @@ export function useAuth() {
     login,
     logout,
   };
+}
+
+// ─── 익명 → 로그인 계정 이력 이전 ────────────────────────────────────────────
+// 로그인 직후 익명 ID로 쌓인 행동 이력(user_events, 취향 점수)을
+// 로그인 계정(toss_user_key)으로 이전해요.
+
+async function linkAnonymousToLogin(tossUserKey: number): Promise<void> {
+  const anonymousId = await getOrCreateAnonymousId();
+  await http.post('/api/user-events/link-anonymous', { anonymousId, tossUserKey });
+  if (__DEV__) console.log('[useAuth][link-anonymous] 완료:', { anonymousId, tossUserKey });
 }
 
 // ─── 로컬 → 서버 마이그레이션 ──────────────────────────────────────────────
