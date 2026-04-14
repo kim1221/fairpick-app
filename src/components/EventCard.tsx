@@ -8,7 +8,7 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, ViewStyle } from 'react-native';
 import type { ScoredEvent } from '../types/recommendation';
 import { useAdaptive } from '@toss/tds-react-native/private';
-import { IconButton } from '@toss/tds-react-native';
+import { IconButton, AnimateSkeleton } from '@toss/tds-react-native';
 import { formatEventPeriodHuman, getDateUrgency, type DateUrgency } from '../lib/dateUtils';
 import { Analytics } from '@apps-in-toss/framework';
 import { useLike } from '../hooks/useLike';
@@ -75,20 +75,6 @@ function getTitleStyle(variant: string) {
   }
 }
 
-function getCategoryColor(category: string): string {
-  const colorMap: Record<string, string> = {
-    '팝업': '#E8F4FD',
-    '전시': '#EDF7EE',
-    '공연': '#F3F0FF',
-    '축제': '#FFF4E5',
-    '행사': '#FFF0F0',
-    '뮤지컬': '#E8F4FD',
-    '연극': '#F3F0FF',
-    '콘서트': '#FFF4E5',
-  };
-  return colorMap[category] || '#F3F4F6';
-}
-
 // 긴박도 → 색상 매핑 (라이트 배경용)
 // critical: 시스템 레드  / soon: 앰버  / normal: TDS grey600  / upcoming: TDS grey400
 const DATE_URGENCY_COLOR: Record<DateUrgency, string> = {
@@ -121,12 +107,6 @@ const staticStyles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
-  },
-  placeholderImage: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   categoryBadge: {
     position: 'absolute',
@@ -243,13 +223,6 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     position: 'relative',
   },
 
-  // 플레이스홀더 텍스트
-  placeholderText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: a.grey600,
-  },
-
   // 지역 배지 텍스트
   regionBadgeText: {
     color: a.grey900,
@@ -338,24 +311,17 @@ const EventCardBase: React.FC<EventCardProps> = ({ event, onPress, variant = 'de
     <View style={[styles.imageContainer, getImageStyle(variant)]}>
       {event.thumbnail_url ? (
         <>
-          {/* 이미지 로드 전 카테고리 컬러 placeholder — 회색 빈 박스 대신 의미 있는 색상 표시 */}
-          {!imageLoaded && (
-            <View style={[StyleSheet.absoluteFill, staticStyles.placeholderImage, { backgroundColor: getCategoryColor(event.category) }]}>
-              <Text style={styles.placeholderText}>{event.category}</Text>
-            </View>
-          )}
           <Image
             source={{ uri: event.thumbnail_url }}
             style={staticStyles.image}
             resizeMode="cover"
             onLoad={() => setImageLoaded(true)}
           />
+          {!imageLoaded && (
+            <AnimateSkeleton style={StyleSheet.absoluteFill} />
+          )}
         </>
-      ) : (
-        <View style={[staticStyles.placeholderImage, { backgroundColor: getCategoryColor(event.category) }]}>
-          <Text style={styles.placeholderText}>{event.category}</Text>
-        </View>
-      )}
+      ) : null}
 
       {/* 카테고리 배지 */}
       <View style={staticStyles.categoryBadge}>

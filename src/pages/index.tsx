@@ -343,7 +343,10 @@ function HomePageInner() {
       setFeedPage(feedState.nextPage);
     }
 
-    if (_homeCache && Date.now() < _homeCache.expiresAt) return;
+    if (_homeCache && Date.now() < _homeCache.expiresAt) {
+      loadMoreFeed(); // 캐시 히트해도 첫 피드 배치 로드
+      return;
+    }
 
     try {
       // userId 조회 + GPS 대기 병렬 실행
