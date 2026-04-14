@@ -1,7 +1,7 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl } from 'react-native';
+import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl, Platform } from 'react-native';
 import { Loader, Icon, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { useAuth } from '../hooks/useAuth';
@@ -18,6 +18,36 @@ import http from '../lib/http';
 import { isStoredItemActive, getTodayMidnight } from '../utils/eventStatus';
 import { EventCardData } from '../data/events';
 import { EventImage } from '../components/EventImage';
+import { InlineAd } from '@apps-in-toss/framework';
+
+// 부모 리렌더 시 Native Ad View 리셋 방지를 위해 독립 컴포넌트로 분리
+const MyPageAdSlot = React.memo(() => {
+  const [status, setStatus] = useState<'loading' | 'rendered' | 'failed'>('loading');
+
+  if (status === 'failed') return null;
+
+  const isAndroid = Platform.OS === 'android';
+
+  return (
+    <View
+      collapsable={false}
+      style={{
+        width: '100%',
+        height: isAndroid ? 96 : (status === 'rendered' ? undefined : 0),
+        marginTop: status === 'rendered' ? 12 : 0,
+        overflow: isAndroid ? 'visible' : 'hidden',
+      }}
+    >
+      <InlineAd
+        adGroupId="ait.v2.live.6526c6e693454a28"
+        impressFallbackOnMount={true}
+        onAdRendered={() => setStatus('rendered')}
+        onAdFailedToRender={() => setStatus('failed')}
+        onNoFill={() => setStatus('failed')}
+      />
+    </View>
+  );
+});
 
 export const Route = createRoute('/mypage', {
   component: MyPage,
@@ -350,6 +380,9 @@ const [likeEvents, setLikeEvents] = useState<EventCardData[]>([]);
                 </View>
               </View>
             )}
+
+            {/* 이미지 강조형 배너 광고 */}
+            <MyPageAdSlot />
 
             {/* 찜한 목록 미리보기 */}
             <View style={styles.section}>
