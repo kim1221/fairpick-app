@@ -13,6 +13,15 @@
 
 import express from 'express';
 import { pool } from '../db';
+import { CITY_ZONES } from '../lib/cityZones';
+
+// 정규화된 지역명 → 광역 도시권 전체 (예: '서울' → ['서울', '인천', '경기'])
+function getMetroZone(region: string): string[] {
+  for (const regions of Object.values(CITY_ZONES)) {
+    if (regions.includes(region)) return regions;
+  }
+  return [region]; // 매핑 없으면 해당 지역만 (단독 처리)
+}
 
 const router = express.Router();
 
@@ -216,12 +225,28 @@ async function fetchSlotEventsRaw(
     orderByClause = sql.orderBy;
   }
 
-  // 위치 소프트 부스트: nearbyRegion 있으면 해당 지역 이벤트를 앞으로
-  // 지역 이벤트가 부족하면 자연스럽게 전국 이벤트로 채워짐 (공백 없음)
-  let locationOrderExpr = '1'; // 부스트 없음 (상수 → 정렬에 영향 없음)
+  // 위치 단계별 부스트 (단일 쿼리로 3단계 구현)
+  // Stage 0 → 정확한 지역 (예: 서울)
+  // Stage 1 → 광역 도시권 (예: 수도권 = 서울+인천+경기)
+  // Stage 2 → 전국 (공백 방지 fallback)
+  let locationOrderExpr = '1'; // 위치 없음 → 정렬 영향 없음
   if (nearbyRegion) {
-    params.push(nearbyRegion);
-    locationOrderExpr = `CASE WHEN region = $${params.length} THEN 0 ELSE 1 END`;
+    const metroZone = getMetroZone(nearbyRegion); // 예: ['서울', '인천', '경기']
+    params.push(nearbyRegion); // $N: 정확한 지역
+    const exactIdx = params.length;
+
+    if (metroZone.length > 1) {
+      // 수도권/부울경 등 도시권 범위가 있는 경우: 3단계
+      params.push(metroZone); // $M: 광역 도시권 배열
+      const metroIdx = params.length;
+      locationOrderExpr =
+        `CASE WHEN region = $${exactIdx} THEN 0 ` +
+        `WHEN region = ANY($${metroIdx}::text[]) THEN 1 ` +
+        `ELSE 2 END`;
+    } else {
+      // 강원/제주 등 단독 지역: 2단계 (지역 → 전국)
+      locationOrderExpr = `CASE WHEN region = $${exactIdx} THEN 0 ELSE 1 END`;
+    }
   }
 
   // HERO 카드는 이미지가 핵심 — 이미지 없는 이벤트 제외
