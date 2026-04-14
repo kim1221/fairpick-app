@@ -78,15 +78,53 @@ async function logUserEvent(
       [internalUserId, eventId, actionType, sectionSlug ?? null, rankPosition ?? null, sessionId ?? null, metadata ? JSON.stringify(metadata) : null]
     );
 
-    // 2. canonical_events 테이블의 카운트 증가 (실시간 반영)
-    // Note: canonical_events에는 view_count만 존재 (save_count, share_count 없음)
+    // 2. canonical_events view_count 증가
     if (actionType === 'view') {
       await client.query(
         `UPDATE canonical_events SET view_count = view_count + 1 WHERE id = $1`,
         [eventId]
       );
     }
-    // TODO: save_count, share_count를 canonical_events에 추가하거나 별도 테이블로 관리 필요
+
+    // 3. user_preferences 취향 점수 업데이트 (개인화 추천용)
+    //    view: +5  /  save: +20  /  unsave: -10  (0~100 범위 클램핑)
+    const scoreDelta =
+      actionType === 'save'   ?  20 :
+      actionType === 'view'   ?   5 :
+      actionType === 'unsave' ? -10 : 0;
+
+    if (scoreDelta !== 0) {
+      await client.query(
+        `WITH cat AS (
+           SELECT main_category
+           FROM canonical_events
+           WHERE id = $1 AND main_category IS NOT NULL
+         )
+         INSERT INTO user_preferences (user_id, category_scores, preferred_tags, last_updated)
+         SELECT
+           $2,
+           jsonb_build_object((SELECT main_category FROM cat), GREATEST(0, $3::int)),
+           ARRAY[]::text[],
+           NOW()
+         FROM cat
+         ON CONFLICT (user_id) DO UPDATE
+           SET category_scores = (
+                 SELECT jsonb_object_agg(
+                   key,
+                   GREATEST(0, LEAST(100,
+                     COALESCE((user_preferences.category_scores->>key)::int, 0)
+                     + CASE WHEN key = (SELECT main_category FROM cat) THEN $3::int ELSE 0 END
+                   ))
+                 )
+                 FROM jsonb_object_keys(
+                   COALESCE(user_preferences.category_scores, '{}'::jsonb)
+                   || jsonb_build_object((SELECT main_category FROM cat), 0)
+                 ) AS key
+               ),
+               last_updated = NOW()`,
+        [eventId, internalUserId, scoreDelta]
+      );
+    }
 
     console.log(`[UserEvents] Logged: ${actionType} for event ${eventId} by user ${internalUserId}`);
   } finally {
