@@ -5,6 +5,7 @@
  */
 
 import { API_BASE_URL, API_TIMEOUT } from '../config/api';
+import type { ScoredEvent } from '../types/recommendation';
 
 export interface FeedEvent {
   id: string;
@@ -39,6 +40,33 @@ export interface FeedResponse {
   cards: FeedCard[];
   next_cursor: string | null;
   has_more: boolean;
+}
+
+/**
+ * FeedEvent → ScoredEvent 어댑터
+ * BUNDLE 카드에서 EventCard(ScoredEvent 전용)를 직접 재사용하기 위해 사용
+ */
+export function feedEventToScoredEvent(e: FeedEvent): ScoredEvent {
+  return {
+    id: e.id,
+    source: '',
+    external_id: '',
+    title: e.title,
+    start_date: e.start_at ?? '',
+    end_date: e.end_at ?? '',
+    region: e.region ?? undefined,
+    category: e.main_category,
+    thumbnail_url: e.image_url ?? undefined,
+    venue: e.venue ?? undefined,
+    buzz_score: e.buzz_score,
+    view_count: 0,
+    save_count: 0,
+    share_count: 0,
+    score: e.buzz_score,
+    is_free: e.is_free ?? undefined,
+    created_at: '',
+    updated_at: '',
+  } as ScoredEvent;
 }
 
 export async function fetchFeed(params: {

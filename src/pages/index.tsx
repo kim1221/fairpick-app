@@ -23,7 +23,7 @@ import { LikesProvider } from '../contexts/LikesContext';
 import { MagazineCard } from '../components/MagazineCard';
 import { TrendCard } from '../components/TrendCard';
 import { HeroCard } from '../components/HeroCard';
-import { fetchFeed, type FeedCard } from '../services/feedService';
+import { fetchFeed, feedEventToScoredEvent, type FeedCard } from '../services/feedService';
 
 import type { ScoredEvent, Location } from '../types/recommendation';
 
@@ -573,20 +573,32 @@ function HomePageInner() {
     if (processedSections.length === 0) {
       return [{ type: 'empty' }];
     }
+
     const items: FeedItem[] = [];
+    let feedIdx = 0;
+
     for (let i = 0; i < processedSections.length; i++) {
       items.push({ type: 'section', section: processedSections[i]! });
-      if (i === 1) {
-        items.push({ type: 'ad' });
+
+      // 광고는 섹션 두 번째 바로 뒤
+      if (i === 1) items.push({ type: 'ad' });
+
+      // 섹션 뒤에 피드 카드 삽입:
+      // 첫 번째 섹션(today_pick) 뒤: 1개 (HERO — 시각적 훅)
+      // 나머지: 2개씩
+      const insertCount = i === 0 ? 1 : 2;
+      for (let j = 0; j < insertCount && feedIdx < feedCards.length; j++) {
+        items.push({ type: 'magazine', card: feedCards[feedIdx++]! });
       }
     }
-    // 기존 섹션 뒤에 매거진 피드 카드 자연스럽게 이어붙이기
-    for (const card of feedCards) {
-      items.push({ type: 'magazine', card });
+
+    // 섹션 다 소진 후 남은 피드 카드 (무한 스크롤 계속)
+    while (feedIdx < feedCards.length) {
+      items.push({ type: 'magazine', card: feedCards[feedIdx++]! });
     }
-    if (feedLoading) {
-      items.push({ type: 'feed_loading' });
-    }
+
+    if (feedLoading) items.push({ type: 'feed_loading' });
+
     return items;
   }, [sections, processedSections, feedCards, feedLoading]);
 
@@ -625,6 +637,7 @@ function HomePageInner() {
     }
     if (item.type === 'magazine') {
       const { card } = item;
+
       if (card.content_type === 'HERO') {
         if (!card.events[0]) return null;
         return (
@@ -635,6 +648,7 @@ function HomePageInner() {
           />
         );
       }
+
       if (card.content_type === 'TREND' || card.content_type === 'RANKING') {
         return (
           <TrendCard
@@ -644,7 +658,36 @@ function HomePageInner() {
           />
         );
       }
-      // BUNDLE / SPOTLIGHT
+
+      if (card.content_type === 'BUNDLE') {
+        // 기존 섹션과 동일한 EventCard small + 가로 스크롤 — 시각적 일관성
+        const adaptedEvents = card.events.map(feedEventToScoredEvent);
+        return (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{card.framing_label ?? card.title ?? ''}</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              removeClippedSubviews
+            >
+              {adaptedEvents.map((event, idx) => (
+                <SectionCard
+                  key={event.id}
+                  event={event}
+                  slug={card.framing_type}
+                  rank={idx + 1}
+                  onPress={handleEventPress}
+                />
+              ))}
+            </ScrollView>
+          </View>
+        );
+      }
+
+      // SPOTLIGHT 등 fallback
       return (
         <MagazineCard
           contentType="BUNDLE"
