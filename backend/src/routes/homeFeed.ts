@@ -77,7 +77,7 @@ function seededShuffle<T>(arr: T[], seed: string): T[] {
 // ─────────────────────────────────────────────────────────────
 
 const HERO_POOL: SlotSpec[] = [
-  { type: 'HERO', framing_type: 'ending_soon',     framing_label: '오늘 마감인데 아직 안 가셨어요?',     fetchCount: 5, takeCount: 1 },
+  { type: 'HERO', framing_type: 'ending_soon',     framing_label: '이번 주 마감인데 아직 안 가셨어요?', fetchCount: 5, takeCount: 1 },
   { type: 'HERO', framing_type: 'trending_buzz',   framing_label: '요즘 다들 여기 가더라고요',           fetchCount: 5, takeCount: 1 },
   { type: 'HERO', framing_type: 'must_see_ending', framing_label: '이 인기에 곧 끝난다니요',             fetchCount: 5, takeCount: 1 },
   { type: 'HERO', framing_type: 'newly_opened',    framing_label: '제일 먼저 알아버렸어요',              fetchCount: 5, takeCount: 1 },
@@ -87,7 +87,7 @@ const HERO_POOL: SlotSpec[] = [
   { type: 'HERO', framing_type: 'concert',         framing_label: '현장에서만 느낄 수 있어요',           fetchCount: 5, takeCount: 1 },
   // 전시/팝업 비중 보완
   { type: 'HERO', framing_type: 'hot_exhibition',  framing_label: '이 전시 안 보면 이야기가 안 돼요',   fetchCount: 5, takeCount: 1 },
-  { type: 'HERO', framing_type: 'hot_popup',       framing_label: '이 팝업 아는 사람이 없어요, 아직은', fetchCount: 5, takeCount: 1 },
+  { type: 'HERO', framing_type: 'hot_popup',       framing_label: '지금 막 떠오르는 팝업이에요',        fetchCount: 5, takeCount: 1 },
 ];
 
 const BUNDLE_POOL: SlotSpec[] = [
@@ -98,7 +98,7 @@ const BUNDLE_POOL: SlotSpec[] = [
   { type: 'BUNDLE', framing_type: 'classical',         framing_label: '클래식은 어렵다고요?',           fetchCount: 8, takeCount: 6 },
   { type: 'BUNDLE', framing_type: 'traditional',       framing_label: 'K-클래식의 진짜 맛',             fetchCount: 8, takeCount: 6 },
   { type: 'BUNDLE', framing_type: 'dance',             framing_label: '몸이 하는 말, 무용',             fetchCount: 8, takeCount: 6 },
-  { type: 'BUNDLE', framing_type: 'newly_opened',      framing_label: '이번 주 새로 생겼어요',          fetchCount: 8, takeCount: 6 },
+  { type: 'BUNDLE', framing_type: 'newly_opened',      framing_label: '요즘 새로 열렸어요',             fetchCount: 8, takeCount: 6 },
   { type: 'BUNDLE', framing_type: 'hidden_gem',        framing_label: '줄 안 서도 돼요, 아직은',        fetchCount: 8, takeCount: 6 },
   // 전시/팝업 비중 보완
   { type: 'BUNDLE', framing_type: 'exhibition_bundle', framing_label: '전시, 이렇게 좋은 게 있었어요?', fetchCount: 8, takeCount: 6 },
@@ -139,7 +139,9 @@ function getFramingSQL(framingType: string): FramingSQL {
     case 'free_picks':
       return { where: `is_free = true`, orderBy: 'buzz_score DESC' };
     case 'budget_picks':
-      return { where: `(is_free = true OR price_min <= 15000)`, orderBy: 'buzz_score DESC' };
+      // 유료이지만 저렴한 이벤트 (1,000~15,000원)
+      // 무료 이벤트는 free_picks 슬롯으로 분리 — budget_picks에 섞이면 라벨 불일치
+      return { where: `price_min IS NOT NULL AND price_min > 0 AND price_min <= 15000`, orderBy: 'buzz_score DESC' };
     case 'weekend_picks':
       return { where: '', orderBy: 'buzz_score DESC', isWeekend: true };
     case 'hidden_gem':
@@ -171,8 +173,9 @@ function getFramingSQL(framingType: string): FramingSQL {
       // HERO 전용: 전시 중 buzz 상위 (전국적으로 화제인 전시)
       return { where: `main_category = '전시' AND buzz_score > 50`, orderBy: 'buzz_score DESC' };
     case 'hot_popup':
-      // HERO 전용: 팝업 buzz 상위
-      return { where: `main_category = '팝업' AND buzz_score > 30`, orderBy: 'buzz_score DESC' };
+      // HERO 전용: 팝업 중 buzz 상승 초기 구간 ("지금 막 떠오르는")
+      // buzz > 30이면 이미 알려진 것 → 20~50 구간이 "막 뜨기 시작한" 단계
+      return { where: `main_category = '팝업' AND buzz_score BETWEEN 20 AND 50`, orderBy: 'buzz_score DESC' };
     case 'exhibition_bundle':
       return { where: `main_category = '전시'`, orderBy: 'buzz_score DESC' };
     case 'popup_bundle':
