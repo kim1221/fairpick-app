@@ -114,8 +114,9 @@ export async function runHotRating() {
 
   // 2. 이벤트 리스트 생성
   const eventList = events.rows.map((e, idx) => {
-    const startDate = e.start_at.toISOString().split('T')[0];
-    const endDate = e.end_at.toISOString().split('T')[0];
+    // DB에서 string 또는 Date 객체 둘 다 처리
+    const startDate = new Date(e.start_at).toISOString().split('T')[0];
+    const endDate   = new Date(e.end_at).toISOString().split('T')[0];
     return `${idx + 1}. [${e.main_category}] ${e.title} (${e.venue}, ${startDate} ~ ${endDate})`;
   }).join('\n');
 

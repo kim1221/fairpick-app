@@ -157,6 +157,24 @@ function isTransientNetworkError(error: any): boolean {
   );
 }
 
+// job 이름 → PostgreSQL advisory lock ID (분산 환경에서 중복 실행 방지)
+// Railway 멀티 인스턴스에서도 동일 DB를 바라보므로 분산 잠금 역할
+const JOB_ADVISORY_LOCK_IDS: Record<string, number> = {
+  'metadata':              10_001,
+  'geo-refresh-03':        10_002,
+  'cleanup':               10_003,
+  'buzz-score':            10_004,
+  'auto-featured-score':   10_005,
+  'price-info':            10_006,
+  'phase2-internal-fields':10_007,
+  'embed-new-events':      10_008,
+  'generate-content-pool': 10_009,
+  'popga-collector':       10_010,
+  'artmap-collector':      10_011,
+  'ai-hot-rating':         10_012,
+  'collect-15':            10_013,
+};
+
 async function runJobSafely<T = void>(
   jobName: string,
   jobFn: () => Promise<T>,
@@ -167,10 +185,29 @@ async function runJobSafely<T = void>(
   const startTime = Date.now();
   const startISO = new Date().toISOString();
 
-  // 중복 실행 체크 (allowConcurrent=false인 경우)
+  // 중복 실행 체크 1: 인스턴스 내 in-memory 체크
   if (!options.allowConcurrent && runningJobs.has(jobName)) {
-    console.warn(`[Scheduler][${jobName}] ⚠️ SKIP - Already running (jobId=${jobId})`);
+    console.warn(`[Scheduler][${jobName}] ⚠️ SKIP - Already running in this instance (jobId=${jobId})`);
     return undefined;
+  }
+
+  // 중복 실행 체크 2: PostgreSQL advisory lock (분산 인스턴스 간 중복 방지)
+  const lockId = JOB_ADVISORY_LOCK_IDS[jobName];
+  let dbClient: any = null;
+  if (lockId && !options.allowConcurrent) {
+    try {
+      dbClient = await pool.connect();
+      const lockResult = await dbClient.query('SELECT pg_try_advisory_lock($1) AS acquired', [lockId]);
+      if (!lockResult.rows[0].acquired) {
+        console.warn(`[Scheduler][${jobName}] ⚠️ SKIP - Already running on another instance (lockId=${lockId})`);
+        dbClient.release();
+        return undefined;
+      }
+    } catch (lockErr) {
+      // advisory lock 획득 실패는 치명적이지 않음 — 로그만 남기고 계속 진행
+      console.warn(`[Scheduler][${jobName}] Advisory lock check failed (will proceed):`, lockErr);
+      if (dbClient) { dbClient.release(); dbClient = null; }
+    }
   }
 
   runningJobs.add(jobName);
@@ -187,6 +224,7 @@ async function runJobSafely<T = void>(
       const resultLog = typeof result === 'number' ? ` (result=${result})` : '';
       console.log(`[Scheduler][${jobName}][${jobId}] SUCCESS (duration=${durationSec}s)${attemptLog}${resultLog}`);
       runningJobs.delete(jobName);
+      await releaseAdvisoryLock(jobName, lockId, dbClient);
       return result;
     } catch (error: any) {
       lastError = error;
@@ -209,10 +247,22 @@ async function runJobSafely<T = void>(
   // 에러를 던지지 않고 로깅만 (스케줄러 계속 동작)
 
   runningJobs.delete(jobName);
+  await releaseAdvisoryLock(jobName, lockId, dbClient);
   const totalDurationMs = Date.now() - startTime;
   const totalDurationSec = (totalDurationMs / 1000).toFixed(1);
   console.log(`[Scheduler][${jobName}][${jobId}] END (total_duration=${totalDurationSec}s)`);
   return undefined;
+}
+
+async function releaseAdvisoryLock(jobName: string, lockId: number | undefined, client: any): Promise<void> {
+  if (!lockId || !client) return;
+  try {
+    await client.query('SELECT pg_advisory_unlock($1)', [lockId]);
+  } catch (e) {
+    console.warn(`[Scheduler][${jobName}] Failed to release advisory lock:`, e);
+  } finally {
+    client.release();
+  }
 }
 
 // ============================================================
