@@ -77,8 +77,10 @@ export async function fetchFeed(params: {
   userId?: string;
   region?: string;
   regionStage?: 'exact' | 'metro' | 'all';
+  timeout?: number;
 }): Promise<FeedResponse> {
-  const { cursor, page, excludeIds = [], userId, region, regionStage } = params;
+  const { cursor, page, excludeIds = [], userId, region, regionStage, timeout } = params;
+  const effectiveTimeout = timeout ?? API_TIMEOUT;
 
   const pageNum = page !== undefined ? page : (parseInt(cursor ?? '0') || 0);
 
@@ -101,7 +103,7 @@ export async function fetchFeed(params: {
   // 1) AbortController signal → iOS URLSession이 정상 동작하려면 signal 필요
   // 2) Promise.race → Android OkHttp가 abort를 무시해도 JS 레벨에서 타임아웃 보장
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+  const timeoutId = setTimeout(() => controller.abort(), effectiveTimeout);
 
   const fetchPromise = fetch(`${API_BASE_URL}/api/home/feed?${query.toString()}`, {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -109,7 +111,7 @@ export async function fetchFeed(params: {
   });
 
   const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error('Feed request JS timeout')), API_TIMEOUT + 500);
+    setTimeout(() => reject(new Error('Feed request JS timeout')), effectiveTimeout + 500);
   });
 
   try {

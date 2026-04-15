@@ -361,6 +361,8 @@ function HomePageInner() {
   const userRegionRef = useRef('');
   const feedRetryCountRef = useRef(0);
   const FEED_MAX_RETRIES = 3;
+  // Railway 콜드 스타트 대비: 첫 피드 요청은 30초, 이후는 15초
+  const COLD_START_TIMEOUT = 30000;
 
   useEffect(() => {
     initializeUser();
@@ -385,18 +387,20 @@ function HomePageInner() {
       feedPageRef.current = feedState.nextPage;
     }
 
-    if (_homeCache && Date.now() < _homeCache.expiresAt) {
-      feedHasMoreRef.current = true;
-      setFeedHasMore(true);
-      void loadMoreFeedRef.current();
-      return;
-    }
-
     const triggerFeedLoad = () => {
       feedHasMoreRef.current = true;
       setFeedHasMore(true);
       void loadMoreFeedRef.current();
     };
+
+    if (_homeCache && Date.now() < _homeCache.expiresAt) {
+      // 캐시 히트: 섹션은 이미 useState 초기값으로 표시됨
+      // Railway 콜드 스타트 대비: loadSections를 fire-and-forget으로 호출해 서버를 미리 깨움
+      // (응답 결과는 무시하지 않고 섹션 갱신에 활용)
+      loadSections(_homeCache.location, _homeCache.userId).catch(() => {});
+      triggerFeedLoad();
+      return;
+    }
 
     try {
       const [uid, loc] = await Promise.all([
@@ -408,16 +412,14 @@ function HomePageInner() {
       ]);
       setUserId(uid);
 
-      // 섹션 로드와 피드 로드를 병렬 실행
-      // 섹션이 실패해도 피드는 독립적으로 로드됨
-      const sectionsPromise = loadSections(loc, uid).catch((err) => {
+      // 섹션 먼저 로드: Railway 콜드 스타트 시 이 요청이 서버를 깨움
+      // 섹션 로드 완료 후 서버가 warm 상태이므로 피드 요청은 빠르게 처리됨
+      await loadSections(loc, uid).catch((err) => {
         console.warn('[Home] loadSections failed, setting empty sections:', err);
         setSections((prev) => prev ?? []);
       });
 
       triggerFeedLoad();
-
-      await sectionsPromise;
 
       // GPS가 500ms 내에 못 왔지만 이후 완료된 경우 전체 섹션 재로드
       if (!loc) {
@@ -429,9 +431,7 @@ function HomePageInner() {
       }
     } catch (error) {
       console.error('[Home] init error:', error);
-      // 최소한 sections=[]로 설정해 스켈레톤에서 벗어남
       setSections((prev) => prev ?? []);
-      // 에러 시에도 피드 로드 보장
       triggerFeedLoad();
     }
   };
@@ -586,8 +586,9 @@ function HomePageInner() {
     setFeedLoading(true);
     const currentPage = feedPageRef.current;
     const currentRegion = userRegionRef.current;
-    // Android safety: OkHttp가 AbortController.abort()를 무시하면 fetchFeed가 hang
-    // → JS 레벨에서 (API_TIMEOUT + 3s) 후 강제로 loading 해제
+    // 첫 피드 요청(카드 0개)이면 Railway 콜드 스타트에 대비해 30초 타임아웃
+    const isFirstLoad = !feedCardsLoadedRef.current;
+    const fetchTimeout = isFirstLoad ? COLD_START_TIMEOUT : API_TIMEOUT;
     const safetyTimeoutId = setTimeout(() => {
       if (feedLoadingRef.current) {
         feedLoadingRef.current = false;
@@ -597,15 +598,15 @@ function HomePageInner() {
           setTimeout(() => { void loadMoreFeedRef.current(); }, 1000);
         }
       }
-    }, API_TIMEOUT + 3000);
+    }, fetchTimeout + 3000);
     try {
       const res = await fetchFeed({
         page: currentPage,
         excludeIds: Array.from(feedSeenEventIds.current),
         userId,
         region: currentRegion || undefined,
-        // 위치 정보 있으면 현재 단계의 하드 필터 적용, 없으면 전국 표시
         regionStage: currentRegion ? feedRegionStageRef.current : 'all',
+        timeout: fetchTimeout,
       });
       if (res.cards.length === 0) {
         // Priority 1: excludeIds 풀 소진 시 → 초기화 후 1회만 재시도
