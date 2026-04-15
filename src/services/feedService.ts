@@ -75,8 +75,8 @@ export async function fetchFeed(params: {
   limit?: number;
   excludeIds?: string[];
   userId?: string;
-  region?: string;           // DB region 이름 (예: "서울", "경기", "부산")
-  regionStage?: 'exact' | 'metro' | 'all';  // 지역 하드 필터 단계
+  region?: string;
+  regionStage?: 'exact' | 'metro' | 'all';
 }): Promise<FeedResponse> {
   const { cursor, page, excludeIds = [], userId, region, regionStage } = params;
 
@@ -97,18 +97,23 @@ export async function fetchFeed(params: {
     query.set('region_stage', regionStage);
   }
 
-  // signal: AbortController로 native 요청 취소 (iOS URLSession은 정상 동작)
-  // Android OkHttp는 abort를 무시할 수 있으나, loadMoreFeed 레벨 safety timeout이 보완
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // 듀얼 타임아웃:
+  // 1) AbortController signal → iOS URLSession이 정상 동작하려면 signal 필요
+  // 2) Promise.race → Android OkHttp가 abort를 무시해도 JS 레벨에서 타임아웃 보장
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
 
-  try {
-    // signal 타입 충돌(RN AbortSignal vs DOM AbortSignal) → as any 캐스트
+  const fetchPromise = fetch(`${API_BASE_URL}/api/home/feed?${query.toString()}`, {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await fetch(`${API_BASE_URL}/api/home/feed?${query.toString()}`, {
-      signal: controller.signal as any,
-    });
+    signal: controller.signal as any,
+  });
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('Feed request JS timeout')), API_TIMEOUT + 500);
+  });
+
+  try {
+    const res = await Promise.race([fetchPromise, timeoutPromise]);
 
     if (!res.ok) {
       throw new Error(`Feed API error: ${res.status}`);
@@ -117,5 +122,6 @@ export async function fetchFeed(params: {
     return (await res.json()) as FeedResponse;
   } finally {
     clearTimeout(timeoutId);
+    controller.abort();
   }
 }

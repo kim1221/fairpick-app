@@ -366,8 +366,10 @@ function HomePageInner() {
   const feedRegionStageRef = useRef<'exact' | 'metro' | 'all'>('exact');
   // initializeUser가 호출한 loadMoreFeed가 fetch 중이라 drop됐을 때 재시도 예약 플래그
   const feedPendingLoadRef = useRef(false);
-  // userRegion ref: loadMoreFeed 클로저 stale 방지 (reverseGeocode가 비동기로 세팅됨)
   const userRegionRef = useRef('');
+  // 피드 에러 자동 재시도 카운터 (세션당 최대 3회)
+  const feedRetryCountRef = useRef(0);
+  const FEED_MAX_RETRIES = 3;
 
   useEffect(() => {
     initializeUser();
@@ -579,6 +581,7 @@ function HomePageInner() {
       feedCardsLoadedRef.current = false;
       feedRegionStageRef.current = 'exact';
       feedPendingLoadRef.current = false;
+      feedRetryCountRef.current = 0;
       userRegionRef.current = '';
       const loc = await requestLocation();
       await loadSections(loc, userId).catch((err) => {
@@ -679,10 +682,17 @@ function HomePageInner() {
       }
       setFeedHasMore(res.has_more);
       feedHasMoreRef.current = res.has_more;
+      // 성공 시 재시도 카운터 리셋
+      feedRetryCountRef.current = 0;
     } catch (err) {
-      // 피드 로딩 실패는 무시 (기존 섹션에 영향 없음)
-      // 에러 로그: Android abort 미지원 / 네트워크 에러 등 원인 파악용
       console.warn('[Feed] loadMoreFeed error:', err instanceof Error ? err.message : String(err));
+      // 에러 시 자동 재시도 (exponential backoff, 세션당 최대 3회)
+      if (feedRetryCountRef.current < FEED_MAX_RETRIES) {
+        feedRetryCountRef.current++;
+        const delay = 1000 * feedRetryCountRef.current; // 1s, 2s, 3s
+        console.warn(`[Feed] auto-retry #${feedRetryCountRef.current} in ${delay}ms`);
+        setTimeout(() => { void loadMoreFeedRef.current(); }, delay);
+      }
     } finally {
       clearTimeout(safetyTimeoutId); // safety timeout이 이미 발동됐으면 no-op
       feedLoadingRef.current = false;
@@ -701,6 +711,16 @@ function HomePageInner() {
   // 항상 최신 버전을 호출하도록 ref에 동기화.
   const loadMoreFeedRef = useRef(loadMoreFeed);
   useEffect(() => { loadMoreFeedRef.current = loadMoreFeed; }, [loadMoreFeed]);
+
+  // 피드 고착 상태 자동 복구: feedCards=0, loading=false, hasMore=true이면
+  // 섹션은 로드됐는데 피드가 빠진 상태 → 3초 후 자동 재트리거
+  useEffect(() => {
+    if (sections !== null && feedCards.length === 0 && !feedLoading && feedHasMore) {
+      const id = setTimeout(() => { void loadMoreFeedRef.current(); }, 3000);
+      return () => clearTimeout(id);
+    }
+    return undefined;
+  }, [sections, feedCards.length, feedLoading, feedHasMore]);
 
   const scrollToTop = useCallback(() => {
     flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
