@@ -395,14 +395,20 @@ function HomePageInner() {
     if (_homeCache && Date.now() < _homeCache.expiresAt) {
       console.log('[Feed] initializeUser: cache HIT → loadMoreFeed', { cardsLoaded: feedCardsLoadedRef.current, loading: feedLoadingRef.current });
       if (!feedCardsLoadedRef.current) feedHasMoreRef.current = true;
-      // fetch 중이면 pending 마킹 → finally에서 자동 재시도
       if (feedLoadingRef.current) { feedPendingLoadRef.current = true; }
-      else { void loadMoreFeedRef.current(); } // 캐시 히트해도 첫 피드 배치 로드
+      else { void loadMoreFeedRef.current(); }
       return;
     }
 
+    // 피드 로드를 섹션과 독립적으로 즉시 시작
+    // 섹션 API가 느리거나 실패해도 피드는 독립적으로 표시됨
+    const triggerFeedLoad = () => {
+      if (!feedCardsLoadedRef.current) feedHasMoreRef.current = true;
+      if (feedLoadingRef.current) { feedPendingLoadRef.current = true; }
+      else { void loadMoreFeedRef.current(); }
+    };
+
     try {
-      // userId 조회 + GPS 대기 병렬 실행
       const [uid, loc] = await Promise.all([
         getCurrentUserId(),
         Promise.race([
@@ -412,14 +418,20 @@ function HomePageInner() {
       ]);
       setUserId(uid);
 
-      await loadSections(loc, uid);
-      console.log('[Feed] initializeUser: sections loaded → loadMoreFeed', { cardsLoaded: feedCardsLoadedRef.current, loading: feedLoadingRef.current, hasMore: feedHasMoreRef.current });
-      if (!feedCardsLoadedRef.current) feedHasMoreRef.current = true;
-      // fetch 중이면 pending 마킹 → finally에서 자동 재시도
-      if (feedLoadingRef.current) { feedPendingLoadRef.current = true; }
-      else { void loadMoreFeedRef.current(); } // 섹션 로드 완료 후 최신 loadMoreFeed로 피드 로드
+      // 섹션 로드와 피드 로드를 병렬 실행
+      // 섹션이 실패해도 피드는 독립적으로 로드됨
+      const sectionsPromise = loadSections(loc, uid).catch((err) => {
+        console.warn('[Home] loadSections failed, setting empty sections:', err);
+        setSections((prev) => prev ?? []);
+      });
 
-      // GPS가 2초 내에 못 왔지만 이후 완료된 경우 전체 섹션 재로드
+      // 섹션 완료를 기다리지 않고 피드 즉시 시작
+      console.log('[Feed] initializeUser: triggering feed load (parallel with sections)');
+      triggerFeedLoad();
+
+      await sectionsPromise;
+
+      // GPS가 500ms 내에 못 왔지만 이후 완료된 경우 전체 섹션 재로드
       if (!loc) {
         requestLocation().then((resolvedLoc) => {
           if (resolvedLoc) {
@@ -429,11 +441,10 @@ function HomePageInner() {
       }
     } catch (error) {
       console.error('[Home] init error:', error);
-      await loadSections();
-      if (!feedCardsLoadedRef.current) feedHasMoreRef.current = true;
-      // fetch 중이면 pending 마킹 → finally에서 자동 재시도
-      if (feedLoadingRef.current) { feedPendingLoadRef.current = true; }
-      else { void loadMoreFeedRef.current(); } // 오류 복구 후에도 피드 로드 시도
+      // 최소한 sections=[]로 설정해 스켈레톤에서 벗어남
+      setSections((prev) => prev ?? []);
+      // 에러 시에도 피드 로드 보장
+      triggerFeedLoad();
     }
   };
 
@@ -473,14 +484,23 @@ function HomePageInner() {
     const currentUid = uid ?? userId;
 
     // SWR Step 1: 이전 세션 stale 캐시 즉시 렌더링 (skeleton 없이 바로 데이터 표시)
-    // 이미 sections가 있으면 stale로 덮어씌우지 않음 (GPS 재호출 시 플래시 방지)
-    const stale = await recommendationService.getStaleHomeSections();
+    let stale: Awaited<ReturnType<typeof recommendationService.getStaleHomeSections>> = null;
+    try {
+      stale = await recommendationService.getStaleHomeSections();
+    } catch (e) {
+      console.warn('[Home] getStaleHomeSections failed:', e);
+    }
     setSections((prev) => prev !== null ? prev : (stale ?? null));
 
-    const networkStatus = await getNetworkStatus();
+    let networkStatus: string = 'ONLINE';
+    try {
+      networkStatus = await getNetworkStatus();
+    } catch (e) {
+      console.warn('[Home] getNetworkStatus failed, assuming online:', e);
+    }
     if (networkStatus === 'OFFLINE') {
       setIsOffline(true);
-      if (stale === null) setSections([]); // 캐시도 없고 오프라인 → 에러 표시
+      if (stale === null) setSections([]);
       return;
     }
     setIsOffline(false);
@@ -561,37 +581,32 @@ function HomePageInner() {
       feedPendingLoadRef.current = false;
       userRegionRef.current = '';
       const loc = await requestLocation();
-      await loadSections(loc, userId);
-      void loadMoreFeedRef.current(); // 새로고침 후 피드도 재로드
+      await loadSections(loc, userId).catch((err) => {
+        console.warn('[Home] refresh loadSections failed:', err);
+        setSections((prev) => prev ?? []);
+      });
+      void loadMoreFeedRef.current();
     } finally {
       setRefreshing(false);
     }
   }, [userId]);
 
   const loadMoreFeed = useCallback(async () => {
-    // ref로 동기 체크 — setState 배치로 인한 동시 실행 방지
-    // feedHasMoreRef: 클로저 stale 문제 없는 동기 ref 사용
-    console.log('[Feed] loadMoreFeed called — loading:', feedLoadingRef.current, 'hasMore:', feedHasMoreRef.current, 'page:', feedPageRef.current, 'seenIds:', feedSeenEventIds.current.size);
-    if (feedLoadingRef.current) { console.log('[Feed] BLOCKED: already loading'); return; }
-    if (!feedHasMoreRef.current) { console.log('[Feed] BLOCKED: hasMore=false'); return; }
+    if (feedLoadingRef.current || !feedHasMoreRef.current) return;
     feedLoadingRef.current = true;
     setFeedLoading(true);
-    // feedPage/userRegion은 ref로 읽어 stale 클로저 문제 방지
-    // (setFeedPage(0) 후 타임아웃 재시도 시 비동기 리렌더 완료 전에 이전 값을 읽는 문제 방지)
     const currentPage = feedPageRef.current;
     const currentRegion = userRegionRef.current;
-    // Android safety timeout: OkHttp가 AbortController abort를 무시하면 fetchFeed가 hang함
-    // → JS 레벨에서 (API_TIMEOUT + 3s) 후 강제로 loading 해제해 UI가 멈추지 않도록 보장
+    // Android safety: OkHttp가 AbortController.abort()를 무시하면 fetchFeed가 hang
+    // → JS 레벨에서 (API_TIMEOUT + 3s) 후 강제로 loading 해제
     const safetyTimeoutId = setTimeout(() => {
       if (feedLoadingRef.current) {
-        console.warn('[Feed] safety timeout triggered — clearing stuck loading state');
+        console.warn('[Feed] safety timeout triggered');
         feedLoadingRef.current = false;
         setFeedLoading(false);
       }
     }, API_TIMEOUT + 3000);
     try {
-      const reqParams = { page: currentPage, region: currentRegion || 'none', stage: currentRegion ? feedRegionStageRef.current : 'all', excludeCount: feedSeenEventIds.current.size };
-      console.log('[Feed] fetchFeed START', reqParams);
       const res = await fetchFeed({
         page: currentPage,
         excludeIds: Array.from(feedSeenEventIds.current),
@@ -600,8 +615,6 @@ function HomePageInner() {
         // 위치 정보 있으면 현재 단계의 하드 필터 적용, 없으면 전국 표시
         regionStage: currentRegion ? feedRegionStageRef.current : 'all',
       });
-      console.log('[Feed] fetchFeed DONE — cards:', res.cards.length, 'hasMore:', res.has_more);
-
       if (res.cards.length === 0) {
         // Priority 1: excludeIds 풀 소진 시 → 초기화 후 1회만 재시도
         // stale pendingRetry가 feedPage=0으로 잘못 호출돼 false exhaustion이 생기는 경우도 포함
@@ -785,37 +798,31 @@ function HomePageInner() {
   // ─────────────────────────────────────────────────────────────
 
   const feedItems = useMemo((): FeedItem[] => {
-    if (sections === null) {
-      return [
-        { type: 'skeleton', skeletonType: 'today_pick', id: 'sk-today' },
-        { type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h1' },
-        { type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h2' },
-        { type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h3' },
-      ];
-    }
-    if (processedSections.length === 0) {
-      return [{ type: 'empty' }];
-    }
-
     const items: FeedItem[] = [];
 
-    // 섹션 고정 배치
-    // 섹션 사이에 피드 카드를 끼워넣으면 피드 로딩 시 기존 아이템 인덱스가 밀려
-    // FlatList가 스크롤 위치를 잃는 점프 현상이 발생함 → 섹션 뒤에 순서대로 붙임
-    for (let i = 0; i < processedSections.length; i++) {
-      items.push({ type: 'section', section: processedSections[i]! });
-      if (i === 1) items.push({ type: 'ad', id: 'section-1' });
+    if (sections === null) {
+      // 섹션 로딩 중: 스켈레톤 표시
+      items.push({ type: 'skeleton', skeletonType: 'today_pick', id: 'sk-today' });
+      items.push({ type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h1' });
+      items.push({ type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h2' });
+      items.push({ type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h3' });
+    } else if (processedSections.length === 0) {
+      items.push({ type: 'empty' });
+    } else {
+      for (let i = 0; i < processedSections.length; i++) {
+        items.push({ type: 'section', section: processedSections[i]! });
+        if (i === 1) items.push({ type: 'ad', id: 'section-1' });
+      }
     }
 
-    // 피드 카드는 섹션 전체 이후에 추가 (스크롤 점프 없음)
-    // 3개 컴포넌트마다 광고 1개 삽입
+    // 피드 카드는 섹션 상태와 무관하게 항상 표시
+    // (sections 로딩/실패로 피드가 영원히 숨겨지는 버그 방지)
     for (let i = 0; i < feedCards.length; i++) {
       items.push({ type: 'magazine', card: feedCards[i]! });
       if ((i + 1) % 3 === 0) items.push({ type: 'ad', id: `feed-${i}` });
     }
 
     if (feedLoading) {
-      // 스켈레톤 3개: 인스타/핀터레스트처럼 여러 개가 오고 있다는 느낌 제공
       items.push({ type: 'feed_loading' });
       items.push({ type: 'feed_loading' });
       items.push({ type: 'feed_loading' });
@@ -823,8 +830,6 @@ function HomePageInner() {
       const eventCount = feedCards.reduce((sum, card) => sum + card.events.length, 0);
       items.push({ type: 'feed_end', eventCount });
     } else if (feedCards.length > 0) {
-      // feedHasMore=true && !feedLoading: 더 로드 가능한 상태임을 하단 도트로 표시
-      // 사용자가 더 스크롤할 의지를 갖도록 유도 (핀터레스트 방식)
       items.push({ type: 'feed_more_dot' });
     }
 
