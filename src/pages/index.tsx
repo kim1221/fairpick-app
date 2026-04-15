@@ -93,7 +93,7 @@ type FeedItem =
   | { type: 'skeleton'; skeletonType: 'today_pick' | 'horizontal'; id: string }
   | { type: 'empty' }
   | { type: 'section'; section: ProcessedSection }
-  | { type: 'ad'; id: string }
+  | { type: 'ad'; id: string; adType: 'section' | 'feed' }
   | { type: 'magazine'; card: FeedCard }
   | { type: 'feed_loading'; loadingIdx: number }
   | { type: 'feed_more_dot' }
@@ -249,7 +249,7 @@ function HorizontalSectionSkeleton() {
 // feedAdRendered 상태가 HomePageInner를 리렌더하지 않도록 격리
 // Android에서 부모 리렌더 시 Native Ad View가 리셋되는 문제 방지
 // ─────────────────────────────────────────────────────────────
-const AdSlot = React.memo(() => {
+const AdSlot = React.memo(({ adGroupId }: { adGroupId: string }) => {
   const [status, setStatus] = useState<'loading' | 'rendered' | 'failed'>('loading');
 
   if (status === 'failed') return null;
@@ -271,7 +271,7 @@ const AdSlot = React.memo(() => {
       }}
     >
       <InlineAd
-        adGroupId="ait.v2.live.b3363cb4c82643e9"
+        adGroupId={adGroupId}
         impressFallbackOnMount={true}
         onAdRendered={() => setStatus('rendered')}
         onAdFailedToRender={() => setStatus('failed')}
@@ -280,6 +280,11 @@ const AdSlot = React.memo(() => {
     </View>
   );
 });
+
+// 섹션 사이 광고 ID (추천 섹션용)
+const AD_GROUP_SECTION = 'ait.v2.live.b3363cb4c82643e9';
+// 피드 카드 사이 광고 ID (피드 전용 — 섹션과 동일 ID 사용 시 fill 충돌 발생)
+const AD_GROUP_FEED = 'ait.v2.live.7e6f43f894204302';
 
 // SectionCard — 메모이제이션된 카드 래퍼
 // onPress를 안정된 참조로 유지해 EventCard 리렌더 방지
@@ -850,7 +855,7 @@ function HomePageInner() {
     } else {
       for (let i = 0; i < processedSections.length; i++) {
         items.push({ type: 'section', section: processedSections[i]! });
-        if (i === 1) items.push({ type: 'ad', id: 'section-1' });
+        if (i === 1) items.push({ type: 'ad', id: 'section-1', adType: 'section' });
       }
     }
 
@@ -858,7 +863,7 @@ function HomePageInner() {
     // (sections 로딩/실패로 피드가 영원히 숨겨지는 버그 방지)
     for (let i = 0; i < feedCards.length; i++) {
       items.push({ type: 'magazine', card: feedCards[i]! });
-      if ((i + 1) % 3 === 0) items.push({ type: 'ad', id: `feed-${i}` });
+      if ((i + 1) % 3 === 0) items.push({ type: 'ad', id: `feed-${i}`, adType: 'feed' });
     }
 
     // 로딩 중이거나 재시도 대기 중(카드 없음+hasMore+에러 없음)일 때 스켈레톤 표시
@@ -912,7 +917,7 @@ function HomePageInner() {
       );
     }
     if (item.type === 'ad') {
-      return <AdSlot />;
+      return <AdSlot adGroupId={item.adType === 'feed' ? AD_GROUP_FEED : AD_GROUP_SECTION} />;
     }
     if (item.type === 'magazine') {
       const { card } = item;
