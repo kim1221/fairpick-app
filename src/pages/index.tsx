@@ -393,6 +393,7 @@ function HomePageInner() {
     }
 
     if (_homeCache && Date.now() < _homeCache.expiresAt) {
+      console.log('[Feed] initializeUser: cache HIT → loadMoreFeed', { cardsLoaded: feedCardsLoadedRef.current, loading: feedLoadingRef.current });
       if (!feedCardsLoadedRef.current) feedHasMoreRef.current = true;
       // fetch 중이면 pending 마킹 → finally에서 자동 재시도
       if (feedLoadingRef.current) { feedPendingLoadRef.current = true; }
@@ -412,6 +413,7 @@ function HomePageInner() {
       setUserId(uid);
 
       await loadSections(loc, uid);
+      console.log('[Feed] initializeUser: sections loaded → loadMoreFeed', { cardsLoaded: feedCardsLoadedRef.current, loading: feedLoadingRef.current, hasMore: feedHasMoreRef.current });
       if (!feedCardsLoadedRef.current) feedHasMoreRef.current = true;
       // fetch 중이면 pending 마킹 → finally에서 자동 재시도
       if (feedLoadingRef.current) { feedPendingLoadRef.current = true; }
@@ -569,7 +571,9 @@ function HomePageInner() {
   const loadMoreFeed = useCallback(async () => {
     // ref로 동기 체크 — setState 배치로 인한 동시 실행 방지
     // feedHasMoreRef: 클로저 stale 문제 없는 동기 ref 사용
-    if (feedLoadingRef.current || !feedHasMoreRef.current) return;
+    console.log('[Feed] loadMoreFeed called — loading:', feedLoadingRef.current, 'hasMore:', feedHasMoreRef.current, 'page:', feedPageRef.current, 'seenIds:', feedSeenEventIds.current.size);
+    if (feedLoadingRef.current) { console.log('[Feed] BLOCKED: already loading'); return; }
+    if (!feedHasMoreRef.current) { console.log('[Feed] BLOCKED: hasMore=false'); return; }
     feedLoadingRef.current = true;
     setFeedLoading(true);
     // feedPage/userRegion은 ref로 읽어 stale 클로저 문제 방지
@@ -586,6 +590,8 @@ function HomePageInner() {
       }
     }, API_TIMEOUT + 3000);
     try {
+      const reqParams = { page: currentPage, region: currentRegion || 'none', stage: currentRegion ? feedRegionStageRef.current : 'all', excludeCount: feedSeenEventIds.current.size };
+      console.log('[Feed] fetchFeed START', reqParams);
       const res = await fetchFeed({
         page: currentPage,
         excludeIds: Array.from(feedSeenEventIds.current),
@@ -594,6 +600,7 @@ function HomePageInner() {
         // 위치 정보 있으면 현재 단계의 하드 필터 적용, 없으면 전국 표시
         regionStage: currentRegion ? feedRegionStageRef.current : 'all',
       });
+      console.log('[Feed] fetchFeed DONE — cards:', res.cards.length, 'hasMore:', res.has_more);
 
       if (res.cards.length === 0) {
         // Priority 1: excludeIds 풀 소진 시 → 초기화 후 1회만 재시도
