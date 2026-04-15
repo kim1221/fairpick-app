@@ -346,32 +346,21 @@ function HomePageInner() {
   // 매거진 피드 상태
   const [feedCards, setFeedCards] = useState<FeedCard[]>([]);
   // feedPage/userRegion은 렌더링에 직접 사용되지 않으므로 ref만 관리 (setState 불필요)
-  const [feedHasMore, setFeedHasMore] = useState(true);
+  // feedHasMore=false로 시작: initializeUser 완료 전에 onEndReached가
+  // 조기 발동해서 레이스 컨디션을 일으키는 것을 방지
+  const [feedHasMore, setFeedHasMore] = useState(false);
   const [feedLoading, setFeedLoading] = useState(false);
-  // ref: setState는 비동기 배치라 연속 onEndReached 호출 시 guard가 뚫릴 수 있음
-  // ref는 동기적으로 체크되므로 동시 실행 방지에 사용
   const feedLoadingRef = useRef(false);
   const feedSeenEventIds = useRef<Set<string>>(new Set());
-  // exclude 소진 자동 리셋은 세션당 1회만 (무한 루프 방지)
   const feedResetAttemptedRef = useRef(false);
-  // 이번 세션에서 카드를 한 번이라도 로드했는지 (자연스러운 피드 끝 vs. 초기 로드 실패 구분용)
   const feedCardsLoadedRef = useRef(false);
-  // feedHasMore 클로저 stale 문제 방지용 ref: loadMoreFeed guard는 이 ref로 동기 체크
-  // (onEndReached 조기 발동으로 feedHasMore=false가 세팅돼도 initializeUser 호출을 막지 않음)
-  const feedHasMoreRef = useRef(true);
-  // feedPage 클로저 stale 방지용 ref: setFeedPage(0) 후 타임아웃 재시도 시 비동기 리렌더 완료 전에
-  // 이전 page 값을 읽는 문제를 방지 (ref는 동기 업데이트)
+  const feedHasMoreRef = useRef(false);
   const feedPageRef = useRef(0);
-  // 지역 하드 필터 단계: exact(서울) → metro(수도권) → all(전국) 순서로 자동 확장
   const feedRegionStageRef = useRef<'exact' | 'metro' | 'all'>('exact');
-  // initializeUser가 호출한 loadMoreFeed가 fetch 중이라 drop됐을 때 재시도 예약 플래그
   const feedPendingLoadRef = useRef(false);
   const userRegionRef = useRef('');
-  // 피드 에러 자동 재시도 카운터 (세션당 최대 3회)
   const feedRetryCountRef = useRef(0);
   const FEED_MAX_RETRIES = 3;
-  // 디버그: 피드 에러를 화면에 표시 (원인 파악 후 제거)
-  const [feedDebugMsg, setFeedDebugMsg] = useState('');
 
   useEffect(() => {
     initializeUser();
@@ -397,19 +386,16 @@ function HomePageInner() {
     }
 
     if (_homeCache && Date.now() < _homeCache.expiresAt) {
-      console.log('[Feed] initializeUser: cache HIT → loadMoreFeed', { cardsLoaded: feedCardsLoadedRef.current, loading: feedLoadingRef.current });
-      if (!feedCardsLoadedRef.current) feedHasMoreRef.current = true;
-      if (feedLoadingRef.current) { feedPendingLoadRef.current = true; }
-      else { void loadMoreFeedRef.current(); }
+      feedHasMoreRef.current = true;
+      setFeedHasMore(true);
+      void loadMoreFeedRef.current();
       return;
     }
 
-    // 피드 로드를 섹션과 독립적으로 즉시 시작
-    // 섹션 API가 느리거나 실패해도 피드는 독립적으로 표시됨
     const triggerFeedLoad = () => {
-      if (!feedCardsLoadedRef.current) feedHasMoreRef.current = true;
-      if (feedLoadingRef.current) { feedPendingLoadRef.current = true; }
-      else { void loadMoreFeedRef.current(); }
+      feedHasMoreRef.current = true;
+      setFeedHasMore(true);
+      void loadMoreFeedRef.current();
     };
 
     try {
@@ -429,8 +415,6 @@ function HomePageInner() {
         setSections((prev) => prev ?? []);
       });
 
-      // 섹션 완료를 기다리지 않고 피드 즉시 시작
-      console.log('[Feed] initializeUser: triggering feed load (parallel with sections)');
       triggerFeedLoad();
 
       await sectionsPromise;
@@ -600,7 +584,6 @@ function HomePageInner() {
     if (feedLoadingRef.current || !feedHasMoreRef.current) return;
     feedLoadingRef.current = true;
     setFeedLoading(true);
-    setFeedDebugMsg(`fetching page=${feedPageRef.current}...`);
     const currentPage = feedPageRef.current;
     const currentRegion = userRegionRef.current;
     // Android safety: OkHttp가 AbortController.abort()를 무시하면 fetchFeed가 hang
@@ -621,7 +604,6 @@ function HomePageInner() {
         // 위치 정보 있으면 현재 단계의 하드 필터 적용, 없으면 전국 표시
         regionStage: currentRegion ? feedRegionStageRef.current : 'all',
       });
-      setFeedDebugMsg(`OK: ${res.cards.length}cards, hasMore=${res.has_more}`);
       if (res.cards.length === 0) {
         // Priority 1: excludeIds 풀 소진 시 → 초기화 후 1회만 재시도
         // stale pendingRetry가 feedPage=0으로 잘못 호출돼 false exhaustion이 생기는 경우도 포함
@@ -689,8 +671,7 @@ function HomePageInner() {
       // 성공 시 재시도 카운터 리셋
       feedRetryCountRef.current = 0;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setFeedDebugMsg(`ERR(retry ${feedRetryCountRef.current}/${FEED_MAX_RETRIES}): ${msg}`);
+      console.warn('[Feed] error:', err instanceof Error ? err.message : String(err));
       if (feedRetryCountRef.current < FEED_MAX_RETRIES) {
         feedRetryCountRef.current++;
         const delay = 1000 * feedRetryCountRef.current;
@@ -1071,19 +1052,10 @@ function HomePageInner() {
           return item.type;
         }}
         ListHeaderComponent={listHeader}
-        ListFooterComponent={
-          <View style={{ height: 100 }}>
-            {feedDebugMsg ? (
-              <Text style={{ fontSize: 11, color: '#999', textAlign: 'center', padding: 8 }}>
-                [feed] {feedDebugMsg}
-              </Text>
-            ) : null}
-          </View>
-        }
+        ListFooterComponent={<View style={{ height: 100 }} />}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={Platform.OS !== 'android'}
-        // Android 성능 최적화: 기본 windowSize=21(화면 20개 분량)이 너무 커서
-        // 스크롤 누적 시 JS 스레드 과부하 → 5로 줄여 메모리/렌더 부담 감소
+        maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
         windowSize={5}
         maxToRenderPerBatch={3}
         initialNumToRender={6}
