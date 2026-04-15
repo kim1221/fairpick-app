@@ -359,8 +359,13 @@ function HomePageInner() {
   const feedRegionStageRef = useRef<'exact' | 'metro' | 'all'>('exact');
   const feedPendingLoadRef = useRef(false);
   const userRegionRef = useRef('');
+  // userId ref: loadMoreFeed가 loadSections 완료 전에 호출될 때 stale 클로저 방지
+  const userIdRef = useRef(validCache?.userId ?? '');
   const feedRetryCountRef = useRef(0);
+  // recovery effect 재시도 횟수: 무한 루프 방지
+  const feedRecoveryCountRef = useRef(0);
   const FEED_MAX_RETRIES = 3;
+  const FEED_MAX_RECOVERY = 3;
   // Railway 콜드 스타트 대비: 첫 피드 요청은 30초, 이후는 15초
   const COLD_START_TIMEOUT = 30000;
 
@@ -411,14 +416,14 @@ function HomePageInner() {
         ]),
       ]);
       setUserId(uid);
+      userIdRef.current = uid;
 
-      // 섹션 먼저 로드: Railway 콜드 스타트 시 이 요청이 서버를 깨움
-      // 섹션 로드 완료 후 서버가 warm 상태이므로 피드 요청은 빠르게 처리됨
-      await loadSections(loc, uid).catch((err) => {
+      // 섹션·피드 병렬 로드: 섹션 완료를 기다리지 않고 피드 즉시 시작
+      // Railway 콜드 스타트 시 섹션 로드가 10~30초 걸려 피드가 늦게 뜨는 문제 해결
+      loadSections(loc, uid).catch((err) => {
         console.warn('[Home] loadSections failed, setting empty sections:', err);
         setSections((prev) => prev ?? []);
       });
-
       triggerFeedLoad();
 
       // GPS가 500ms 내에 못 왔지만 이후 완료된 경우 전체 섹션 재로드
@@ -568,9 +573,10 @@ function HomePageInner() {
       feedRegionStageRef.current = 'exact';
       feedPendingLoadRef.current = false;
       feedRetryCountRef.current = 0;
+      feedRecoveryCountRef.current = 0;
       userRegionRef.current = '';
       const loc = await requestLocation();
-      await loadSections(loc, userId).catch((err) => {
+      loadSections(loc, userId).catch((err) => {
         console.warn('[Home] refresh loadSections failed:', err);
         setSections((prev) => prev ?? []);
       });
@@ -586,6 +592,8 @@ function HomePageInner() {
     setFeedLoading(true);
     const currentPage = feedPageRef.current;
     const currentRegion = userRegionRef.current;
+    // userId: ref로 읽어 stale 클로저 방지 (loadSections 완료 전에 호출될 수 있음)
+    const currentUserId = userIdRef.current;
     // 첫 피드 요청(카드 0개)이면 Railway 콜드 스타트에 대비해 30초 타임아웃
     const isFirstLoad = !feedCardsLoadedRef.current;
     const fetchTimeout = isFirstLoad ? COLD_START_TIMEOUT : API_TIMEOUT;
@@ -603,7 +611,7 @@ function HomePageInner() {
       const res = await fetchFeed({
         page: currentPage,
         excludeIds: Array.from(feedSeenEventIds.current),
-        userId,
+        userId: currentUserId,
         region: currentRegion || undefined,
         regionStage: currentRegion ? feedRegionStageRef.current : 'all',
         timeout: fetchTimeout,
@@ -702,10 +710,24 @@ function HomePageInner() {
 
   // 피드 고착 상태 자동 복구: feedCards=0, loading=false, hasMore=true이면
   // 섹션은 로드됐는데 피드가 빠진 상태 → 3초 후 자동 재트리거
+  // FEED_MAX_RECOVERY 초과 시 hasMore=false로 바꿔 무한 루프 방지
   useEffect(() => {
     if (sections !== null && feedCards.length === 0 && !feedLoading && feedHasMore) {
-      const id = setTimeout(() => { void loadMoreFeedRef.current(); }, 3000);
+      if (feedRecoveryCountRef.current >= FEED_MAX_RECOVERY) {
+        // 복구 시도 횟수 초과 → 피드 끝 카드 표시 (무한 로딩 깜박임 방지)
+        setFeedHasMore(false);
+        feedHasMoreRef.current = false;
+        return undefined;
+      }
+      const id = setTimeout(() => {
+        feedRecoveryCountRef.current++;
+        void loadMoreFeedRef.current();
+      }, 3000);
       return () => clearTimeout(id);
+    }
+    // 카드가 생겼으면 복구 카운터 리셋
+    if (feedCards.length > 0) {
+      feedRecoveryCountRef.current = 0;
     }
     return undefined;
   }, [sections, feedCards.length, feedLoading, feedHasMore]);
