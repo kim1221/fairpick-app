@@ -649,8 +649,10 @@ function HomePageInner() {
       }
       setFeedHasMore(res.has_more);
       feedHasMoreRef.current = res.has_more;
-    } catch {
+    } catch (err) {
       // 피드 로딩 실패는 무시 (기존 섹션에 영향 없음)
+      // 에러 로그: Android abort 미지원 / 네트워크 에러 등 원인 파악용
+      console.warn('[Feed] loadMoreFeed error:', err instanceof Error ? err.message : String(err));
     } finally {
       feedLoadingRef.current = false;
       setFeedLoading(false);

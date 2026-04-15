@@ -97,13 +97,22 @@ export async function fetchFeed(params: {
     query.set('region_stage', regionStage);
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+  // Android의 OkHttp는 AbortController.abort()를 일부 버전에서 무시하는 알려진 버그 존재
+  // AbortController 대신 Promise.race + JS 타임아웃으로 timeout 보장
+  // → fetchFeed가 절대 hang하지 않도록 해 loadMoreFeed finally가 항상 실행됨
+  let jsTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
   try {
-    const res = await fetch(`${API_BASE_URL}/api/home/feed?${query.toString()}`, {
-      signal: controller.signal,
+    const fetchPromise = fetch(`${API_BASE_URL}/api/home/feed?${query.toString()}`);
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      jsTimeoutId = setTimeout(
+        () => reject(new Error('Feed request timeout')),
+        API_TIMEOUT,
+      );
     });
+
+    const res = await Promise.race([fetchPromise, timeoutPromise]);
 
     if (!res.ok) {
       throw new Error(`Feed API error: ${res.status}`);
@@ -111,6 +120,6 @@ export async function fetchFeed(params: {
 
     return (await res.json()) as FeedResponse;
   } finally {
-    clearTimeout(timeoutId);
+    clearTimeout(jsTimeoutId);
   }
 }
