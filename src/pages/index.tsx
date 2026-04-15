@@ -369,8 +369,9 @@ function HomePageInner() {
   const feedRecoveryCountRef = useRef(0);
   const FEED_MAX_RETRIES = 3;
   const FEED_MAX_RECOVERY = 3;
-  // Railway 콜드 스타트 대비: 첫 피드 요청은 30초, 이후는 15초
-  const COLD_START_TIMEOUT = 30000;
+  // 첫 피드 요청 타임아웃: 8초로 짧게 유지해 빠른 재시도로 서버 웨이크업을 노림
+  // Railway 콜드 스타트(15~30초)는 재시도가 catch해줌 — 1번 요청이 30초 기다리는 것보다 빠름
+  const COLD_START_TIMEOUT = 8000;
 
   useEffect(() => {
     initializeUser();
@@ -860,7 +861,10 @@ function HomePageInner() {
       if ((i + 1) % 3 === 0) items.push({ type: 'ad', id: `feed-${i}` });
     }
 
-    if (feedLoading) {
+    // 로딩 중이거나 재시도 대기 중(카드 없음+hasMore+에러 없음)일 때 스켈레톤 표시
+    // 재시도 사이 1~3초 갭에도 스켈레톤을 유지해 깜박임 방지
+    const showFeedLoading = feedLoading || (feedCards.length === 0 && feedHasMore && !feedError);
+    if (showFeedLoading) {
       items.push({ type: 'feed_loading', loadingIdx: 0 });
       items.push({ type: 'feed_loading', loadingIdx: 1 });
       items.push({ type: 'feed_loading', loadingIdx: 2 });
