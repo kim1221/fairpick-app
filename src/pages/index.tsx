@@ -97,6 +97,7 @@ type FeedItem =
   | { type: 'magazine'; card: FeedCard }
   | { type: 'feed_loading'; loadingIdx: number }
   | { type: 'feed_more_dot' }
+  | { type: 'feed_error' }
   | { type: 'feed_end'; eventCount: number };
 
 // ─────────────────────────────────────────────────────────────
@@ -350,6 +351,8 @@ function HomePageInner() {
   // 조기 발동해서 레이스 컨디션을 일으키는 것을 방지
   const [feedHasMore, setFeedHasMore] = useState(false);
   const [feedLoading, setFeedLoading] = useState(false);
+  // feedError: 카드 0개인 상태에서 모든 복구 시도 실패 시 표시 (hasMore=false 대신 사용)
+  const [feedError, setFeedError] = useState(false);
   const feedLoadingRef = useRef(false);
   const feedSeenEventIds = useRef<Set<string>>(new Set());
   const feedResetAttemptedRef = useRef(false);
@@ -395,6 +398,9 @@ function HomePageInner() {
     const triggerFeedLoad = () => {
       feedHasMoreRef.current = true;
       setFeedHasMore(true);
+      setFeedError(false);
+      feedRecoveryCountRef.current = 0;
+      feedRetryCountRef.current = 0;
       void loadMoreFeedRef.current();
     };
 
@@ -574,6 +580,7 @@ function HomePageInner() {
       feedPendingLoadRef.current = false;
       feedRetryCountRef.current = 0;
       feedRecoveryCountRef.current = 0;
+      setFeedError(false);
       userRegionRef.current = '';
       const loc = await requestLocation();
       loadSections(loc, userId).catch((err) => {
@@ -710,13 +717,13 @@ function HomePageInner() {
 
   // 피드 고착 상태 자동 복구: feedCards=0, loading=false, hasMore=true이면
   // 섹션은 로드됐는데 피드가 빠진 상태 → 3초 후 자동 재트리거
-  // FEED_MAX_RECOVERY 초과 시 hasMore=false로 바꿔 무한 루프 방지
+  // FEED_MAX_RECOVERY 초과 시 feedError=true로 에러 카드 표시 (hasMore는 건드리지 않음)
+  // 이유: hasMore=false는 "콘텐츠가 없음"을 의미하지만 실제로는 서버 응답 실패이므로 구분
   useEffect(() => {
-    if (sections !== null && feedCards.length === 0 && !feedLoading && feedHasMore) {
+    if (sections !== null && feedCards.length === 0 && !feedLoading && feedHasMore && !feedError) {
       if (feedRecoveryCountRef.current >= FEED_MAX_RECOVERY) {
-        // 복구 시도 횟수 초과 → 피드 끝 카드 표시 (무한 로딩 깜박임 방지)
-        setFeedHasMore(false);
-        feedHasMoreRef.current = false;
+        // 복구 시도 초과 → 에러 카드 표시 (다시 시도 버튼 포함)
+        setFeedError(true);
         return undefined;
       }
       const id = setTimeout(() => {
@@ -725,12 +732,13 @@ function HomePageInner() {
       }, 3000);
       return () => clearTimeout(id);
     }
-    // 카드가 생겼으면 복구 카운터 리셋
-    if (feedCards.length > 0) {
+    // 카드가 생겼으면 복구 카운터·에러 리셋
+    if (feedCards.length > 0 && feedError) {
+      setFeedError(false);
       feedRecoveryCountRef.current = 0;
     }
     return undefined;
-  }, [sections, feedCards.length, feedLoading, feedHasMore]);
+  }, [sections, feedCards.length, feedLoading, feedHasMore, feedError]);
 
   const scrollToTop = useCallback(() => {
     flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -856,6 +864,9 @@ function HomePageInner() {
       items.push({ type: 'feed_loading', loadingIdx: 0 });
       items.push({ type: 'feed_loading', loadingIdx: 1 });
       items.push({ type: 'feed_loading', loadingIdx: 2 });
+    } else if (feedError) {
+      // 카드 0개 + 모든 재시도 실패: 에러 카드 (hasMore는 여전히 true — 콘텐츠는 존재함)
+      items.push({ type: 'feed_error' });
     } else if (!feedHasMore) {
       const eventCount = feedCards.reduce((sum, card) => sum + card.events.length, 0);
       items.push({ type: 'feed_end', eventCount });
@@ -864,7 +875,7 @@ function HomePageInner() {
     }
 
     return items;
-  }, [sections, processedSections, feedCards, feedLoading, feedHasMore]);
+  }, [sections, processedSections, feedCards, feedLoading, feedHasMore, feedError]);
 
   const renderFeedItem = useCallback(({ item }: { item: FeedItem }) => {
     if (item.type === 'skeleton') {
@@ -969,6 +980,30 @@ function HomePageInner() {
           <AnimateSkeleton delay={0} withGradient={false} withShimmer>
             <View style={{ height: 100, borderRadius: 16, backgroundColor: adaptive.grey200 }} />
           </AnimateSkeleton>
+        </View>
+      );
+    }
+    if (item.type === 'feed_error') {
+      // 카드 0개 상태에서 서버 응답 실패 — 다시 시도 버튼 제공
+      return (
+        <View style={{ paddingHorizontal: 20, paddingVertical: 32, alignItems: 'center' }}>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: adaptive.grey700, marginBottom: 8 }}>
+            피드를 불러오지 못했어요
+          </Text>
+          <Text style={{ fontSize: 13, color: adaptive.grey500, marginBottom: 20 }}>
+            잠시 후 다시 시도해 주세요
+          </Text>
+          <Pressable
+            onPress={() => {
+              setFeedError(false);
+              feedRecoveryCountRef.current = 0;
+              feedRetryCountRef.current = 0;
+              void loadMoreFeedRef.current();
+            }}
+            style={{ paddingVertical: 11, paddingHorizontal: 24, borderRadius: 10, borderWidth: 1, borderColor: adaptive.grey300 }}
+          >
+            <Text style={{ fontSize: 14, fontWeight: '600', color: adaptive.grey700 }}>다시 시도</Text>
+          </Pressable>
         </View>
       );
     }
