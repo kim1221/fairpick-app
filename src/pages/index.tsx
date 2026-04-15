@@ -370,6 +370,8 @@ function HomePageInner() {
   // 피드 에러 자동 재시도 카운터 (세션당 최대 3회)
   const feedRetryCountRef = useRef(0);
   const FEED_MAX_RETRIES = 3;
+  // 디버그: 피드 에러를 화면에 표시 (원인 파악 후 제거)
+  const [feedDebugMsg, setFeedDebugMsg] = useState('');
 
   useEffect(() => {
     initializeUser();
@@ -598,6 +600,7 @@ function HomePageInner() {
     if (feedLoadingRef.current || !feedHasMoreRef.current) return;
     feedLoadingRef.current = true;
     setFeedLoading(true);
+    setFeedDebugMsg(`fetching page=${feedPageRef.current}...`);
     const currentPage = feedPageRef.current;
     const currentRegion = userRegionRef.current;
     // Android safety: OkHttp가 AbortController.abort()를 무시하면 fetchFeed가 hang
@@ -618,6 +621,7 @@ function HomePageInner() {
         // 위치 정보 있으면 현재 단계의 하드 필터 적용, 없으면 전국 표시
         regionStage: currentRegion ? feedRegionStageRef.current : 'all',
       });
+      setFeedDebugMsg(`OK: ${res.cards.length}cards, hasMore=${res.has_more}`);
       if (res.cards.length === 0) {
         // Priority 1: excludeIds 풀 소진 시 → 초기화 후 1회만 재시도
         // stale pendingRetry가 feedPage=0으로 잘못 호출돼 false exhaustion이 생기는 경우도 포함
@@ -685,12 +689,11 @@ function HomePageInner() {
       // 성공 시 재시도 카운터 리셋
       feedRetryCountRef.current = 0;
     } catch (err) {
-      console.warn('[Feed] loadMoreFeed error:', err instanceof Error ? err.message : String(err));
-      // 에러 시 자동 재시도 (exponential backoff, 세션당 최대 3회)
+      const msg = err instanceof Error ? err.message : String(err);
+      setFeedDebugMsg(`ERR(retry ${feedRetryCountRef.current}/${FEED_MAX_RETRIES}): ${msg}`);
       if (feedRetryCountRef.current < FEED_MAX_RETRIES) {
         feedRetryCountRef.current++;
-        const delay = 1000 * feedRetryCountRef.current; // 1s, 2s, 3s
-        console.warn(`[Feed] auto-retry #${feedRetryCountRef.current} in ${delay}ms`);
+        const delay = 1000 * feedRetryCountRef.current;
         setTimeout(() => { void loadMoreFeedRef.current(); }, delay);
       }
     } finally {
@@ -1068,7 +1071,15 @@ function HomePageInner() {
           return item.type;
         }}
         ListHeaderComponent={listHeader}
-        ListFooterComponent={<View style={{ height: 100 }} />}
+        ListFooterComponent={
+          <View style={{ height: 100 }}>
+            {feedDebugMsg ? (
+              <Text style={{ fontSize: 11, color: '#999', textAlign: 'center', padding: 8 }}>
+                [feed] {feedDebugMsg}
+              </Text>
+            ) : null}
+          </View>
+        }
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={Platform.OS !== 'android'}
         // Android 성능 최적화: 기본 windowSize=21(화면 20개 분량)이 너무 커서
