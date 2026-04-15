@@ -24,6 +24,7 @@ import { MagazineCard } from '../components/MagazineCard';
 import { TrendCard } from '../components/TrendCard';
 import { HeroCard } from '../components/HeroCard';
 import { fetchFeed, feedEventToScoredEvent, type FeedCard } from '../services/feedService';
+import { API_TIMEOUT } from '../config/api';
 
 import type { ScoredEvent, Location } from '../types/recommendation';
 
@@ -575,6 +576,15 @@ function HomePageInner() {
     // (setFeedPage(0) 후 타임아웃 재시도 시 비동기 리렌더 완료 전에 이전 값을 읽는 문제 방지)
     const currentPage = feedPageRef.current;
     const currentRegion = userRegionRef.current;
+    // Android safety timeout: OkHttp가 AbortController abort를 무시하면 fetchFeed가 hang함
+    // → JS 레벨에서 (API_TIMEOUT + 3s) 후 강제로 loading 해제해 UI가 멈추지 않도록 보장
+    const safetyTimeoutId = setTimeout(() => {
+      if (feedLoadingRef.current) {
+        console.warn('[Feed] safety timeout triggered — clearing stuck loading state');
+        feedLoadingRef.current = false;
+        setFeedLoading(false);
+      }
+    }, API_TIMEOUT + 3000);
     try {
       const res = await fetchFeed({
         page: currentPage,
@@ -654,6 +664,7 @@ function HomePageInner() {
       // 에러 로그: Android abort 미지원 / 네트워크 에러 등 원인 파악용
       console.warn('[Feed] loadMoreFeed error:', err instanceof Error ? err.message : String(err));
     } finally {
+      clearTimeout(safetyTimeoutId); // safety timeout이 이미 발동됐으면 no-op
       feedLoadingRef.current = false;
       setFeedLoading(false);
       // initializeUser의 call이 drop됐으면 지금 재시도
