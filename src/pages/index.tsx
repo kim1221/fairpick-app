@@ -56,6 +56,19 @@ interface HomeCache {
 let _homeCache: HomeCache | null = null;
 const HOME_CACHE_TTL_MS = 5 * 60 * 1000; // 5분
 
+// today_pick KST 일별 고정 캐시
+// GPS 재로드 / 새로고침 시에도 오늘 이미 결정된 today_pick을 유지
+interface TodayPickCache {
+  section: HomeSection;
+  kstDate: string; // KST 기준 YYYY-MM-DD
+}
+let _todayPickCache: TodayPickCache | null = null;
+
+/** KST(UTC+9) 기준 오늘 날짜 문자열 반환 */
+function getTodayKst(): string {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 // ─────────────────────────────────────────────────────────────
 // 타입
 // ─────────────────────────────────────────────────────────────
@@ -82,6 +95,7 @@ type FeedItem =
   | { type: 'ad'; id: string }
   | { type: 'magazine'; card: FeedCard }
   | { type: 'feed_loading' }
+  | { type: 'feed_more_dot' }
   | { type: 'feed_end'; eventCount: number };
 
 // ─────────────────────────────────────────────────────────────
@@ -321,7 +335,7 @@ function HomePageInner() {
   const [userId, setUserId] = useState(validCache?.userId ?? '');
   const [location, setLocation] = useState<Location | undefined>(validCache?.location);
   const [currentAddress, setCurrentAddress] = useState('');
-  const [userRegion, setUserRegion] = useState('');  // DB region명 (예: "서울", "경기")
+  // userRegion은 ref로만 관리 (렌더링에 직접 사용되지 않음)
   const [refreshing, setRefreshing] = useState(false);
   const [showAiNotice, setShowAiNotice] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
@@ -330,13 +344,29 @@ function HomePageInner() {
 
   // 매거진 피드 상태
   const [feedCards, setFeedCards] = useState<FeedCard[]>([]);
-  const [feedPage, setFeedPage] = useState<number>(0);
+  // feedPage/userRegion은 렌더링에 직접 사용되지 않으므로 ref만 관리 (setState 불필요)
   const [feedHasMore, setFeedHasMore] = useState(true);
   const [feedLoading, setFeedLoading] = useState(false);
   // ref: setState는 비동기 배치라 연속 onEndReached 호출 시 guard가 뚫릴 수 있음
   // ref는 동기적으로 체크되므로 동시 실행 방지에 사용
   const feedLoadingRef = useRef(false);
   const feedSeenEventIds = useRef<Set<string>>(new Set());
+  // exclude 소진 자동 리셋은 세션당 1회만 (무한 루프 방지)
+  const feedResetAttemptedRef = useRef(false);
+  // 이번 세션에서 카드를 한 번이라도 로드했는지 (자연스러운 피드 끝 vs. 초기 로드 실패 구분용)
+  const feedCardsLoadedRef = useRef(false);
+  // feedHasMore 클로저 stale 문제 방지용 ref: loadMoreFeed guard는 이 ref로 동기 체크
+  // (onEndReached 조기 발동으로 feedHasMore=false가 세팅돼도 initializeUser 호출을 막지 않음)
+  const feedHasMoreRef = useRef(true);
+  // feedPage 클로저 stale 방지용 ref: setFeedPage(0) 후 타임아웃 재시도 시 비동기 리렌더 완료 전에
+  // 이전 page 값을 읽는 문제를 방지 (ref는 동기 업데이트)
+  const feedPageRef = useRef(0);
+  // 지역 하드 필터 단계: exact(서울) → metro(수도권) → all(전국) 순서로 자동 확장
+  const feedRegionStageRef = useRef<'exact' | 'metro' | 'all'>('exact');
+  // initializeUser가 호출한 loadMoreFeed가 fetch 중이라 drop됐을 때 재시도 예약 플래그
+  const feedPendingLoadRef = useRef(false);
+  // userRegion ref: loadMoreFeed 클로저 stale 방지 (reverseGeocode가 비동기로 세팅됨)
+  const userRegionRef = useRef('');
 
   useEffect(() => {
     initializeUser();
@@ -358,11 +388,14 @@ function HomePageInner() {
     const feedState = await getFeedState();
     if (!feedState.wasReset && feedState.excludeIds.length > 0) {
       feedSeenEventIds.current = new Set(feedState.excludeIds);
-      setFeedPage(feedState.nextPage);
+      feedPageRef.current = feedState.nextPage;
     }
 
     if (_homeCache && Date.now() < _homeCache.expiresAt) {
-      void loadMoreFeedRef.current(); // 캐시 히트해도 첫 피드 배치 로드
+      if (!feedCardsLoadedRef.current) feedHasMoreRef.current = true;
+      // fetch 중이면 pending 마킹 → finally에서 자동 재시도
+      if (feedLoadingRef.current) { feedPendingLoadRef.current = true; }
+      else { void loadMoreFeedRef.current(); } // 캐시 히트해도 첫 피드 배치 로드
       return;
     }
 
@@ -378,7 +411,10 @@ function HomePageInner() {
       setUserId(uid);
 
       await loadSections(loc, uid);
-      void loadMoreFeedRef.current(); // 섹션 로드 완료 후 최신 loadMoreFeed로 피드 로드
+      if (!feedCardsLoadedRef.current) feedHasMoreRef.current = true;
+      // fetch 중이면 pending 마킹 → finally에서 자동 재시도
+      if (feedLoadingRef.current) { feedPendingLoadRef.current = true; }
+      else { void loadMoreFeedRef.current(); } // 섹션 로드 완료 후 최신 loadMoreFeed로 피드 로드
 
       // GPS가 2초 내에 못 왔지만 이후 완료된 경우 전체 섹션 재로드
       if (!loc) {
@@ -391,7 +427,10 @@ function HomePageInner() {
     } catch (error) {
       console.error('[Home] init error:', error);
       await loadSections();
-      void loadMoreFeedRef.current(); // 오류 복구 후에도 피드 로드 시도
+      if (!feedCardsLoadedRef.current) feedHasMoreRef.current = true;
+      // fetch 중이면 pending 마킹 → finally에서 자동 재시도
+      if (feedLoadingRef.current) { feedPendingLoadRef.current = true; }
+      else { void loadMoreFeedRef.current(); } // 오류 복구 후에도 피드 로드 시도
     }
   };
 
@@ -411,7 +450,11 @@ function HomePageInner() {
       reverseGeocode(loc.lat, loc.lng).then((geo) => {
         setCurrentAddress(geo.success && geo.address ? geo.address : '위치 정보');
         if (geo.success && geo.sido) {
-          setUserRegion(sidoToRegion(geo.sido));
+          const region = sidoToRegion(geo.sido);
+          // ref만 업데이트: 다음 loadMoreFeed 호출 시 자동으로 반영됨
+          // 강제 재로드 금지 — feedSeenEventIds가 채워진 상태에서 page=0+exact로 재시도하면
+          // 이미 본 이벤트가 exclude되어 빈 결과 → 단계 순환 루프 발생
+          userRegionRef.current = region;
         }
       }).catch(() => {});
       return loc;
@@ -427,9 +470,9 @@ function HomePageInner() {
     const currentUid = uid ?? userId;
 
     // SWR Step 1: 이전 세션 stale 캐시 즉시 렌더링 (skeleton 없이 바로 데이터 표시)
-    // 배민/쿠팡이츠와 동일한 패턴 — API 응답 기다리지 않고 캐시 먼저 보여줌
+    // 이미 sections가 있으면 stale로 덮어씌우지 않음 (GPS 재호출 시 플래시 방지)
     const stale = await recommendationService.getStaleHomeSections();
-    setSections(stale !== null ? stale : null); // stale 있으면 즉시 표시, 없으면 skeleton
+    setSections((prev) => prev !== null ? prev : (stale ?? null));
 
     const networkStatus = await getNetworkStatus();
     if (networkStatus === 'OFFLINE') {
@@ -442,9 +485,24 @@ function HomePageInner() {
     // SWR Step 2: 신선한 데이터를 백그라운드에서 fetch → 완료 시 UI 갱신
     const response = await recommendationService.getSections(loc, currentUid);
     if (response.success) {
-      setSections(response.sections);
+      // today_pick 하루 고정: GPS 재로드·새로고침 시에도 오늘 이미 선택된 이벤트 유지
+      // (GPS 유무에 따라 backend 후보 풀이 달라져 변경될 수 있으므로 프론트에서 잠금)
+      const today = getTodayKst();
+      const freshTodayPick = response.sections.find(s => s.slug === 'today_pick');
+      let finalSections = response.sections;
+      if (freshTodayPick) {
+        if (!_todayPickCache || _todayPickCache.kstDate !== today) {
+          // 오늘 첫 선택 → 캐시에 저장
+          _todayPickCache = { section: freshTodayPick, kstDate: today };
+        }
+        // 이미 오늘 today_pick이 결정됐으면 기존 것 유지
+        finalSections = response.sections.map(s =>
+          s.slug === 'today_pick' ? _todayPickCache!.section : s
+        );
+      }
+      setSections(finalSections);
       _homeCache = {
-        sections: response.sections,
+        sections: finalSections,
         location: loc,
         userId: currentUid,
         expiresAt: Date.now() + HOME_CACHE_TTL_MS,
@@ -452,7 +510,7 @@ function HomePageInner() {
       // 첫 화면에 보이는 이미지 프리페치 — 사용자가 보기 전에 미리 캐시
       // 각 섹션 앞 6개만 프리페치 (오버헤드 최소화)
       requestAnimationFrame(() => {
-        response.sections.forEach((section) => {
+        finalSections.forEach((section) => {
           section.events.slice(0, 6).forEach((event) => {
             if (event.thumbnail_url) {
               Image.prefetch(event.thumbnail_url).catch(() => {});
@@ -490,9 +548,15 @@ function HomePageInner() {
       // 피드 초기화 + 스토리지 리셋
       await resetFeedState();
       setFeedCards([]);
-      setFeedPage(0);
+      feedPageRef.current = 0;
       setFeedHasMore(true);
+      feedHasMoreRef.current = true;
       feedSeenEventIds.current.clear();
+      feedResetAttemptedRef.current = false;
+      feedCardsLoadedRef.current = false;
+      feedRegionStageRef.current = 'exact';
+      feedPendingLoadRef.current = false;
+      userRegionRef.current = '';
       const loc = await requestLocation();
       await loadSections(loc, userId);
       void loadMoreFeedRef.current(); // 새로고침 후 피드도 재로드
@@ -503,17 +567,66 @@ function HomePageInner() {
 
   const loadMoreFeed = useCallback(async () => {
     // ref로 동기 체크 — setState 배치로 인한 동시 실행 방지
-    if (feedLoadingRef.current || !feedHasMore) return;
+    // feedHasMoreRef: 클로저 stale 문제 없는 동기 ref 사용
+    if (feedLoadingRef.current || !feedHasMoreRef.current) return;
     feedLoadingRef.current = true;
     setFeedLoading(true);
+    // feedPage/userRegion은 ref로 읽어 stale 클로저 문제 방지
+    // (setFeedPage(0) 후 타임아웃 재시도 시 비동기 리렌더 완료 전에 이전 값을 읽는 문제 방지)
+    const currentPage = feedPageRef.current;
+    const currentRegion = userRegionRef.current;
     try {
       const res = await fetchFeed({
-        page: feedPage,
+        page: currentPage,
         excludeIds: Array.from(feedSeenEventIds.current),
         userId,
-        region: userRegion || undefined,
+        region: currentRegion || undefined,
+        // 위치 정보 있으면 현재 단계의 하드 필터 적용, 없으면 전국 표시
+        regionStage: currentRegion ? feedRegionStageRef.current : 'all',
       });
+
+      if (res.cards.length === 0) {
+        // Priority 1: excludeIds 풀 소진 시 → 초기화 후 1회만 재시도
+        // stale pendingRetry가 feedPage=0으로 잘못 호출돼 false exhaustion이 생기는 경우도 포함
+        // feedResetAttemptedRef로 무한 루프 방지 (세션당 1회)
+        if (
+          feedSeenEventIds.current.size > 0 &&
+          !feedResetAttemptedRef.current
+        ) {
+          feedResetAttemptedRef.current = true;
+          feedSeenEventIds.current.clear();
+          feedPageRef.current = 0;
+          setFeedHasMore(true);
+          feedHasMoreRef.current = true;
+          feedPendingLoadRef.current = false; // setTimeout이 처리하므로 별도 pending 불필요
+          resetFeedState().catch(() => {});
+          setTimeout(() => { void loadMoreFeedRef.current(); }, 100);
+          return;
+        }
+
+        // Priority 2: 지역 단계 확장 (서울 exact → 수도권 metro → 전국 all)
+        // 위치 정보가 있고 아직 all 단계가 아닐 때만 확장
+        if (currentRegion && feedRegionStageRef.current !== 'all') {
+          if (feedRegionStageRef.current === 'exact') {
+            feedRegionStageRef.current = 'metro';
+          } else {
+            feedRegionStageRef.current = 'all';
+          }
+          feedPageRef.current = 0;
+          setFeedHasMore(true);
+          feedHasMoreRef.current = true;
+          feedPendingLoadRef.current = false; // setTimeout이 처리하므로 별도 pending 불필요
+          setTimeout(() => { void loadMoreFeedRef.current(); }, 100);
+          return;
+        }
+
+        // Priority 3: 모든 단계 소진 → 피드 끝 카드 표시
+        setFeedHasMore(false);
+        feedHasMoreRef.current = false;
+        return;
+      }
       if (res.cards.length > 0) {
+        feedCardsLoadedRef.current = true; // 이번 세션에서 카드 로드 성공
         setFeedCards((prev) => [...prev, ...res.cards]);
         const newIds: string[] = [];
         res.cards.forEach((card) =>
@@ -522,8 +635,8 @@ function HomePageInner() {
             newIds.push(e.id);
           }),
         );
-        const nextPage = parseInt(res.next_cursor ?? String(feedPage + 1));
-        setFeedPage(nextPage);
+        const nextPage = parseInt(res.next_cursor ?? String(currentPage + 1));
+        feedPageRef.current = nextPage;
         advanceFeedState(newIds, nextPage).catch(() => {}); // fire-and-forget
         // 다음 스크롤 전에 이미지 미리 캐시 — 스크롤 시 즉시 표시
         requestAnimationFrame(() => {
@@ -535,13 +648,20 @@ function HomePageInner() {
         });
       }
       setFeedHasMore(res.has_more);
+      feedHasMoreRef.current = res.has_more;
     } catch {
       // 피드 로딩 실패는 무시 (기존 섹션에 영향 없음)
     } finally {
       feedLoadingRef.current = false;
       setFeedLoading(false);
+      // initializeUser의 call이 drop됐으면 지금 재시도
+      // 150ms: React가 setFeedPage 등으로 re-render + loadMoreFeedRef 갱신을 완료할 여유
+      if (feedPendingLoadRef.current) {
+        feedPendingLoadRef.current = false;
+        setTimeout(() => { void loadMoreFeedRef.current(); }, 150);
+      }
     }
-  }, [feedHasMore, feedPage, userId, userRegion]); // feedLoading 제거 (ref로 대체)
+  }, [userId]); // feedPage/userRegion은 ref로 읽으므로 deps 제거 (stale 클로저 방지)
 
   // loadMoreFeed는 deps 변경 시마다 새 참조 생성 (useCallback).
   // initializeUser/handleRefresh는 first-render closure를 캡처하므로
@@ -551,6 +671,16 @@ function HomePageInner() {
 
   const scrollToTop = useCallback(() => {
     flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, []);
+
+  // onEndReached가 새 카드 추가 후 자동으로 재평가되지 않는 React Native FlatList 이슈 보완
+  // 스크롤 모멘텀 종료 시점에 추가로 체크하여 누락된 로드 트리거 보정
+  const handleMomentumScrollEnd = useCallback((e: { nativeEvent: { contentSize: { height: number }; layoutMeasurement: { height: number }; contentOffset: { y: number } } }) => {
+    const { contentSize, layoutMeasurement, contentOffset } = e.nativeEvent;
+    const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    if (distanceFromEnd < layoutMeasurement.height * 2) {
+      void loadMoreFeedRef.current();
+    }
   }, []);
 
   // ─────────────────────────────────────────────────────────────
@@ -665,10 +795,17 @@ function HomePageInner() {
     }
 
     if (feedLoading) {
+      // 스켈레톤 3개: 인스타/핀터레스트처럼 여러 개가 오고 있다는 느낌 제공
       items.push({ type: 'feed_loading' });
-    } else if (!feedHasMore && feedCards.length > 0) {
+      items.push({ type: 'feed_loading' });
+      items.push({ type: 'feed_loading' });
+    } else if (!feedHasMore) {
       const eventCount = feedCards.reduce((sum, card) => sum + card.events.length, 0);
       items.push({ type: 'feed_end', eventCount });
+    } else if (feedCards.length > 0) {
+      // feedHasMore=true && !feedLoading: 더 로드 가능한 상태임을 하단 도트로 표시
+      // 사용자가 더 스크롤할 의지를 갖도록 유도 (핀터레스트 방식)
+      items.push({ type: 'feed_more_dot' });
     }
 
     return items;
@@ -773,8 +910,20 @@ function HomePageInner() {
     }
     if (item.type === 'feed_loading') {
       return (
-        <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-          <AnimateSkeleton style={{ width: '90%', height: 120, borderRadius: 16 }} />
+        <View style={{ paddingVertical: 12, paddingHorizontal: 20 }}>
+          <AnimateSkeleton delay={0} withGradient={false} withShimmer>
+            <View style={{ height: 100, borderRadius: 16, backgroundColor: adaptive.grey200 }} />
+          </AnimateSkeleton>
+        </View>
+      );
+    }
+    if (item.type === 'feed_more_dot') {
+      // 더 로드 가능한 상태임을 알리는 점 세 개 — 핀터레스트 방식
+      return (
+        <View style={{ paddingVertical: 20, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: adaptive.grey300 }} />
+          ))}
         </View>
       );
     }
@@ -791,7 +940,9 @@ function HomePageInner() {
           </View>
           {/* 이벤트 수 */}
           <Text style={{ fontSize: 15, fontWeight: '700', color: adaptive.grey900, marginBottom: 6 }}>
-            {item.eventCount.toLocaleString()}개의 이벤트를 둘러봤어요
+            {item.eventCount > 0
+              ? `${item.eventCount.toLocaleString()}개의 이벤트를 둘러봤어요`
+              : '새로운 피드를 준비 중이에요'}
           </Text>
           {/* 업데이트 안내 */}
           <Text style={{ fontSize: 13, color: adaptive.grey500, marginBottom: 24 }}>
@@ -860,11 +1011,13 @@ function HomePageInner() {
         style={styles.scrollView}
         data={feedItems}
         renderItem={renderFeedItem}
-        keyExtractor={(item) => {
+        keyExtractor={(item, index) => {
           if (item.type === 'section') return item.section.slug;
           if (item.type === 'skeleton') return item.id;
           if (item.type === 'magazine') return `magazine-${item.card.id}`;
-          if (item.type === 'feed_loading') return 'feed_loading';
+          // feed_loading은 3개가 동시에 렌더링될 수 있으므로 index로 구분
+          if (item.type === 'feed_loading') return `feed_loading_${index}`;
+          if (item.type === 'feed_more_dot') return 'feed_more_dot';
           if (item.type === 'feed_end') return 'feed_end';
           if (item.type === 'ad') return `ad-${item.id}`;
           return item.type;
@@ -880,7 +1033,10 @@ function HomePageInner() {
         initialNumToRender={6}
         onScrollBeginDrag={handleAiNoticeConfirm}
         onEndReached={loadMoreFeed}
-        onEndReachedThreshold={0.5}
+        onEndReachedThreshold={2}
+        // React Native FlatList는 새 아이템 추가 후 onEndReached를 자동 재평가하지 않음
+        // → 모멘텀 스크롤 종료 시 추가 체크하여 누락된 로드 트리거 보정
+        onMomentumScrollEnd={handleMomentumScrollEnd}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       />
 

@@ -195,6 +195,7 @@ async function fetchSlotEventsRaw(
   excludeIds: string[],
   personalizedCategory?: string,
   nearbyRegion?: string,
+  regionStage?: 'exact' | 'metro' | 'all',
 ): Promise<EventRow[]> {
   const params: unknown[] = [excludeIds, slot.fetchCount];
   let whereClause: string;
@@ -233,6 +234,9 @@ async function fetchSlotEventsRaw(
   // Stage 1 → 광역 도시권 (예: 수도권 = 서울+인천+경기)
   // Stage 2 → 전국 (공백 방지 fallback)
   let locationOrderExpr = '1'; // 위치 없음 → 정렬 영향 없음
+  // regionStage 하드 필터: exact/metro → WHERE 절에 지역 조건 추가
+  // region IS NULL 이벤트(전국 단위)는 모든 단계에서 포함
+  let regionHardClause = '';
   if (nearbyRegion) {
     const metroZone = getMetroZone(nearbyRegion); // 예: ['서울', '인천', '경기']
     params.push(nearbyRegion); // $N: 정확한 지역
@@ -246,9 +250,21 @@ async function fetchSlotEventsRaw(
         `CASE WHEN region = $${exactIdx} THEN 0 ` +
         `WHEN region = ANY($${metroIdx}::text[]) THEN 1 ` +
         `ELSE 2 END`;
+
+      if (regionStage === 'exact') {
+        regionHardClause = `AND (region = $${exactIdx} OR region IS NULL)`;
+      } else if (regionStage === 'metro') {
+        regionHardClause = `AND (region = ANY($${metroIdx}::text[]) OR region IS NULL)`;
+      }
+      // 'all' 또는 regionStage 미지정 → 하드 필터 없음 (전국 표시)
     } else {
       // 강원/제주 등 단독 지역: 2단계 (지역 → 전국)
       locationOrderExpr = `CASE WHEN region = $${exactIdx} THEN 0 ELSE 1 END`;
+
+      if (regionStage === 'exact' || regionStage === 'metro') {
+        // 단독 지역은 metro 범위 = exact 범위
+        regionHardClause = `AND (region = $${exactIdx} OR region IS NULL)`;
+      }
     }
   }
 
@@ -267,6 +283,7 @@ async function fetchSlotEventsRaw(
       AND NOT (id = ANY($1::uuid[]))
       ${heroImageCond}
       AND ${whereClause}
+      ${regionHardClause}
     ORDER BY ${locationOrderExpr}, ${orderByClause}
     LIMIT $2
   `;
@@ -288,6 +305,11 @@ router.get('/', async (req, res) => {
     const userId = (req.query['user_id'] as string) || '';
     // region: 프론트에서 sido를 정규화해서 넘김 (예: "서울", "경기", "부산")
     const region = ((req.query['region'] as string) || '').trim();
+    // region_stage: 지역 하드 필터 단계 (exact → metro → all)
+    const regionStageRaw = (req.query['region_stage'] as string) || '';
+    const regionStage: 'exact' | 'metro' | 'all' =
+      regionStageRaw === 'exact' ? 'exact' :
+      regionStageRaw === 'metro' ? 'metro' : 'all';
 
     const excludeIds = excludeIdsRaw
       .split(',')
@@ -352,7 +374,7 @@ router.get('/', async (req, res) => {
     // nearbyRegion: 모든 슬롯에 위치 소프트 부스트 전달 (지역 이벤트 우선 정렬)
     const nearbyRegion = region || undefined;
     const rawResults = await Promise.all(
-      slots.map((slot) => fetchSlotEventsRaw(slot, excludeIds, personalizedCategory, nearbyRegion)),
+      slots.map((slot) => fetchSlotEventsRaw(slot, excludeIds, personalizedCategory, nearbyRegion, regionStage)),
     );
 
     const usedIds = new Set<string>(excludeIds);

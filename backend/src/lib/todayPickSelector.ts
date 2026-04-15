@@ -204,9 +204,9 @@ export interface ScoredTodayPickCandidate {
 // ─────────────────────────────────────────────────────────────
 
 const FEATURED_BOOST = 12;   // is_featured=true 가중치 (flat)
-const NEARBY_POOL_SIZE = 8;
-const REGION_POOL_SIZE = 8;
-const NATIONAL_POOL_SIZE = 10;
+const NEARBY_POOL_SIZE = 10;
+const REGION_POOL_SIZE = 10;
+const NATIONAL_POOL_SIZE = 15; // 로테이션 풀 7개 + 클릭/노출 exclusion 폴백 여유분
 
 // 단계별 가중치 (합계 = 100%)
 const STAGE_WEIGHTS = {
@@ -423,9 +423,10 @@ export function pickTodayPickCandidateV2(
     return Math.abs(diff) < 0.01 ? a.event.id.localeCompare(b.event.id) : diff;
   });
 
-  // top-3 일별 로테이션: 매일 다른 base candidate 사용
-  // → 클릭 이력 없는 신규 사용자도 매일 다른 이벤트 노출
-  const rotationPool = sorted.slice(0, Math.min(3, sorted.length));
+  // top-7 일별 로테이션: 매일 다른 base candidate 사용
+  // → 클릭 이력 없는 신규 사용자도 일주일 동안 다른 이벤트 노출
+  // (기존 top-3는 3일 주기 반복으로 사실상 같은 이벤트만 표시됐음)
+  const rotationPool = sorted.slice(0, Math.min(7, sorted.length));
   const todayIdx = todaySeed() % rotationPool.length;
   const rotated = [
     ...rotationPool.slice(todayIdx),

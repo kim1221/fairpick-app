@@ -75,9 +75,10 @@ export async function fetchFeed(params: {
   limit?: number;
   excludeIds?: string[];
   userId?: string;
-  region?: string;  // DB region 이름 (예: "서울", "경기", "부산")
+  region?: string;           // DB region 이름 (예: "서울", "경기", "부산")
+  regionStage?: 'exact' | 'metro' | 'all';  // 지역 하드 필터 단계
 }): Promise<FeedResponse> {
-  const { cursor, page, excludeIds = [], userId, region } = params;
+  const { cursor, page, excludeIds = [], userId, region, regionStage } = params;
 
   const pageNum = page !== undefined ? page : (parseInt(cursor ?? '0') || 0);
 
@@ -91,6 +92,9 @@ export async function fetchFeed(params: {
   }
   if (region) {
     query.set('region', region);
+  }
+  if (regionStage) {
+    query.set('region_stage', regionStage);
   }
 
   const controller = new AbortController();
