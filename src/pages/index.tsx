@@ -95,7 +95,7 @@ type FeedItem =
   | { type: 'section'; section: ProcessedSection }
   | { type: 'ad'; id: string }
   | { type: 'magazine'; card: FeedCard }
-  | { type: 'feed_loading' }
+  | { type: 'feed_loading'; loadingIdx: number }
   | { type: 'feed_more_dot' }
   | { type: 'feed_end'; eventCount: number };
 
@@ -590,9 +590,12 @@ function HomePageInner() {
     // → JS 레벨에서 (API_TIMEOUT + 3s) 후 강제로 loading 해제
     const safetyTimeoutId = setTimeout(() => {
       if (feedLoadingRef.current) {
-        console.warn('[Feed] safety timeout triggered');
         feedLoadingRef.current = false;
         setFeedLoading(false);
+        if (feedRetryCountRef.current < FEED_MAX_RETRIES) {
+          feedRetryCountRef.current++;
+          setTimeout(() => { void loadMoreFeedRef.current(); }, 1000);
+        }
       }
     }, API_TIMEOUT + 3000);
     try {
@@ -827,9 +830,9 @@ function HomePageInner() {
     }
 
     if (feedLoading) {
-      items.push({ type: 'feed_loading' });
-      items.push({ type: 'feed_loading' });
-      items.push({ type: 'feed_loading' });
+      items.push({ type: 'feed_loading', loadingIdx: 0 });
+      items.push({ type: 'feed_loading', loadingIdx: 1 });
+      items.push({ type: 'feed_loading', loadingIdx: 2 });
     } else if (!feedHasMore) {
       const eventCount = feedCards.reduce((sum, card) => sum + card.events.length, 0);
       items.push({ type: 'feed_end', eventCount });
@@ -1040,12 +1043,11 @@ function HomePageInner() {
         style={styles.scrollView}
         data={feedItems}
         renderItem={renderFeedItem}
-        keyExtractor={(item, index) => {
+        keyExtractor={(item, _index) => {
           if (item.type === 'section') return item.section.slug;
           if (item.type === 'skeleton') return item.id;
           if (item.type === 'magazine') return `magazine-${item.card.id}`;
-          // feed_loading은 3개가 동시에 렌더링될 수 있으므로 index로 구분
-          if (item.type === 'feed_loading') return `feed_loading_${index}`;
+          if (item.type === 'feed_loading') return `feed_loading_${item.loadingIdx}`;
           if (item.type === 'feed_more_dot') return 'feed_more_dot';
           if (item.type === 'feed_end') return 'feed_end';
           if (item.type === 'ad') return `ad-${item.id}`;
@@ -1054,16 +1056,13 @@ function HomePageInner() {
         ListHeaderComponent={listHeader}
         ListFooterComponent={<View style={{ height: 100 }} />}
         showsVerticalScrollIndicator={false}
-        removeClippedSubviews={Platform.OS !== 'android'}
-        maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
-        windowSize={5}
-        maxToRenderPerBatch={3}
-        initialNumToRender={6}
+        removeClippedSubviews={false}
+        windowSize={11}
+        maxToRenderPerBatch={5}
+        initialNumToRender={8}
         onScrollBeginDrag={handleAiNoticeConfirm}
         onEndReached={loadMoreFeed}
         onEndReachedThreshold={2}
-        // React Native FlatList는 새 아이템 추가 후 onEndReached를 자동 재평가하지 않음
-        // → 모멘텀 스크롤 종료 시 추가 체크하여 누락된 로드 트리거 보정
         onMomentumScrollEnd={handleMomentumScrollEnd}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       />
