@@ -1124,8 +1124,8 @@ function HomePageInner() {
         ListFooterComponent={<View style={{ height: 100 }} />}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={false}
-        windowSize={11}
-        maxToRenderPerBatch={5}
+        windowSize={5}
+        maxToRenderPerBatch={3}
         initialNumToRender={8}
         onScrollBeginDrag={handleAiNoticeConfirm}
         onEndReached={loadMoreFeed}
