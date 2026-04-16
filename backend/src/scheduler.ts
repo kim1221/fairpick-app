@@ -58,14 +58,9 @@ type CatchupItem = {
 async function runMissedJobsOnStartup(): Promise<void> {
   console.log('[Startup] 누락된 잡 확인 중...');
   try {
-    // 이전 인스턴스에서 실행 중인 잡 확인 (최근 13h 이내 running 상태)
-    const { rows: runningRows } = await pool.query<{ scheduler_job_name: string }>(
-      `SELECT DISTINCT scheduler_job_name FROM collection_logs
-       WHERE status = 'running' AND started_at > NOW() - INTERVAL '13 hours'`
-    );
-    const dbRunning = new Set(runningRows.map((r) => r.scheduler_job_name));
-
     // 최근 48h 내 마지막 성공/부분성공 실행 시각
+    // 주의: DB의 'running' 상태는 이전 프로세스가 kill된 잔여물일 수 있으므로
+    // 신뢰하지 않는다. 현재 프로세스의 runningJobs(인메모리)만 실행 중 판단에 사용.
     const { rows: lastRunRows } = await pool.query<{ scheduler_job_name: string; last_started: string }>(
       `SELECT scheduler_job_name, MAX(started_at) AS last_started
        FROM collection_logs
@@ -110,8 +105,9 @@ async function runMissedJobsOnStartup(): Promise<void> {
 
     for (const job of CATCHUP) {
       if (!pastToday(job.schedH, job.schedM)) continue;  // 오늘 아직 예정 시간 미도래
-      if (dbRunning.has(job.name)) {
-        console.log(`[Startup] ${job.name}: DB 실행 중 로그 존재 — 스킵`);
+      if (runningJobs.has(job.name)) {
+        // 현재 프로세스에서 이미 실행 중인 경우만 스킵 (DB 상태는 무시)
+        console.log(`[Startup] ${job.name}: 현재 실행 중 — 스킵`);
         continue;
       }
       if (hoursSince(job.name) > job.expectedH * 0.85) {
