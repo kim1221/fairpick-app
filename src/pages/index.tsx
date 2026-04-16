@@ -420,8 +420,19 @@ function HomePageInner() {
     }
 
     try {
+      // 첫 방문 유저: 권한 다이얼로그를 500ms Race 밖에서 먼저 처리
+      // Race 안에서 openPermissionDialog를 호출하면 500ms 타임아웃이 먼저 resolve되고
+      // 이후 if(!loc) 재호출과 openPermissionDialog가 동시에 실행돼 다이얼로그가 안 뜨는 버그
+      try {
+        const perm = await getCurrentLocation.getPermission();
+        if ((perm as string) === 'notDetermined') {
+          await getCurrentLocation.openPermissionDialog();
+        }
+      } catch (_) {}
+
       const [uid, loc] = await Promise.all([
         getCurrentUserId(),
+        // 권한은 위에서 이미 처리됨 → 여기서는 좌표만 가져오면 되므로 500ms Race 유효
         Promise.race([
           requestLocation(),
           new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 500)),
