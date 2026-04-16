@@ -2752,17 +2752,24 @@ async function postProcessExtractedInfo(
       const criticalViolations = overviewValidation.violations.filter(v => v.severity === 'critical');
 
       if (criticalViolations.length > 0) {
-        // Critical 위반 (날짜/시간/가격) → overview 무효화
-        console.error('[OVERVIEW][GUARD] 🚨 Critical violations - Overview nullified:', criticalViolations.map(v => v.type));
-        extracted.overview = undefined;
+        // Critical 위반 (날짜/시간/가격) → 토큰만 제거하고 overview 유지
+        const sanitized = sanitizeOverview(extracted.overview!);
+        if (sanitized && sanitized.length >= 10) {
+          console.warn('[OVERVIEW][GUARD] 🔧 Critical violations - Tokens removed, overview kept:', criticalViolations.map(v => v.type));
+          extracted.overview = sanitized;
+        } else {
+          // 제거 후 너무 짧으면 null 처리
+          console.error('[OVERVIEW][GUARD] 🚨 Critical violations - Overview nullified (too short after sanitize):', criticalViolations.map(v => v.type));
+          extracted.overview = undefined;
+        }
 
         // sources에 위반 정보 기록
         if (!extracted.sources) extracted.sources = {};
         extracted.sources['overview_validation'] = {
-          source: 'VALIDATION_FAILED',
-          evidence: `Critical violations: ${criticalViolations.map(v => v.pattern).join(', ')}`,
-          reason: overviewValidation.reasonMessage || 'Contains forbidden tokens (SSOT violation)',
-          confidence: 0,
+          source: 'VALIDATION_SANITIZED',
+          evidence: `Critical violations removed: ${criticalViolations.map(v => v.pattern).join(', ')}`,
+          reason: 'Forbidden tokens stripped from overview',
+          confidence: 50,
         };
       } else {
         // High 위반만 있으면 경고만
@@ -3035,6 +3042,45 @@ export async function extractDerivedTagsOnly(
     console.error('[AI] Tag extraction error:', error.message);
     return [];
   }
+}
+
+/**
+ * Overview sanitizer - Critical 위반 토큰(날짜/시간/가격)만 제거하고 나머지 텍스트 유지
+ * null 처리 대신 가능한 한 overview를 살리기 위해 사용
+ */
+function sanitizeOverview(overview: string): string {
+  let text = overview;
+
+  // 날짜/시간 패턴 제거
+  text = text
+    .replace(/\d{4}년\s*/g, '')
+    .replace(/\d{1,2}월\s*/g, '')
+    .replace(/\d{1,2}일\s*/g, '')
+    .replace(/약\s*\d+분/g, '')
+    .replace(/약\s*\d+시간/g, '')
+    .replace(/\d+:\d+/g, '')
+    .replace(/오전|오후|AM|PM/g, '')
+    .replace(/부터|까지/g, '');
+
+  // 가격 패턴 제거
+  text = text
+    .replace(/무료/g, '')
+    .replace(/유료/g, '')
+    .replace(/\d+,?\d*원/g, '')
+    .replace(/₩/g, '');
+
+  // URL 제거
+  text = text.replace(/https?:\/\/[^\s]+/g, '');
+
+  // 정리: 연속 공백, 문장 앞뒤 공백, 빈 괄호 등
+  text = text
+    .replace(/\(\s*\)/g, '')       // 빈 괄호
+    .replace(/\[\s*\]/g, '')       // 빈 대괄호
+    .replace(/,\s*,/g, ',')        // 연속 쉼표
+    .replace(/\s{2,}/g, ' ')       // 연속 공백
+    .trim();
+
+  return text;
 }
 
 /**
