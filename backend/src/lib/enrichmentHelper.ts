@@ -95,7 +95,7 @@ export async function addSuggestion(
   
   await pool.query(`
     UPDATE canonical_events
-    SET ai_suggestions = COALESCE(ai_suggestions, '{}'::jsonb) || jsonb_build_object($1, $2::jsonb),
+    SET ai_suggestions = COALESCE(ai_suggestions, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb),
         updated_at = NOW()
     WHERE id = $3
   `, [fieldName, JSON.stringify(suggestion), eventId]);
