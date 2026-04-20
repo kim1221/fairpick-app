@@ -204,9 +204,9 @@ export interface ScoredTodayPickCandidate {
 // ─────────────────────────────────────────────────────────────
 
 const FEATURED_BOOST = 12;   // is_featured=true 가중치 (flat)
-const NEARBY_POOL_SIZE = 10;
-const REGION_POOL_SIZE = 10;
-const NATIONAL_POOL_SIZE = 15; // 로테이션 풀 7개 + 클릭/노출 exclusion 폴백 여유분
+const NEARBY_POOL_SIZE = 20;
+const REGION_POOL_SIZE = 20;
+const NATIONAL_POOL_SIZE = 35; // 21일 노출 창 × 1회/일 = 최대 21개 제외 → 여유분 포함 35개
 
 // 단계별 가중치 (합계 = 100%)
 const STAGE_WEIGHTS = {
@@ -423,15 +423,15 @@ export function pickTodayPickCandidateV2(
     return Math.abs(diff) < 0.01 ? a.event.id.localeCompare(b.event.id) : diff;
   });
 
-  // top-7 일별 로테이션: 매일 다른 base candidate 사용
-  // → 클릭 이력 없는 신규 사용자도 일주일 동안 다른 이벤트 노출
-  // (기존 top-3는 3일 주기 반복으로 사실상 같은 이벤트만 표시됐음)
-  const rotationPool = sorted.slice(0, Math.min(7, sorted.length));
+  // top-21 일별 로테이션: 매일 다른 base candidate 사용
+  // → 21일 노출 창과 맞춰 3주 동안 같은 이벤트 반복 없음
+  // impression exclusion이 21일이므로 rotation pool도 동일하게 21개로 확장
+  const rotationPool = sorted.slice(0, Math.min(21, sorted.length));
   const todayIdx = todaySeed() % rotationPool.length;
   const rotated = [
     ...rotationPool.slice(todayIdx),
     ...rotationPool.slice(0, todayIdx),
-    ...sorted.slice(3), // 나머지 후보는 click/impression exclusion 폴백용
+    ...sorted.slice(21), // rotation pool 이후 나머지 → impression/click exclusion 폴백용
   ];
 
   console.log(

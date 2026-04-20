@@ -8375,14 +8375,15 @@ async function getUserClickHistory(userId: string): Promise<UserClickHistory> {
     }
   });
 
-  // 최근 3일 today_pick impression 조회 (두 번째 쿼리, 기존 click 쿼리와 독립)
+  // 최근 21일 today_pick impression 조회 (두 번째 쿼리, 기존 click 쿼리와 독립)
+  // 21일 창 → 같은 이벤트를 3주 내에 다시 오늘의 픽으로 노출하지 않음
   const impressionResult = await pool.query(
     `SELECT event_id
      FROM user_events
      WHERE user_id = $1
        AND action_type = 'impression'
        AND section_slug = 'today_pick'
-       AND created_at > NOW() - INTERVAL '3 days'
+       AND created_at > NOW() - INTERVAL '21 days'
      GROUP BY event_id`,
     [userId],
   );
@@ -8732,8 +8733,8 @@ app.get('/api/home/sections', async (req, res) => {
         }
 
         // impression 기록 (fire-and-forget, 응답 지연 없음)
-        // todayPickImpressionIds: 최근 3일 today_pick section 노출 이력 (user+event 기준)
-        // 이미 3일 내 노출된 이벤트는 기록 skip — 다른 섹션과 동일한 hard dedup 적용
+        // todayPickImpressionIds: 최근 21일 today_pick section 노출 이력 (user+event 기준)
+        // 이미 21일 내 노출된 이벤트는 기록 skip (중복 row 방지)
         if (resolvedUserId && pickedEvent && !todayPickImpressionIds.has(pickedEvent.id)) {
           pool.query(
             `INSERT INTO user_events (user_id, event_id, action_type, section_slug, metadata)
