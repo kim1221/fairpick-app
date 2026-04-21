@@ -16,7 +16,19 @@ import { requireAuth } from '../middleware/requireAuth';
 const router = express.Router();
 
 const TICKETS_PER_EXCHANGE = 10;
-const DAILY_LIMIT = 30;           // 하루 최대 획득 조각 수
+/**
+ * [정책 확정]
+ * DAILY_LIMIT: 유저당 하루 최대 적립 조각 수 (KST 자정 기준 리셋)
+ * - 광고 fill rate 부족(failedToShow)과 정책 한도 도달은 의미가 다르므로 별도 처리
+ * - DAILY_LIMIT_REACHED 응답 시에만 "오늘 티켓을 모두 모았어요" 문구 사용
+ * - 광고 없음/오류는 "지금은 광고를 불러올 수 없어요" 문구로 분리
+ *
+ * DAILY_LIMIT clamp 정책:
+ * - remaining=1일 때 randomTickets()=3이면 1조각 지급 (0장보다 나은 UX)
+ * - 광고를 끝까지 본 사용자가 0장 받는 경험을 방지
+ * - 정책 상한(30개)은 절대 초과하지 않음
+ */
+const DAILY_LIMIT = 30;
 const COOLDOWN_SECONDS = 30;      // 연속 적립 최소 대기 시간
 const EXCHANGE_EXPIRES_HOURS = 24; // pending 만료 시간
 

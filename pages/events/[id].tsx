@@ -416,7 +416,7 @@ function EventDetailPage() {
       return;
     }
     if (!rewardedAdLoaded || !showFullScreenAd.isSupported()) {
-      dialog.openAlert({ title: '광고 없음', description: '지금은 광고를 불러오지 못했어요.\n잠시 후 다시 시도해 주세요.' });
+      dialog.openAlert({ title: '광고 없음', description: '지금은 광고를 불러올 수 없어요.\n잠시 후 다시 시도해 주세요.' });
       return;
     }
     setTicketLoading(true);
@@ -455,13 +455,17 @@ function EventDetailPage() {
         if (ev.type === 'failedToShow') {
           resetAdState();
           dialog.openAlert({
-            title: '광고 오류',
-            description: '광고를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.',
+            title: '광고 없음',
+            description: '지금은 광고를 불러올 수 없어요.\n잠시 후 다시 시도해 주세요.',
           });
         }
       },
       onError: () => {
         resetAdState();
+        dialog.openAlert({
+          title: '광고 없음',
+          description: '지금은 광고를 불러올 수 없어요.\n잠시 후 다시 시도해 주세요.',
+        });
       },
     });
     showUnregisterRef.current = unregister;
