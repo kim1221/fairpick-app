@@ -249,6 +249,9 @@ function EventDetailPage() {
   const [rewardedAdLoaded, setRewardedAdLoaded] = useState(false);
   const [ticketLoading, setTicketLoading] = useState(false);
   const [ticketResult, setTicketResult] = useState<{ earned: number } | null>(null);
+  const loadUnregisterRef = React.useRef<(() => void) | null>(null);
+  const showUnregisterRef = React.useRef<(() => void) | null>(null);
+  const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   // event 로드 후 snapshot 추출 → useLike에 전달 (찜 시 로컬 snapshot 저장)
   const eventSnapshot = React.useMemo(() => event ? {
@@ -363,58 +366,93 @@ function EventDetailPage() {
     };
   }, [params?.id]);
 
+  // 광고 프리로드 헬퍼 (unregister ref 관리 포함)
+  const preloadRewardedAd = React.useCallback(() => {
+    if (!loadFullScreenAd.isSupported()) return;
+    loadUnregisterRef.current?.();
+    const unregister = loadFullScreenAd({
+      options: { adGroupId: REWARDED_AD_ID },
+      onEvent: (e) => {
+        if (e.type === 'loaded') setRewardedAdLoaded(true);
+      },
+      onError: () => setRewardedAdLoaded(false),
+    });
+    loadUnregisterRef.current = unregister;
+  }, []);
+
   // 티켓 조회 + 리워드 광고 프리로드
   useEffect(() => {
     if (!isLoggedIn) return;
     getTickets().then(setTicketInfo).catch(() => {});
+    preloadRewardedAd();
+    return () => {
+      loadUnregisterRef.current?.();
+      showUnregisterRef.current?.();
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, [isLoggedIn, preloadRewardedAd]);
 
-    if (!loadFullScreenAd.isSupported()) return;
-    const unregister = loadFullScreenAd({
-      options: { adGroupId: REWARDED_AD_ID },
-      onEvent: (event) => {
-        if (event.type === 'loaded') setRewardedAdLoaded(true);
-      },
-      onError: () => setRewardedAdLoaded(false),
-    });
-    return () => unregister();
-  }, [isLoggedIn]);
+  // 토스트 표시 헬퍼 (2.5초 후 자동 소멸, 연속 적립 시 타이머 교체)
+  const showTicketToast = React.useCallback((earned: number) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setTicketResult({ earned });
+    toastTimerRef.current = setTimeout(() => {
+      setTicketResult(null);
+      toastTimerRef.current = null;
+    }, 2500);
+  }, []);
+
+  // 광고 후 상태 초기화 + 다음 광고 프리로드
+  const resetAdState = React.useCallback(() => {
+    setTicketLoading(false);
+    setRewardedAdLoaded(false);
+    preloadRewardedAd();
+  }, [preloadRewardedAd]);
 
   // 광고 보고 티켓 받기
-  const handleWatchAdForTicket = () => {
+  const handleWatchAdForTicket = React.useCallback(() => {
     if (!isLoggedIn) {
       dialog.openAlert({ title: '로그인 필요', description: '티켓을 받으려면 로그인이 필요해요.' });
       return;
     }
     if (!rewardedAdLoaded || !showFullScreenAd.isSupported()) {
-      dialog.openAlert({ title: '광고 없음', description: '오늘 티켓은 모두 모았어요! 🎟\n내일 자정에 다시 충전돼요.' });
+      dialog.openAlert({ title: '광고 없음', description: '지금은 광고를 불러오지 못했어요.\n잠시 후 다시 시도해 주세요.' });
       return;
     }
     setTicketLoading(true);
+    showUnregisterRef.current?.();
     const unregister = showFullScreenAd({
       options: { adGroupId: REWARDED_AD_ID },
       onEvent: async (ev) => {
         if (ev.type === 'userEarnedReward') {
           try {
             const result = await earnTickets();
-            setTicketResult({ earned: result.earned });
+            showTicketToast(result.earned);
             setTicketInfo((prev) => prev ? { ...prev, ticketCount: result.ticketCount } : null);
-          } catch {}
+          } catch {
+            dialog.openAlert({
+              title: '티켓 지급 실패',
+              description: '광고 시청은 완료됐지만 티켓 지급에 실패했어요.\n잠시 후 다시 확인해 주세요.',
+            });
+          }
         }
         if (ev.type === 'dismissed') {
-          setTicketLoading(false);
-          setRewardedAdLoaded(false);
-          // 다음 광고 프리로드
-          loadFullScreenAd({
-            options: { adGroupId: REWARDED_AD_ID },
-            onEvent: (e) => { if (e.type === 'loaded') setRewardedAdLoaded(true); },
-            onError: () => setRewardedAdLoaded(false),
+          resetAdState();
+        }
+        if (ev.type === 'failedToShow') {
+          resetAdState();
+          dialog.openAlert({
+            title: '광고 오류',
+            description: '광고를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.',
           });
         }
       },
-      onError: () => setTicketLoading(false),
+      onError: () => {
+        resetAdState();
+      },
     });
-    return () => unregister();
-  };
+    showUnregisterRef.current = unregister;
+  }, [isLoggedIn, rewardedAdLoaded, dialog, showTicketToast, resetAdState]);
 
   // 포인트 교환
   const handleExchange = async () => {
