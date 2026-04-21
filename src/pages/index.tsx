@@ -10,12 +10,12 @@ import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-nat
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Image, Platform, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
-import { Icon, AnimateSkeleton } from '@toss/tds-react-native';
+import { Icon, AnimateSkeleton, BottomSheet, Button } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { EventCard } from '../components/EventCard';
 
-import { Accuracy, getCurrentLocation, GetCurrentLocationPermissionError, InlineAd, getNetworkStatus } from '@apps-in-toss/framework';
+import { Accuracy, getCurrentLocation, GetCurrentLocationPermissionError, InlineAd, getNetworkStatus, Storage } from '@apps-in-toss/framework';
 
 import recommendationService from '../services/recommendationService';
 import userEventService from '../services/userEventService';
@@ -197,6 +197,37 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     color: a.grey500,
     flex: 1,
   },
+  onboardingSheet: {
+    paddingHorizontal: 20,
+    paddingBottom: 32,
+    gap: 20,
+  },
+  onboardingStep: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+  },
+  onboardingEmoji: {
+    fontSize: 28,
+    lineHeight: 36,
+  },
+  onboardingStepText: {
+    flex: 1,
+    gap: 2,
+  },
+  onboardingStepTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: a.grey900,
+  },
+  onboardingStepDesc: {
+    fontSize: 13,
+    color: a.grey500,
+    lineHeight: 18,
+  },
+  onboardingBtn: {
+    marginTop: 8,
+  },
   section: { marginTop: 24, marginBottom: 8 },
   sectionHeader: { paddingHorizontal: 20, marginBottom: 16 },
   sectionTitle: { fontSize: 20, fontWeight: '700', color: a.grey900, letterSpacing: -0.3 },
@@ -358,6 +389,7 @@ function HomePageInner() {
   const [showAiNotice, setShowAiNotice] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [ticketInfo, setTicketInfo] = useState<TicketInfo | null>(null);
+  const [showTicketOnboarding, setShowTicketOnboarding] = useState(false);
 
   // 통합 피드 상태 (섹션 카드 + 매거진 카드 한 배열)
   const [feedCards, setFeedCards] = useState<FeedCard[]>(validCache?.feedCards ?? []);
@@ -386,10 +418,17 @@ function HomePageInner() {
   // 첫 로드 타임아웃: Railway 콜드 스타트(15~30초) 커버
   const COLD_START_TIMEOUT = 30000;
 
-  // ── 티켓 조회 ────────────────────────────────────────────────
+  // ── 티켓 조회 + 온보딩 ──────────────────────────────────────
   useEffect(() => {
-    getToken().then((token) => {
-      if (token) getTickets().then(setTicketInfo).catch(() => {});
+    getToken().then(async (token) => {
+      if (!token) return;
+      getTickets().then(setTicketInfo).catch(() => {});
+      // 첫 방문 시에만 온보딩 시트 표시
+      const seen = await Storage.getItem('ticket_onboarding_seen');
+      if (!seen) {
+        setShowTicketOnboarding(true);
+        await Storage.setItem('ticket_onboarding_seen', '1');
+      }
     });
   }, []);
 
@@ -1151,6 +1190,48 @@ function HomePageInner() {
       />
 
       <BottomTabBar currentTab="home" onHomeTabPress={scrollToTop} />
+
+      {/* 티켓 온보딩 (첫 로그인 시 1회) */}
+      <BottomSheet.Root
+        open={showTicketOnboarding}
+        onClose={() => setShowTicketOnboarding(false)}
+        onDimmerClick={() => setShowTicketOnboarding(false)}
+      >
+        <BottomSheet.Header>티켓 조각 모으기</BottomSheet.Header>
+        <View style={styles.onboardingSheet}>
+          <View style={styles.onboardingStep}>
+            <Text style={styles.onboardingEmoji}>🔍</Text>
+            <View style={styles.onboardingStepText}>
+              <Text style={styles.onboardingStepTitle}>이벤트 카드를 탭해요</Text>
+              <Text style={styles.onboardingStepDesc}>관심 있는 이벤트를 골라 상세 정보를 확인하세요</Text>
+            </View>
+          </View>
+          <View style={styles.onboardingStep}>
+            <Text style={styles.onboardingEmoji}>📺</Text>
+            <View style={styles.onboardingStepText}>
+              <Text style={styles.onboardingStepTitle}>광고를 보면 티켓 조각을 받아요</Text>
+              <Text style={styles.onboardingStepDesc}>어떤 이벤트든 OK! 볼 때마다 1~3조각을 드려요</Text>
+            </View>
+          </View>
+          <View style={styles.onboardingStep}>
+            <Text style={styles.onboardingEmoji}>🎁</Text>
+            <View style={styles.onboardingStepText}>
+              <Text style={styles.onboardingStepTitle}>10조각 모으면 1 토스 포인트</Text>
+              <Text style={styles.onboardingStepDesc}>모은 조각을 토스 포인트로 바꿀 수 있어요</Text>
+            </View>
+          </View>
+          <View style={styles.onboardingBtn}>
+            <Button
+              type="primary"
+              size="big"
+              viewStyle={{ width: '100%' }}
+              onPress={() => setShowTicketOnboarding(false)}
+            >
+              시작하기
+            </Button>
+          </View>
+        </View>
+      </BottomSheet.Root>
     </View>
   );
 }
