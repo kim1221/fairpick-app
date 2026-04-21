@@ -203,8 +203,16 @@ router.post('/exchange', requireAuth, async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'NOT_ENOUGH_TICKETS' });
   }
 
-  // 원자적 INSERT + ON CONFLICT — partial unique index(user_id WHERE status='pending')로 레이스 컨디션 방지
-  // 동시 요청이 와도 DB 레벨에서 pending 중복 생성 차단
+  // 시간상 만료된 pending을 먼저 expired로 정리
+  // → unique index(user_id WHERE status='pending')의 충돌 원인 사전 제거
+  await pool.query(
+    `UPDATE user_ticket_exchanges
+     SET status = 'expired'
+     WHERE user_id = $1 AND status = 'pending' AND expires_at <= NOW()`,
+    [userId]
+  );
+
+  // 원자적 INSERT + ON CONFLICT — 동시 요청 시 DB 레벨에서 pending 중복 생성 차단
   const { rows: inserted } = await pool.query(
     `INSERT INTO user_ticket_exchanges (user_id, promotion_code, amount, expires_at)
      VALUES ($1, $2, 1, NOW() + ($3 || ' hours')::INTERVAL)
@@ -218,7 +226,7 @@ router.post('/exchange', requireAuth, async (req: Request, res: Response) => {
     return res.json({ exchangeId: inserted[0].id });
   }
 
-  // 충돌 발생 → 기존 미만료 pending 재사용
+  // INSERT 충돌 → 유효한 pending 재사용 (동시 요청의 정상 경로)
   const { rows: existing } = await pool.query(
     `SELECT id FROM user_ticket_exchanges
      WHERE user_id = $1 AND status = 'pending' AND expires_at > NOW()
@@ -230,8 +238,9 @@ router.post('/exchange', requireAuth, async (req: Request, res: Response) => {
     return res.json({ exchangeId: existing[0].id });
   }
 
-  // pending이 막 만료된 타이밍 — 재시도 안내
-  return res.status(409).json({ error: 'EXCHANGE_PENDING_EXPIRED_RETRY' });
+  // cleanup 후 INSERT가 충돌 없이 성공해야 하므로 이론상 도달 불가
+  console.error(`[Tickets] exchange unexpected state after cleanup: user=${userId}`);
+  return res.status(500).json({ error: 'INTERNAL_ERROR' });
 });
 
 /**
