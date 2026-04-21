@@ -1,6 +1,9 @@
 /**
  * Fairpick - 홈 화면
- * curation_themes 기반 동적 섹션 렌더링
+ * 섹션 + 피드를 단일 FeedCard 스트림으로 통합
+ * /api/home/sections → TODAY_PICK / SECTION 카드
+ * /api/home/feed     → HERO / BUNDLE / RANKING / TREND 카드
+ * 모두 feedCards[] 하나로 관리 → 로딩 상태 단순화
  */
 
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
@@ -23,8 +26,10 @@ import { LikesProvider } from '../contexts/LikesContext';
 import { MagazineCard } from '../components/MagazineCard';
 import { TrendCard } from '../components/TrendCard';
 import { HeroCard } from '../components/HeroCard';
-import { fetchFeed, feedEventToScoredEvent, type FeedCard } from '../services/feedService';
+import { fetchFeed, feedEventToScoredEvent, sectionToFeedCards, type FeedCard } from '../services/feedService';
 import { API_TIMEOUT } from '../config/api';
+import { getTickets, TICKETS_PER_EXCHANGE, type TicketInfo } from '../services/ticketService';
+import { getToken } from '../utils/authStorage';
 
 import type { ScoredEvent, Location } from '../types/recommendation';
 
@@ -33,7 +38,6 @@ export const Route = createRoute('/', {
 });
 
 // sido(시도) 행정구역명 → DB region 단축명 변환
-// geocoding API의 sido 필드(예: "서울특별시") → canonical_events.region(예: "서울")
 function sidoToRegion(sido: string): string {
   const map: Record<string, string> = {
     '서울특별시': '서울', '경기도': '경기', '부산광역시': '부산',
@@ -47,61 +51,49 @@ function sidoToRegion(sido: string): string {
   return map[sido] ?? sido.replace(/(특별시|광역시|특별자치시|특별자치도|도)$/, '').trim();
 }
 
-// 모듈 레벨 캐시: 컴포넌트가 언마운트돼도 데이터 유지 (탭 전환 복귀 대응)
-interface HomeCache {
-  sections: HomeSection[];
-  location: Location | undefined;
-  userId: string;
-  expiresAt: number;
-}
-let _homeCache: HomeCache | null = null;
-const HOME_CACHE_TTL_MS = 5 * 60 * 1000; // 5분
-
-// today_pick KST 일별 고정 캐시
-// GPS 재로드 / 새로고침 시에도 오늘 이미 결정된 today_pick을 유지
-interface TodayPickCache {
-  section: HomeSection;
-  kstDate: string; // KST 기준 YYYY-MM-DD
-}
-let _todayPickCache: TodayPickCache | null = null;
-
 /** KST(UTC+9) 기준 오늘 날짜 문자열 반환 */
 function getTodayKst(): string {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 // ─────────────────────────────────────────────────────────────
-// 타입
+// 모듈 레벨 캐시
 // ─────────────────────────────────────────────────────────────
 
-interface HomeSection {
-  slug: string;
-  title: string;
-  subtitle: string | null;
-  events: ScoredEvent[];
+// 통합 피드 캐시: 섹션 카드 + 피드 page 0 합본
+interface HomeCache {
+  feedCards: FeedCard[];
+  location: Location | undefined;
+  userId: string;
+  nextFeedPage: number; // 다음에 불러올 feed 페이지 번호
+  expiresAt: number;
 }
+let _homeCache: HomeCache | null = null;
+const HOME_CACHE_TTL_MS = 5 * 60 * 1000; // 5분
 
-interface ProcessedSection {
-  slug: string;
-  title: string;
-  subtitle: string | null;
-  events: Array<ScoredEvent & { signal?: { label: string; color: string } }>;
+// today_pick KST 일별 고정 캐시
+interface TodayPickCache {
+  card: FeedCard;
+  kstDate: string;
 }
+let _todayPickCache: TodayPickCache | null = null;
+
+// ─────────────────────────────────────────────────────────────
+// 타입
+// ─────────────────────────────────────────────────────────────
 
 // FlatList 아이템 타입
 type FeedItem =
   | { type: 'skeleton'; skeletonType: 'today_pick' | 'horizontal'; id: string }
-  | { type: 'empty' }
-  | { type: 'section'; section: ProcessedSection }
-  | { type: 'ad'; id: string; adType: 'section' | 'feed' }
   | { type: 'magazine'; card: FeedCard }
+  | { type: 'ad'; id: string; adType: 'section' | 'feed' }
   | { type: 'feed_loading'; loadingIdx: number }
   | { type: 'feed_more_dot' }
   | { type: 'feed_error' }
   | { type: 'feed_end'; eventCount: number };
 
 // ─────────────────────────────────────────────────────────────
-// 섹션별 핵심 신호 계산 (컴포넌트 외부 — 재생성 없음)
+// 섹션별 핵심 신호 계산
 // ─────────────────────────────────────────────────────────────
 
 function getSectionSignal(slug: string, event: ScoredEvent): { label: string; color: string } | undefined {
@@ -185,20 +177,31 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   },
   locationButtonContent: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   locationButtonText: { fontSize: 13, color: a.blue600, fontWeight: '600' },
+  ticketBanner: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: a.grey100,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  ticketBannerText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: a.grey900,
+  },
+  ticketBannerSub: {
+    fontSize: 13,
+    color: a.grey500,
+    flex: 1,
+  },
   section: { marginTop: 24, marginBottom: 8 },
   sectionHeader: { paddingHorizontal: 20, marginBottom: 16 },
   sectionTitle: { fontSize: 20, fontWeight: '700', color: a.grey900, letterSpacing: -0.3 },
   sectionSubtitle: { fontSize: 13, fontWeight: '400', color: a.grey500, marginTop: 4 },
   horizontalList: { paddingHorizontal: 20, gap: 12 },
-  emptyCard: {
-    height: 300,
-    backgroundColor: a.grey50,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 20,
-  },
-  emptyText: { fontSize: 14, color: a.grey600 },
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -246,28 +249,37 @@ function HorizontalSectionSkeleton() {
 
 // ─────────────────────────────────────────────────────────────
 // AdSlot — InlineAd를 독립 컴포넌트로 분리
-// feedAdRendered 상태가 HomePageInner를 리렌더하지 않도록 격리
-// Android에서 부모 리렌더 시 Native Ad View가 리셋되는 문제 방지
+// Android 광고 렌더링 이슈:
+//
+// [list 포맷 — 섹션 사이 리스트형 배너 ~73px]
+//   overflow:'hidden' + height:96 → yoga가 96px 정확히 측정
+//   → FlatList 다음 아이템 위치 정상 → 겹침 없음
+//   (overflow:'visible'은 WRAP_CONTENT 측정으로 height:96 무시 → 0px 측정 → 겹침 발생)
+//
+// [feed 포맷 — 피드 카드 사이 피드형 배너 ~430px]
+//   overflow:'visible' → FlatList 0px 캐시 상태에서도 콘텐츠 가시
+//   height 미지정 → InlineAd 자체 높이로 자동 결정
 // ─────────────────────────────────────────────────────────────
-const AdSlot = React.memo(({ adGroupId }: { adGroupId: string }) => {
+const AdSlot = React.memo(({ adGroupId, adFormat }: { adGroupId: string; adFormat: 'list' | 'feed' }) => {
   const [status, setStatus] = useState<'loading' | 'rendered' | 'failed'>('loading');
 
   if (status === 'failed') return null;
 
   const isAndroid = Platform.OS === 'android';
+  const isList = adFormat === 'list';
 
   return (
     <View
       collapsable={false}
-      style={{
+      style={isList ? {
         width: '100%',
-        // Android: opacity 사용 금지 — native ad SDK 내부 SurfaceView/WebView가
-        // 부모 opacity < 1 환경에서 hardware layer 합성 충돌로 렌더링 실패
-        // → opacity 없이 height:96 확보, 실패 시 return null로 공간 제거
-        // iOS: height:0 → undefined 전환으로 자연스럽게 처리
         height: isAndroid ? 96 : (status === 'rendered' ? undefined : 0),
-        marginVertical: status === 'rendered' ? 8 : 0,
+        marginVertical: isAndroid ? 8 : (status === 'rendered' ? 8 : 0),
+        overflow: 'hidden',
+      } : {
+        width: '100%',
         overflow: isAndroid ? 'visible' : 'hidden',
+        marginVertical: status === 'rendered' ? 8 : 0,
       }}
     >
       <InlineAd
@@ -281,13 +293,11 @@ const AdSlot = React.memo(({ adGroupId }: { adGroupId: string }) => {
   );
 });
 
-// 섹션 사이 광고 ID (추천 섹션용)
 const AD_GROUP_SECTION = 'ait.v2.live.b3363cb4c82643e9';
-// 피드 카드 사이 광고 ID (피드 전용 — 섹션과 동일 ID 사용 시 fill 충돌 발생)
-const AD_GROUP_FEED = 'ait.v2.live.7e6f43f894204302';
+const AD_GROUP_FEED    = 'ait.v2.live.7e6f43f894204302';
 
-// SectionCard — 메모이제이션된 카드 래퍼
-// onPress를 안정된 참조로 유지해 EventCard 리렌더 방지
+// ─────────────────────────────────────────────────────────────
+// SectionCard / TodayPickCard — 메모이제이션된 카드 래퍼
 // ─────────────────────────────────────────────────────────────
 
 interface SectionCardProps {
@@ -336,47 +346,54 @@ function HomePageInner() {
   const { top } = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(adaptive), [adaptive]);
 
+  // ── 캐시 히트 판별 ──────────────────────────────────────────
   const now = Date.now();
   const validCache = _homeCache && now < _homeCache.expiresAt ? _homeCache : null;
-  const [sections, setSections] = useState<HomeSection[] | null>(validCache?.sections ?? null);
+
+  // ── 상태 ────────────────────────────────────────────────────
   const [userId, setUserId] = useState(validCache?.userId ?? '');
   const [location, setLocation] = useState<Location | undefined>(validCache?.location);
   const [currentAddress, setCurrentAddress] = useState('');
-  // userRegion은 ref로만 관리 (렌더링에 직접 사용되지 않음)
   const [refreshing, setRefreshing] = useState(false);
   const [showAiNotice, setShowAiNotice] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
-  const excludedIds = useRef<Set<string>>(new Set());
-  const flatListRef = useRef<FlatList>(null);
+  const [ticketInfo, setTicketInfo] = useState<TicketInfo | null>(null);
 
-  // 매거진 피드 상태
-  const [feedCards, setFeedCards] = useState<FeedCard[]>([]);
-  // feedPage/userRegion은 렌더링에 직접 사용되지 않으므로 ref만 관리 (setState 불필요)
-  // feedHasMore=false로 시작: initializeUser 완료 전에 onEndReached가
-  // 조기 발동해서 레이스 컨디션을 일으키는 것을 방지
+  // 통합 피드 상태 (섹션 카드 + 매거진 카드 한 배열)
+  const [feedCards, setFeedCards] = useState<FeedCard[]>(validCache?.feedCards ?? []);
   const [feedHasMore, setFeedHasMore] = useState(false);
   const [feedLoading, setFeedLoading] = useState(false);
-  // feedError: 카드 0개인 상태에서 모든 복구 시도 실패 시 표시 (hasMore=false 대신 사용)
   const [feedError, setFeedError] = useState(false);
+
+  // ── Ref ─────────────────────────────────────────────────────
+  const flatListRef = useRef<FlatList>(null);
   const feedLoadingRef = useRef(false);
   const feedSeenEventIds = useRef<Set<string>>(new Set());
   const feedResetAttemptedRef = useRef(false);
-  const feedCardsLoadedRef = useRef(false);
+  const feedCardsLoadedRef = useRef(validCache !== null); // 캐시 히트면 이미 로드된 것으로
   const feedHasMoreRef = useRef(false);
-  const feedPageRef = useRef(0);
+  const feedPageRef = useRef(validCache?.nextFeedPage ?? 0);
   const feedRegionStageRef = useRef<'exact' | 'metro' | 'all'>('exact');
   const feedPendingLoadRef = useRef(false);
   const userRegionRef = useRef('');
-  // userId ref: loadMoreFeed가 loadSections 완료 전에 호출될 때 stale 클로저 방지
   const userIdRef = useRef(validCache?.userId ?? '');
+  const locationRef = useRef<Location | undefined>(validCache?.location);
   const feedRetryCountRef = useRef(0);
-  // recovery effect 재시도 횟수: 무한 루프 방지
   const feedRecoveryCountRef = useRef(0);
+
   const FEED_MAX_RETRIES = 3;
   const FEED_MAX_RECOVERY = 3;
-  // 첫 피드 요청 타임아웃: 8초로 짧게 유지해 빠른 재시도로 서버 웨이크업을 노림
-  // Railway 콜드 스타트(15~30초)는 재시도가 catch해줌 — 1번 요청이 30초 기다리는 것보다 빠름
-  const COLD_START_TIMEOUT = 8000;
+  // 첫 로드 타임아웃: Railway 콜드 스타트(15~30초) 커버
+  const COLD_START_TIMEOUT = 30000;
+
+  // ── 티켓 조회 ────────────────────────────────────────────────
+  useEffect(() => {
+    getToken().then((token) => {
+      if (token) getTickets().then(setTicketInfo).catch(() => {});
+    });
+  }, []);
+
+  // ── 초기화 ───────────────────────────────────────────────────
 
   useEffect(() => {
     initializeUser();
@@ -394,11 +411,12 @@ function HomePageInner() {
   }, []);
 
   const initializeUser = async () => {
-    // 피드 상태 복원 (캐시 히트 여부와 관계없이 항상 수행)
+    // 피드 상태 복원 (excludeIds, nextPage)
     const feedState = await getFeedState();
     if (!feedState.wasReset && feedState.excludeIds.length > 0) {
       feedSeenEventIds.current = new Set(feedState.excludeIds);
-      feedPageRef.current = feedState.nextPage;
+      // 캐시가 없을 때만 feedPageRef를 복원 (캐시 히트 시 nextFeedPage를 이미 세팅)
+      if (!validCache) feedPageRef.current = feedState.nextPage;
     }
 
     const triggerFeedLoad = () => {
@@ -410,19 +428,26 @@ function HomePageInner() {
       void loadMoreFeedRef.current();
     };
 
-    if (_homeCache && Date.now() < _homeCache.expiresAt) {
-      // 캐시 히트: 섹션은 이미 useState 초기값으로 표시됨
-      // Railway 콜드 스타트 대비: loadSections를 fire-and-forget으로 호출해 서버를 미리 깨움
-      // (응답 결과는 무시하지 않고 섹션 갱신에 활용)
-      loadSections(_homeCache.location, _homeCache.userId).catch(() => {});
+    if (validCache) {
+      // 캐시 히트: 섹션+피드 page0 데이터가 이미 state 초기값으로 표시됨
+      // 위치 갱신 + 다음 피드 페이지 계속 로드
+      void requestLocation();
       triggerFeedLoad();
       return;
     }
 
+    // 스테일 섹션 즉시 표시 (SWR: 네트워크 응답 전 이전 세션 데이터 선표시)
     try {
-      // 첫 방문 유저: 권한 다이얼로그를 500ms Race 밖에서 먼저 처리
-      // Race 안에서 openPermissionDialog를 호출하면 500ms 타임아웃이 먼저 resolve되고
-      // 이후 if(!loc) 재호출과 openPermissionDialog가 동시에 실행돼 다이얼로그가 안 뜨는 버그
+      const stale = await recommendationService.getStaleHomeSections();
+      if (stale && stale.length > 0) {
+        const staleCards = sectionToFeedCards(stale);
+        setFeedCards(staleCards);
+        feedCardsLoadedRef.current = false; // 스테일이므로 실제 로드 필요
+      }
+    } catch (_) {}
+
+    try {
+      // 첫 방문: 권한 다이얼로그 먼저 처리
       try {
         const perm = await getCurrentLocation.getPermission();
         if ((perm as string) === 'notDetermined') {
@@ -432,7 +457,6 @@ function HomePageInner() {
 
       const [uid, loc] = await Promise.all([
         getCurrentUserId(),
-        // 권한은 위에서 이미 처리됨 → 여기서는 좌표만 가져오면 되므로 500ms Race 유효
         Promise.race([
           requestLocation(),
           new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 500)),
@@ -441,28 +465,44 @@ function HomePageInner() {
       setUserId(uid);
       userIdRef.current = uid;
 
-      // 섹션·피드 병렬 로드: 섹션 완료를 기다리지 않고 피드 즉시 시작
-      // Railway 콜드 스타트 시 섹션 로드가 10~30초 걸려 피드가 늦게 뜨는 문제 해결
-      loadSections(loc, uid).catch((err) => {
-        console.warn('[Home] loadSections failed, setting empty sections:', err);
-        setSections((prev) => prev ?? []);
-      });
       triggerFeedLoad();
 
-      // GPS가 500ms 내에 못 왔지만 이후 완료된 경우 전체 섹션 재로드
+      // 500ms 내에 GPS가 안 왔으면 이후 완료 시 재로드
       if (!loc) {
         requestLocation().then((resolvedLoc) => {
           if (resolvedLoc) {
-            void loadSections(resolvedLoc, uid);
+            // 위치 업데이트 후 섹션만 갱신 (피드는 계속 이어서 로드)
+            recommendationService.getSections(resolvedLoc, uid)
+              .then(res => {
+                if (res.success && res.sections.length > 0) {
+                  const sectionCards = applyTodayPickCache(sectionToFeedCards(res.sections));
+                  // 기존 feedCards에서 섹션 카드를 교체하고 매거진 카드는 유지
+                  setFeedCards(prev => {
+                    const magazineCards = prev.filter(c => c.content_type !== 'TODAY_PICK' && c.content_type !== 'SECTION');
+                    return [...sectionCards, ...magazineCards];
+                  });
+                }
+              })
+              .catch(() => {});
           }
         }).catch(() => {});
       }
     } catch (error) {
       console.error('[Home] init error:', error);
-      setSections((prev) => prev ?? []);
       triggerFeedLoad();
     }
   };
+
+  // today_pick 일별 고정 적용
+  function applyTodayPickCache(cards: FeedCard[]): FeedCard[] {
+    const todayPickCard = cards.find(c => c.content_type === 'TODAY_PICK');
+    if (!todayPickCard) return cards;
+    const today = getTodayKst();
+    if (!_todayPickCache || _todayPickCache.kstDate !== today) {
+      _todayPickCache = { card: todayPickCard, kstDate: today };
+    }
+    return cards.map(c => c.content_type === 'TODAY_PICK' ? _todayPickCache!.card : c);
+  }
 
   const requestLocation = async (): Promise<Location | undefined> => {
     try {
@@ -477,14 +517,11 @@ function HomePageInner() {
       const data = await getCurrentLocation({ accuracy: Accuracy.Balanced });
       const loc: Location = { lat: data.coords.latitude, lng: data.coords.longitude };
       setLocation(loc);
+      locationRef.current = loc;
       reverseGeocode(loc.lat, loc.lng).then((geo) => {
         setCurrentAddress(geo.success && geo.address ? geo.address : '위치 정보');
         if (geo.success && geo.sido) {
-          const region = sidoToRegion(geo.sido);
-          // ref만 업데이트: 다음 loadMoreFeed 호출 시 자동으로 반영됨
-          // 강제 재로드 금지 — feedSeenEventIds가 채워진 상태에서 page=0+exact로 재시도하면
-          // 이미 본 이벤트가 exclude되어 빈 결과 → 단계 순환 루프 발생
-          userRegionRef.current = region;
+          userRegionRef.current = sidoToRegion(geo.sido);
         }
       }).catch(() => {});
       return loc;
@@ -496,77 +533,8 @@ function HomePageInner() {
     }
   };
 
-  const loadSections = async (loc?: Location, uid?: string) => {
-    const currentUid = uid ?? userId;
-
-    // SWR Step 1: 이전 세션 stale 캐시 즉시 렌더링 (skeleton 없이 바로 데이터 표시)
-    let stale: Awaited<ReturnType<typeof recommendationService.getStaleHomeSections>> = null;
-    try {
-      stale = await recommendationService.getStaleHomeSections();
-    } catch (e) {
-      console.warn('[Home] getStaleHomeSections failed:', e);
-    }
-    setSections((prev) => prev !== null ? prev : (stale ?? null));
-
-    let networkStatus: string = 'ONLINE';
-    try {
-      networkStatus = await getNetworkStatus();
-    } catch (e) {
-      console.warn('[Home] getNetworkStatus failed, assuming online:', e);
-    }
-    if (networkStatus === 'OFFLINE') {
-      setIsOffline(true);
-      if (stale === null) setSections([]);
-      return;
-    }
-    setIsOffline(false);
-
-    // SWR Step 2: 신선한 데이터를 백그라운드에서 fetch → 완료 시 UI 갱신
-    const response = await recommendationService.getSections(loc, currentUid);
-    if (response.success) {
-      // today_pick 하루 고정: GPS 재로드·새로고침 시에도 오늘 이미 선택된 이벤트 유지
-      // (GPS 유무에 따라 backend 후보 풀이 달라져 변경될 수 있으므로 프론트에서 잠금)
-      const today = getTodayKst();
-      const freshTodayPick = response.sections.find(s => s.slug === 'today_pick');
-      let finalSections = response.sections;
-      if (freshTodayPick) {
-        if (!_todayPickCache || _todayPickCache.kstDate !== today) {
-          // 오늘 첫 선택 → 캐시에 저장
-          _todayPickCache = { section: freshTodayPick, kstDate: today };
-        }
-        // 이미 오늘 today_pick이 결정됐으면 기존 것 유지
-        finalSections = response.sections.map(s =>
-          s.slug === 'today_pick' ? _todayPickCache!.section : s
-        );
-      }
-      setSections(finalSections);
-      _homeCache = {
-        sections: finalSections,
-        location: loc,
-        userId: currentUid,
-        expiresAt: Date.now() + HOME_CACHE_TTL_MS,
-      };
-      // 첫 화면에 보이는 이미지 프리페치 — 사용자가 보기 전에 미리 캐시
-      // 각 섹션 앞 6개만 프리페치 (오버헤드 최소화)
-      requestAnimationFrame(() => {
-        finalSections.forEach((section) => {
-          section.events.slice(0, 6).forEach((event) => {
-            if (event.thumbnail_url) {
-              Image.prefetch(event.thumbnail_url).catch(() => {});
-            }
-          });
-        });
-      });
-    } else if (stale === null) {
-      // 캐시도 없고 API도 실패한 경우에만 에러 표시
-      setSections([]);
-    }
-    // API 실패 + stale 있음 → stale 유지 (에러 화면 없음)
-  };
-
   const handleEventPress = useCallback((eventId: string, sectionSlug?: string, rankPosition?: number) => {
     navigation.navigate('/events/:id', { id: eventId });
-    // navigate 이후 로깅: 네비게이션 애니메이션이 먼저 시작되도록 지연
     requestAnimationFrame(() => {
       userEventService.logEventClick(eventId, {
         sectionSlug,
@@ -583,8 +551,6 @@ function HomePageInner() {
     setRefreshing(true);
     _homeCache = null;
     try {
-      excludedIds.current.clear();
-      // 피드 초기화 + 스토리지 리셋
       await resetFeedState();
       setFeedCards([]);
       feedPageRef.current = 0;
@@ -599,28 +565,29 @@ function HomePageInner() {
       feedRecoveryCountRef.current = 0;
       setFeedError(false);
       userRegionRef.current = '';
-      const loc = await requestLocation();
-      loadSections(loc, userId).catch((err) => {
-        console.warn('[Home] refresh loadSections failed:', err);
-        setSections((prev) => prev ?? []);
-      });
+      await requestLocation();
       void loadMoreFeedRef.current();
     } finally {
       setRefreshing(false);
     }
-  }, [userId]);
+  }, []);
 
+  // ── 통합 피드 로드 ────────────────────────────────────────────
+  // page 0: /api/home/sections + /api/home/feed 병렬 → 섹션 카드 + 매거진 카드
+  // page 1+: /api/home/feed 만
   const loadMoreFeed = useCallback(async () => {
     if (feedLoadingRef.current || !feedHasMoreRef.current) return;
     feedLoadingRef.current = true;
     setFeedLoading(true);
+
     const currentPage = feedPageRef.current;
-    const currentRegion = userRegionRef.current;
-    // userId: ref로 읽어 stale 클로저 방지 (loadSections 완료 전에 호출될 수 있음)
-    const currentUserId = userIdRef.current;
-    // 첫 피드 요청(카드 0개)이면 Railway 콜드 스타트에 대비해 30초 타임아웃
+    const isPageZero = currentPage === 0;
     const isFirstLoad = !feedCardsLoadedRef.current;
     const fetchTimeout = isFirstLoad ? COLD_START_TIMEOUT : API_TIMEOUT;
+    const currentRegion = userRegionRef.current;
+    const currentUserId = userIdRef.current;
+    const currentLocation = locationRef.current;
+
     const safetyTimeoutId = setTimeout(() => {
       if (feedLoadingRef.current) {
         feedLoadingRef.current = false;
@@ -631,81 +598,134 @@ function HomePageInner() {
         }
       }
     }, fetchTimeout + 3000);
+
     try {
-      const res = await fetchFeed({
-        page: currentPage,
-        excludeIds: Array.from(feedSeenEventIds.current),
-        userId: currentUserId,
-        region: currentRegion || undefined,
-        regionStage: currentRegion ? feedRegionStageRef.current : 'all',
-        timeout: fetchTimeout,
-      });
-      if (res.cards.length === 0) {
-        // Priority 1: excludeIds 풀 소진 시 → 초기화 후 1회만 재시도
-        // stale pendingRetry가 feedPage=0으로 잘못 호출돼 false exhaustion이 생기는 경우도 포함
-        // feedResetAttemptedRef로 무한 루프 방지 (세션당 1회)
-        if (
-          feedSeenEventIds.current.size > 0 &&
-          !feedResetAttemptedRef.current
-        ) {
-          feedResetAttemptedRef.current = true;
-          feedSeenEventIds.current.clear();
-          feedPageRef.current = 0;
-          setFeedHasMore(true);
-          feedHasMoreRef.current = true;
-          feedPendingLoadRef.current = false; // setTimeout이 처리하므로 별도 pending 불필요
-          resetFeedState().catch(() => {});
-          setTimeout(() => { void loadMoreFeedRef.current(); }, 100);
-          return;
-        }
-
-        // Priority 2: 지역 단계 확장 (서울 exact → 수도권 metro → 전국 all)
-        // 위치 정보가 있고 아직 all 단계가 아닐 때만 확장
-        if (currentRegion && feedRegionStageRef.current !== 'all') {
-          if (feedRegionStageRef.current === 'exact') {
-            feedRegionStageRef.current = 'metro';
-          } else {
-            feedRegionStageRef.current = 'all';
-          }
-          feedPageRef.current = 0;
-          setFeedHasMore(true);
-          feedHasMoreRef.current = true;
-          feedPendingLoadRef.current = false; // setTimeout이 처리하므로 별도 pending 불필요
-          setTimeout(() => { void loadMoreFeedRef.current(); }, 100);
-          return;
-        }
-
-        // Priority 3: 모든 단계 소진 → 피드 끝 카드 표시
-        setFeedHasMore(false);
-        feedHasMoreRef.current = false;
+      let networkStatus = 'ONLINE';
+      try { networkStatus = await getNetworkStatus(); } catch (_) {}
+      if (networkStatus === 'OFFLINE') {
+        setIsOffline(true);
         return;
       }
-      if (res.cards.length > 0) {
-        feedCardsLoadedRef.current = true; // 이번 세션에서 카드 로드 성공
-        setFeedCards((prev) => [...prev, ...res.cards]);
-        const newIds: string[] = [];
-        res.cards.forEach((card) =>
-          card.events.forEach((e) => {
-            feedSeenEventIds.current.add(e.id);
-            newIds.push(e.id);
+      setIsOffline(false);
+
+      if (isPageZero) {
+        // ── page 0: 섹션 + 피드 병렬 로드 ──────────────────────
+        const [sectionsResult, feedResult] = await Promise.all([
+          recommendationService.getSections(currentLocation, currentUserId)
+            .catch(() => ({ success: false as const, sections: [] })),
+          fetchFeed({
+            page: 0,
+            excludeIds: Array.from(feedSeenEventIds.current),
+            userId: currentUserId,
+            region: currentRegion || undefined,
+            regionStage: currentRegion ? feedRegionStageRef.current : 'all',
+            timeout: fetchTimeout,
           }),
-        );
-        const nextPage = parseInt(res.next_cursor ?? String(currentPage + 1));
-        feedPageRef.current = nextPage;
-        advanceFeedState(newIds, nextPage).catch(() => {}); // fire-and-forget
-        // 다음 스크롤 전에 이미지 미리 캐시 — 스크롤 시 즉시 표시
+        ]);
+
+        // 섹션 → FeedCard 변환 + today_pick 일별 고정
+        const rawSectionCards = sectionsResult.success
+          ? sectionToFeedCards(sectionsResult.sections)
+          : [];
+        const sectionCards = applyTodayPickCache(rawSectionCards);
+
+        const allCards = [...sectionCards, ...feedResult.cards];
+        feedCardsLoadedRef.current = true;
+        setFeedCards(allCards);
+
+        // 이미지 프리페치
         requestAnimationFrame(() => {
-          res.cards.forEach((card) => {
-            card.events.forEach((e) => {
+          allCards.forEach(card => {
+            card.events.slice(0, 6).forEach(e => {
               if (e.image_url) Image.prefetch(e.image_url).catch(() => {});
             });
           });
         });
+
+        // 피드 이벤트 ID 기록
+        feedResult.cards.forEach(card =>
+          card.events.forEach(e => feedSeenEventIds.current.add(e.id)),
+        );
+        const nextPage = parseInt(feedResult.next_cursor ?? '1');
+        feedPageRef.current = nextPage;
+        advanceFeedState(
+          feedResult.cards.flatMap(c => c.events.map(e => e.id)),
+          nextPage,
+        ).catch(() => {});
+
+        setFeedHasMore(feedResult.has_more);
+        feedHasMoreRef.current = feedResult.has_more;
+        feedRetryCountRef.current = 0;
+
+        // 캐시 저장
+        _homeCache = {
+          feedCards: allCards,
+          location: currentLocation,
+          userId: currentUserId,
+          nextFeedPage: nextPage,
+          expiresAt: Date.now() + HOME_CACHE_TTL_MS,
+        };
+      } else {
+        // ── page 1+: 피드만 ──────────────────────────────────────
+        const res = await fetchFeed({
+          page: currentPage,
+          excludeIds: Array.from(feedSeenEventIds.current),
+          userId: currentUserId,
+          region: currentRegion || undefined,
+          regionStage: currentRegion ? feedRegionStageRef.current : 'all',
+          timeout: fetchTimeout,
+        });
+
+        if (res.cards.length === 0) {
+          // excludeIds 소진 → 1회 리셋
+          if (feedSeenEventIds.current.size > 0 && !feedResetAttemptedRef.current) {
+            feedResetAttemptedRef.current = true;
+            feedSeenEventIds.current.clear();
+            feedPageRef.current = 1; // 0은 섹션 포함이므로 1부터 재시도
+            setFeedHasMore(true);
+            feedHasMoreRef.current = true;
+            resetFeedState().catch(() => {});
+            setTimeout(() => { void loadMoreFeedRef.current(); }, 100);
+            return;
+          }
+          // 지역 단계 확장
+          if (currentRegion && feedRegionStageRef.current !== 'all') {
+            feedRegionStageRef.current = feedRegionStageRef.current === 'exact' ? 'metro' : 'all';
+            feedPageRef.current = 1;
+            setFeedHasMore(true);
+            feedHasMoreRef.current = true;
+            setTimeout(() => { void loadMoreFeedRef.current(); }, 100);
+            return;
+          }
+          setFeedHasMore(false);
+          feedHasMoreRef.current = false;
+          return;
+        }
+
+        feedCardsLoadedRef.current = true;
+        setFeedCards(prev => [...prev, ...res.cards]);
+
+        const newIds: string[] = [];
+        res.cards.forEach(card => card.events.forEach(e => {
+          feedSeenEventIds.current.add(e.id);
+          newIds.push(e.id);
+        }));
+        const nextPage = parseInt(res.next_cursor ?? String(currentPage + 1));
+        feedPageRef.current = nextPage;
+        advanceFeedState(newIds, nextPage).catch(() => {});
+
+        requestAnimationFrame(() => {
+          res.cards.forEach(card => {
+            card.events.forEach(e => {
+              if (e.image_url) Image.prefetch(e.image_url).catch(() => {});
+            });
+          });
+        });
+
+        setFeedHasMore(res.has_more);
+        feedHasMoreRef.current = res.has_more;
+        feedRetryCountRef.current = 0;
       }
-      setFeedHasMore(res.has_more);
-      feedHasMoreRef.current = res.has_more;
-      // 성공 시 재시도 카운터 리셋
-      feedRetryCountRef.current = 0;
     } catch (err) {
       console.warn('[Feed] error:', err instanceof Error ? err.message : String(err));
       if (feedRetryCountRef.current < FEED_MAX_RETRIES) {
@@ -714,55 +734,44 @@ function HomePageInner() {
         setTimeout(() => { void loadMoreFeedRef.current(); }, delay);
       }
     } finally {
-      clearTimeout(safetyTimeoutId); // safety timeout이 이미 발동됐으면 no-op
+      clearTimeout(safetyTimeoutId);
       feedLoadingRef.current = false;
       setFeedLoading(false);
-      // initializeUser의 call이 drop됐으면 지금 재시도
-      // 150ms: React가 setFeedPage 등으로 re-render + loadMoreFeedRef 갱신을 완료할 여유
       if (feedPendingLoadRef.current) {
         feedPendingLoadRef.current = false;
         setTimeout(() => { void loadMoreFeedRef.current(); }, 150);
       }
     }
-  }, [userId]); // feedPage/userRegion은 ref로 읽으므로 deps 제거 (stale 클로저 방지)
+  }, [userId]);
 
-  // loadMoreFeed는 deps 변경 시마다 새 참조 생성 (useCallback).
-  // initializeUser/handleRefresh는 first-render closure를 캡처하므로
-  // 항상 최신 버전을 호출하도록 ref에 동기화.
   const loadMoreFeedRef = useRef(loadMoreFeed);
   useEffect(() => { loadMoreFeedRef.current = loadMoreFeed; }, [loadMoreFeed]);
 
-  // 피드 고착 상태 자동 복구: feedCards=0, loading=false, hasMore=true이면
-  // 섹션은 로드됐는데 피드가 빠진 상태 → 3초 후 자동 재트리거
-  // FEED_MAX_RECOVERY 초과 시 feedError=true로 에러 카드 표시 (hasMore는 건드리지 않음)
-  // 이유: hasMore=false는 "콘텐츠가 없음"을 의미하지만 실제로는 서버 응답 실패이므로 구분
+  // 피드 고착 자동 복구
   useEffect(() => {
-    if (sections !== null && feedCards.length === 0 && !feedLoading && feedHasMore && !feedError) {
+    if (feedCards.length === 0 && !feedLoading && feedHasMore && !feedError) {
       if (feedRecoveryCountRef.current >= FEED_MAX_RECOVERY) {
-        // 복구 시도 초과 → 에러 카드 표시 (다시 시도 버튼 포함)
         setFeedError(true);
         return undefined;
       }
       const id = setTimeout(() => {
         feedRecoveryCountRef.current++;
+        feedRetryCountRef.current = 0;
         void loadMoreFeedRef.current();
       }, 3000);
       return () => clearTimeout(id);
     }
-    // 카드가 생겼으면 복구 카운터·에러 리셋
     if (feedCards.length > 0 && feedError) {
       setFeedError(false);
       feedRecoveryCountRef.current = 0;
     }
     return undefined;
-  }, [sections, feedCards.length, feedLoading, feedHasMore, feedError]);
+  }, [feedCards.length, feedLoading, feedHasMore, feedError]);
 
   const scrollToTop = useCallback(() => {
     flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
   }, []);
 
-  // onEndReached가 새 카드 추가 후 자동으로 재평가되지 않는 React Native FlatList 이슈 보완
-  // 스크롤 모멘텀 종료 시점에 추가로 체크하여 누락된 로드 트리거 보정
   const handleMomentumScrollEnd = useCallback((e: { nativeEvent: { contentSize: { height: number }; layoutMeasurement: { height: number }; contentOffset: { y: number } } }) => {
     const { contentSize, layoutMeasurement, contentOffset } = e.nativeEvent;
     const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y;
@@ -771,132 +780,67 @@ function HomePageInner() {
     }
   }, []);
 
-  // ─────────────────────────────────────────────────────────────
-  // 중복 제거 + 신호 계산을 useMemo로 처리 — 렌더 중 연산 제거
-  // ─────────────────────────────────────────────────────────────
-
-  const processedSections = useMemo((): ProcessedSection[] => {
-    if (!sections) return [];
-    const seenIds = new Set<string>();
-    const result: ProcessedSection[] = [];
-
-    for (const section of sections) {
-      if (section.slug === 'nearby' && !location) continue;
-
-      const unique = section.events.filter((e) => !seenIds.has(e.id));
-      unique.forEach((e) => seenIds.add(e.id));
-
-      if (unique.length === 0) continue;
-
-      result.push({
-        ...section,
-        events: unique.map((event) => ({
-          ...event,
-          signal: getSectionSignal(section.slug, event),
-        })),
-      });
-    }
-
-    return result;
-  }, [sections, location]);
-
-  // ─────────────────────────────────────────────────────────────
-  // 섹션 렌더링
-  // ─────────────────────────────────────────────────────────────
-
-  const renderSection = useCallback((section: ProcessedSection) => {
-    const { slug, title, subtitle, events } = section;
-
-    if (slug === 'today_pick') {
-      return (
-        <View key={slug} style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{title}</Text>
-            {subtitle ? <Text style={styles.sectionSubtitle}>{subtitle}</Text> : null}
-          </View>
-          <View style={{ paddingHorizontal: 20 }}>
-            <TodayPickCard event={events[0]!} onPress={handleEventPress} />
-          </View>
-        </View>
-      );
-    }
-
-    return (
-      <View key={slug} style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{title}</Text>
-          {subtitle ? <Text style={styles.sectionSubtitle}>{subtitle}</Text> : null}
-        </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.horizontalList}
-          removeClippedSubviews={true}
-          nestedScrollEnabled={true}
-        >
-          {events.map((event, idx) => (
-            <SectionCard
-              key={event.id}
-              event={event}
-              slug={slug}
-              rank={idx + 1}
-              onPress={handleEventPress}
-            />
-          ))}
-        </ScrollView>
-      </View>
-    );
-  }, [styles, handleEventPress]);
-
-  // ─────────────────────────────────────────────────────────────
-  // FlatList 데이터 + 렌더러
-  // ─────────────────────────────────────────────────────────────
-
+  // ── FlatList 데이터 구성 ─────────────────────────────────────
   const feedItems = useMemo((): FeedItem[] => {
     const items: FeedItem[] = [];
 
-    if (sections === null) {
-      // 섹션 로딩 중: 스켈레톤 표시
-      items.push({ type: 'skeleton', skeletonType: 'today_pick', id: 'sk-today' });
-      items.push({ type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h1' });
-      items.push({ type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h2' });
-      items.push({ type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h3' });
-    } else if (processedSections.length === 0) {
-      items.push({ type: 'empty' });
-    } else {
-      for (let i = 0; i < processedSections.length; i++) {
-        items.push({ type: 'section', section: processedSections[i]! });
-        if (i === 1) items.push({ type: 'ad', id: 'section-1', adType: 'section' });
+    if (feedCards.length === 0) {
+      // 초기 로딩 중: 스켈레톤 표시
+      if (feedLoading || (feedHasMore && !feedError)) {
+        items.push({ type: 'skeleton', skeletonType: 'today_pick', id: 'sk-today' });
+        items.push({ type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h1' });
+        items.push({ type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h2' });
+        items.push({ type: 'skeleton', skeletonType: 'horizontal', id: 'sk-h3' });
+      } else if (feedError) {
+        items.push({ type: 'feed_error' });
+      }
+      return items;
+    }
+
+    // 섹션 카드 / 매거진 카드 순회하며 광고 삽입
+    let sectionCardCount = 0;
+    let magazineCardCount = 0;
+
+    for (let i = 0; i < feedCards.length; i++) {
+      const card = feedCards[i]!;
+      const isSection = card.content_type === 'TODAY_PICK' || card.content_type === 'SECTION';
+
+      items.push({ type: 'magazine', card });
+
+      if (isSection) {
+        sectionCardCount++;
+        // 두 번째 섹션 카드 뒤에 리스트형 광고 삽입
+        if (sectionCardCount === 2) {
+          items.push({ type: 'ad', id: 'section-1', adType: 'section' });
+        }
+      } else {
+        magazineCardCount++;
+        // 3번째마다 피드형 광고 삽입
+        if (magazineCardCount % 3 === 0) {
+          items.push({ type: 'ad', id: `feed-${magazineCardCount}`, adType: 'feed' });
+        }
       }
     }
 
-    // 피드 카드는 섹션 상태와 무관하게 항상 표시
-    // (sections 로딩/실패로 피드가 영원히 숨겨지는 버그 방지)
-    for (let i = 0; i < feedCards.length; i++) {
-      items.push({ type: 'magazine', card: feedCards[i]! });
-      if ((i + 1) % 3 === 0) items.push({ type: 'ad', id: `feed-${i}`, adType: 'feed' });
-    }
-
-    // 로딩 중이거나 재시도 대기 중(카드 없음+hasMore+에러 없음)일 때 스켈레톤 표시
-    // 재시도 사이 1~3초 갭에도 스켈레톤을 유지해 깜박임 방지
-    const showFeedLoading = feedLoading || (feedCards.length === 0 && feedHasMore && !feedError);
+    // 로딩 / 에러 / 완료 표시
+    const showFeedLoading = feedLoading || (feedHasMore && !feedError && magazineCardCount === 0);
     if (showFeedLoading) {
       items.push({ type: 'feed_loading', loadingIdx: 0 });
       items.push({ type: 'feed_loading', loadingIdx: 1 });
       items.push({ type: 'feed_loading', loadingIdx: 2 });
     } else if (feedError) {
-      // 카드 0개 + 모든 재시도 실패: 에러 카드 (hasMore는 여전히 true — 콘텐츠는 존재함)
       items.push({ type: 'feed_error' });
     } else if (!feedHasMore) {
       const eventCount = feedCards.reduce((sum, card) => sum + card.events.length, 0);
       items.push({ type: 'feed_end', eventCount });
-    } else if (feedCards.length > 0) {
+    } else if (magazineCardCount > 0) {
       items.push({ type: 'feed_more_dot' });
     }
 
     return items;
-  }, [sections, processedSections, feedCards, feedLoading, feedHasMore, feedError]);
+  }, [feedCards, feedLoading, feedHasMore, feedError]);
 
+  // ── 렌더러 ────────────────────────────────────────────────────
   const renderFeedItem = useCallback(({ item }: { item: FeedItem }) => {
     if (item.type === 'skeleton') {
       if (item.skeletonType === 'today_pick') {
@@ -918,21 +862,71 @@ function HomePageInner() {
         </View>
       );
     }
-    if (item.type === 'empty') {
+
+    if (item.type === 'ad') {
       return (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyText}>
-            {isOffline ? '네트워크 연결을 확인해 주세요' : '추천 이벤트를 불러오지 못했어요'}
-          </Text>
-        </View>
+        <AdSlot
+          adGroupId={item.adType === 'feed' ? AD_GROUP_FEED : AD_GROUP_SECTION}
+          adFormat={item.adType === 'feed' ? 'feed' : 'list'}
+        />
       );
     }
-    if (item.type === 'ad') {
-      return <AdSlot adGroupId={item.adType === 'feed' ? AD_GROUP_FEED : AD_GROUP_SECTION} />;
-    }
+
     if (item.type === 'magazine') {
       const { card } = item;
 
+      // ── 섹션형 카드 ─────────────────────────────────────────
+      if (card.content_type === 'TODAY_PICK') {
+        if (!card.events[0]) return null;
+        return (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{card.framing_label ?? '오늘의 픽'}</Text>
+              {card.title ? <Text style={styles.sectionSubtitle}>{card.title}</Text> : null}
+            </View>
+            <View style={{ paddingHorizontal: 20 }}>
+              <TodayPickCard
+                event={feedEventToScoredEvent(card.events[0])}
+                onPress={handleEventPress}
+              />
+            </View>
+          </View>
+        );
+      }
+
+      if (card.content_type === 'SECTION') {
+        const events = card.events.map(e => {
+          const scored = feedEventToScoredEvent(e);
+          return { ...scored, signal: getSectionSignal(card.framing_type, scored) };
+        });
+        return (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{card.framing_label ?? ''}</Text>
+              {card.title ? <Text style={styles.sectionSubtitle}>{card.title}</Text> : null}
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              removeClippedSubviews={true}
+              nestedScrollEnabled={true}
+            >
+              {events.map((event, idx) => (
+                <SectionCard
+                  key={event.id}
+                  event={event}
+                  slug={card.framing_type}
+                  rank={idx + 1}
+                  onPress={handleEventPress}
+                />
+              ))}
+            </ScrollView>
+          </View>
+        );
+      }
+
+      // ── 매거진형 카드 ────────────────────────────────────────
       if (card.content_type === 'HERO') {
         if (!card.events[0]) return null;
         return (
@@ -955,7 +949,6 @@ function HomePageInner() {
       }
 
       if (card.content_type === 'BUNDLE') {
-        // 기존 섹션과 동일한 EventCard small + 가로 스크롤 — 시각적 일관성
         const adaptedEvents = card.events.map(feedEventToScoredEvent);
         return (
           <View style={styles.section}>
@@ -994,6 +987,7 @@ function HomePageInner() {
         />
       );
     }
+
     if (item.type === 'feed_loading') {
       return (
         <View style={{ paddingVertical: 12, paddingHorizontal: 20 }}>
@@ -1003,8 +997,8 @@ function HomePageInner() {
         </View>
       );
     }
+
     if (item.type === 'feed_error') {
-      // 카드 0개 상태에서 서버 응답 실패 — 다시 시도 버튼 제공
       return (
         <View style={{ paddingHorizontal: 20, paddingVertical: 32, alignItems: 'center' }}>
           <Text style={{ fontSize: 15, fontWeight: '600', color: adaptive.grey700, marginBottom: 8 }}>
@@ -1027,8 +1021,8 @@ function HomePageInner() {
         </View>
       );
     }
+
     if (item.type === 'feed_more_dot') {
-      // 더 로드 가능한 상태임을 알리는 점 세 개 — 핀터레스트 방식
       return (
         <View style={{ paddingVertical: 20, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
           {[0, 1, 2].map((i) => (
@@ -1037,10 +1031,10 @@ function HomePageInner() {
         </View>
       );
     }
+
     if (item.type === 'feed_end') {
       return (
         <View style={{ paddingHorizontal: 20, paddingVertical: 32, alignItems: 'center' }}>
-          {/* 구분선 + 타이틀 */}
           <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', marginBottom: 20 }}>
             <View style={{ flex: 1, height: 1, backgroundColor: adaptive.grey200 }} />
             <Text style={{ marginHorizontal: 12, color: adaptive.grey600, fontSize: 13, fontWeight: '600' }}>
@@ -1048,17 +1042,14 @@ function HomePageInner() {
             </Text>
             <View style={{ flex: 1, height: 1, backgroundColor: adaptive.grey200 }} />
           </View>
-          {/* 이벤트 수 */}
           <Text style={{ fontSize: 15, fontWeight: '700', color: adaptive.grey900, marginBottom: 6 }}>
             {item.eventCount > 0
               ? `${item.eventCount.toLocaleString()}개의 이벤트를 둘러봤어요`
               : '새로운 피드를 준비 중이에요'}
           </Text>
-          {/* 업데이트 안내 */}
           <Text style={{ fontSize: 13, color: adaptive.grey500, marginBottom: 24 }}>
             매일 새 이벤트가 업데이트돼요
           </Text>
-          {/* 버튼 2개 */}
           <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
             <Pressable
               onPress={scrollToTop}
@@ -1076,8 +1067,9 @@ function HomePageInner() {
         </View>
       );
     }
-    return renderSection(item.section);
-  }, [styles, adaptive, isOffline, renderSection, handleEventPress, scrollToTop, handleRefresh]);
+
+    return null;
+  }, [styles, adaptive, isOffline, handleEventPress, scrollToTop, handleRefresh]);
 
   const listHeader = useMemo(() => (
     <>
@@ -1101,9 +1093,23 @@ function HomePageInner() {
             </Pressable>
           ) : null}
         </View>
+
+        {/* 티켓 배너 (로그인 유저만) */}
+        {ticketInfo !== null && (
+          <View style={styles.ticketBanner}>
+            <Text style={styles.ticketBannerText}>
+              🎟 {ticketInfo.ticketCount}/{TICKETS_PER_EXCHANGE}
+            </Text>
+            <Text style={styles.ticketBannerSub}>
+              {ticketInfo.ticketCount >= TICKETS_PER_EXCHANGE
+                ? '토스 포인트로 바꿀 수 있어요 →'
+                : '이벤트를 탐색하고 티켓을 모아보세요'}
+            </Text>
+          </View>
+        )}
       </View>
     </>
-  ), [adaptive, styles, top, location, currentAddress, handleRefresh]);
+  ), [adaptive, styles, top, location, currentAddress, handleRefresh, ticketInfo]);
 
   return (
     <View style={styles.container}>
@@ -1122,7 +1128,6 @@ function HomePageInner() {
         data={feedItems}
         renderItem={renderFeedItem}
         keyExtractor={(item, _index) => {
-          if (item.type === 'section') return item.section.slug;
           if (item.type === 'skeleton') return item.id;
           if (item.type === 'magazine') return `magazine-${item.card.id}`;
           if (item.type === 'feed_loading') return `feed_loading_${item.loadingIdx}`;

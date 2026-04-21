@@ -33,6 +33,7 @@ import userEventsRouter from './routes/userEvents';
 import authRouter from './routes/auth';
 import userSyncRouter from './routes/userSync';
 import homeFeedRouter from './routes/homeFeed';
+import ticketsRouter from './routes/tickets';
 import * as recommender from './lib/recommender';
 import { calculateConsensusLight, calculateStructuralScore } from './lib/hotScoreCalculator';
 import { calculateDataCompleteness, DataCompletenessScore } from './lib/dataQuality';
@@ -415,6 +416,9 @@ app.use('/api/user-events', userEventsRouter);
 
 // 매거진 피드 API
 app.use('/api/home/feed', homeFeedRouter);
+
+// 티켓 조각 API
+app.use('/api/tickets', ticketsRouter);
 
 // ============================================================
 // Phase 3: 룰 기반 추천 시스템 API

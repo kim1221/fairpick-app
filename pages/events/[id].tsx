@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { Txt, Badge, Post, BottomSheet, Loader, Button, Icon, IconButton, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
-import { InlineAd, share, getTossShareLink } from '@apps-in-toss/framework';
+import { InlineAd, share, getTossShareLink, loadFullScreenAd, showFullScreenAd } from '@apps-in-toss/framework';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
 type EventStyles = ReturnType<typeof createStyles>;
@@ -32,6 +32,7 @@ import { useLike } from '../../src/hooks/useLike';
 import { LikesProvider } from '../../src/contexts/LikesContext';
 import { useAuth } from '../../src/hooks/useAuth';
 import http from '../../src/lib/http';
+import { earnTickets, exchangeTickets, getTickets, TICKETS_PER_EXCHANGE, type TicketInfo } from '../../src/services/ticketService';
 
 type EventDetailParams = {
   id?: string;
@@ -241,6 +242,13 @@ function EventDetailPage() {
   const [activeSheet, setActiveSheet] = useState<'price' | 'hours' | 'overview' | null>(null);
   const [adRendered, setAdRendered] = useState(false);
   const [adFailed, setAdFailed] = useState(false);
+
+  // 티켓 조각
+  const REWARDED_AD_ID = 'ait.v2.live.b50cf7d900884c5b';
+  const [ticketInfo, setTicketInfo] = useState<TicketInfo | null>(null);
+  const [rewardedAdLoaded, setRewardedAdLoaded] = useState(false);
+  const [ticketLoading, setTicketLoading] = useState(false);
+  const [ticketResult, setTicketResult] = useState<{ earned: number } | null>(null);
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   // event 로드 후 snapshot 추출 → useLike에 전달 (찜 시 로컬 snapshot 저장)
   const eventSnapshot = React.useMemo(() => event ? {
@@ -354,6 +362,75 @@ function EventDetailPage() {
       mounted = false;
     };
   }, [params?.id]);
+
+  // 티켓 조회 + 리워드 광고 프리로드
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    getTickets().then(setTicketInfo).catch(() => {});
+
+    if (!loadFullScreenAd.isSupported()) return;
+    const unregister = loadFullScreenAd({
+      options: { adGroupId: REWARDED_AD_ID },
+      onEvent: (event) => {
+        if (event.type === 'loaded') setRewardedAdLoaded(true);
+      },
+      onError: () => setRewardedAdLoaded(false),
+    });
+    return () => unregister();
+  }, [isLoggedIn]);
+
+  // 광고 보고 티켓 받기
+  const handleWatchAdForTicket = () => {
+    if (!isLoggedIn) {
+      dialog.openAlert({ title: '로그인 필요', description: '티켓을 받으려면 로그인이 필요해요.' });
+      return;
+    }
+    if (!rewardedAdLoaded || !showFullScreenAd.isSupported()) {
+      dialog.openAlert({ title: '광고 없음', description: '오늘 티켓은 모두 모았어요! 🎟\n내일 자정에 다시 충전돼요.' });
+      return;
+    }
+    setTicketLoading(true);
+    const unregister = showFullScreenAd({
+      options: { adGroupId: REWARDED_AD_ID },
+      onEvent: async (ev) => {
+        if (ev.type === 'userEarnedReward') {
+          try {
+            const result = await earnTickets();
+            setTicketResult({ earned: result.earned });
+            setTicketInfo((prev) => prev ? { ...prev, ticketCount: result.ticketCount } : null);
+          } catch {}
+        }
+        if (ev.type === 'dismissed') {
+          setTicketLoading(false);
+          setRewardedAdLoaded(false);
+          // 다음 광고 프리로드
+          loadFullScreenAd({
+            options: { adGroupId: REWARDED_AD_ID },
+            onEvent: (e) => { if (e.type === 'loaded') setRewardedAdLoaded(true); },
+            onError: () => setRewardedAdLoaded(false),
+          });
+        }
+      },
+      onError: () => setTicketLoading(false),
+    });
+    return () => unregister();
+  };
+
+  // 포인트 교환
+  const handleExchange = async () => {
+    if (!ticketInfo || ticketInfo.ticketCount < TICKETS_PER_EXCHANGE) return;
+    try {
+      setTicketLoading(true);
+      const result = await exchangeTickets();
+      setTicketInfo((prev) => prev ? { ...prev, ticketCount: result.ticketCount } : null);
+      dialog.openAlert({ title: '교환 완료!', description: '1포인트가 지급됐어요 🎉' });
+    } catch (err: any) {
+      const msg = err?.message === 'NOT_ENOUGH_TICKETS' ? '티켓이 부족해요.' : '교환 중 오류가 발생했어요.';
+      dialog.openAlert({ title: '오류', description: msg });
+    } finally {
+      setTicketLoading(false);
+    }
+  };
 
   // dwell 시간 측정: 이벤트 데이터가 로드된 시점부터 페이지 이탈까지
   // 5초 미만은 노이즈로 간주하여 기록하지 않음
@@ -836,27 +913,57 @@ function EventDetailPage() {
       </ScrollView>
 
       {/* 하단 CTA — ScrollView 아래 일반 View로 배치 (iOS/Android 모두 오버스크롤 없음) */}
-      {primaryCTALink && (
-        <View style={[
-          styles.stickyBar,
-          { backgroundColor: adaptive.background },
-          primaryCTALink.label === '티켓 예매하기' && { paddingTop: 6 },
-        ]}>
-          {primaryCTALink.label === '티켓 예매하기' && (
-            <Text style={styles.ctaHint}>
-              {getTicketSiteName(primaryCTALink.url)}에서 예매할 수 있어요
-            </Text>
-          )}
-          <Button
-            type="primary"
-            size="big"
-            viewStyle={{ width: '100%' }}
-            onPress={() => handleOpenLink(primaryCTALink.url)}
+      <View style={[styles.stickyBar, { backgroundColor: adaptive.background }]}>
+        {/* 티켓 결과 토스트 */}
+        {ticketResult && (
+          <View style={styles.ticketToast}>
+            <Text style={styles.ticketToastText}>🎟 티켓 조각 +{ticketResult.earned}개!</Text>
+          </View>
+        )}
+
+        {/* 티켓 조각 배너 */}
+        <View style={styles.ticketBannerRow}>
+          <TouchableOpacity
+            style={styles.ticketCountBadge}
+            onPress={ticketInfo && ticketInfo.ticketCount >= TICKETS_PER_EXCHANGE ? handleExchange : undefined}
+            activeOpacity={ticketInfo && ticketInfo.ticketCount >= TICKETS_PER_EXCHANGE ? 0.7 : 1}
           >
-            {primaryCTALink.label}
-          </Button>
+            <Text style={styles.ticketCountText}>
+              🎟 {ticketInfo?.ticketCount ?? 0}/{TICKETS_PER_EXCHANGE}
+            </Text>
+            {ticketInfo && ticketInfo.ticketCount >= TICKETS_PER_EXCHANGE && (
+              <Text style={styles.ticketExchangeLabel}> · 교환하기</Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.ticketAdBtn, ticketLoading && { opacity: 0.5 }]}
+            onPress={handleWatchAdForTicket}
+            disabled={ticketLoading}
+          >
+            <Text style={styles.ticketAdBtnText}>
+              {ticketLoading ? '...' : '광고 보고 받기'}
+            </Text>
+          </TouchableOpacity>
         </View>
-      )}
+
+        {primaryCTALink && (
+          <>
+            {primaryCTALink.label === '티켓 예매하기' && (
+              <Text style={styles.ctaHint}>
+                {getTicketSiteName(primaryCTALink.url)}에서 예매할 수 있어요
+              </Text>
+            )}
+            <Button
+              type="primary"
+              size="big"
+              viewStyle={{ width: '100%' }}
+              onPress={() => handleOpenLink(primaryCTALink.url)}
+            >
+              {primaryCTALink.label}
+            </Button>
+          </>
+        )}
+      </View>
 
       {/* TDS BottomSheet */}
       <BottomSheet.Root
@@ -1408,12 +1515,59 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   },
   stickyBar: {
     paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingTop: 8,
     paddingBottom: Platform.OS === 'ios' ? 30 : 12,
     borderTopWidth: 1,
     borderTopColor: a.grey200,
     zIndex: 10,
     elevation: 10,
+    gap: 8,
+  },
+  ticketToast: {
+    alignSelf: 'center',
+    backgroundColor: a.blue500,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  ticketToastText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  ticketBannerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: a.grey100,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  ticketCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  ticketCountText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: a.grey900,
+  },
+  ticketExchangeLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: a.blue500,
+  },
+  ticketAdBtn: {
+    backgroundColor: a.blue500,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  ticketAdBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
   },
   heroActionsContainer: {
     position: 'absolute',
