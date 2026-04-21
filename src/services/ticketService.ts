@@ -44,7 +44,6 @@ export async function earnTickets(): Promise<{
   canExchange: boolean;
   dailyEarned: number;
   dailyLimit: number;
-  cooldownUntil: string;
 }> {
   const { data } = await http.post('/api/tickets/earn');
   return data;

@@ -431,12 +431,7 @@ function EventDetailPage() {
             setTicketInfo((prev) => prev ? { ...prev, ticketCount: result.ticketCount } : null);
           } catch (earnErr: any) {
             const errCode = earnErr?.response?.data?.error;
-            if (errCode === 'COOLDOWN') {
-              dialog.openAlert({
-                title: '잠깐만요',
-                description: '조금 전에 이미 받았어요.\n잠시 후 다시 시도해 주세요.',
-              });
-            } else if (errCode === 'DAILY_LIMIT_REACHED') {
+            if (errCode === 'DAILY_LIMIT_REACHED') {
               dialog.openAlert({
                 title: '오늘 티켓 완료!',
                 description: '오늘 받을 수 있는 티켓을 모두 모았어요 🎟\n내일 자정에 다시 받을 수 있어요.',

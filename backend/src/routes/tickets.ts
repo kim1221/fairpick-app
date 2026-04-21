@@ -29,7 +29,8 @@ const TICKETS_PER_EXCHANGE = 10;
  * - 정책 상한(30개)은 절대 초과하지 않음
  */
 const DAILY_LIMIT = 30;
-const COOLDOWN_SECONDS = 30;      // 연속 적립 최소 대기 시간
+// cooldown 없음: 리워드 광고 자체가 자연 속도 제한이며 daily_limit으로 총량 방어
+// 이상 징후 발생 시 COOLDOWN_SECONDS = 5~10으로 재도입 가능
 const EXCHANGE_EXPIRES_HOURS = 24; // pending 만료 시간
 
 // 1~3 랜덤 (50% / 35% / 15%)
@@ -115,28 +116,13 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
       [userId]
     );
 
-    // row lock으로 동시 요청 직렬화 (cooldown/daily_limit 검사와 갱신을 단일 트랜잭션 안에서)
+    // row lock으로 동시 요청 직렬화 (daily_limit 검사와 갱신을 단일 트랜잭션 안에서)
     const { rows: lockRows } = await client.query(
-      `SELECT ticket_count, last_earned_at, daily_earned, daily_earned_date
+      `SELECT ticket_count, daily_earned, daily_earned_date
        FROM user_tickets WHERE user_id = $1 FOR UPDATE`,
       [userId]
     );
     const row = lockRows[0];
-
-    // cooldown 검사
-    if (row.last_earned_at) {
-      const elapsed = (Date.now() - new Date(row.last_earned_at).getTime()) / 1000;
-      if (elapsed < COOLDOWN_SECONDS) {
-        await client.query('ROLLBACK');
-        const cooldownUntil = new Date(new Date(row.last_earned_at).getTime() + COOLDOWN_SECONDS * 1000);
-        return res.status(429).json({
-          error: 'COOLDOWN',
-          cooldownUntil: cooldownUntil.toISOString(),
-          dailyEarned: row.daily_earned,
-          dailyLimit: DAILY_LIMIT,
-        });
-      }
-    }
 
     // daily_limit 검사 (KST 날짜 기준 리셋)
     // pg는 DATE 컬럼을 'YYYY-MM-DD' 문자열로 반환
@@ -182,7 +168,6 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
       canExchange: updated[0].ticket_count >= TICKETS_PER_EXCHANGE,
       dailyEarned: newDailyEarned,
       dailyLimit: DAILY_LIMIT,
-      cooldownUntil: new Date(Date.now() + COOLDOWN_SECONDS * 1000).toISOString(),
     });
   } catch (err) {
     await client.query('ROLLBACK');
