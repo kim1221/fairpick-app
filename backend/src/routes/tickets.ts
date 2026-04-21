@@ -55,8 +55,13 @@ async function getOrCreateTickets(userId: string): Promise<{
  * 인증 필요: 프로모션 코드를 미인증 노출하지 않음
  */
 router.get('/config', requireAuth, (_req: Request, res: Response) => {
+  const promotionCode = process.env.PROMOTION_CODE;
+  if (!promotionCode) {
+    console.error('[Tickets] PROMOTION_CODE env var not set');
+    return res.status(503).json({ error: 'PROMOTION_NOT_CONFIGURED' });
+  }
   return res.json({
-    promotionCode: process.env.PROMOTION_CODE ?? '',
+    promotionCode,
     ticketsPerExchange: TICKETS_PER_EXCHANGE,
     dailyLimit: DAILY_LIMIT,
   });
@@ -122,11 +127,12 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
     }
 
     // daily_limit 검사 (KST 날짜 기준 리셋)
-    const isNewDay = !row.daily_earned_date || row.daily_earned_date.toISOString?.().slice(0, 10) !== today
-      || String(row.daily_earned_date).slice(0, 10) !== today;
+    // pg는 DATE 컬럼을 'YYYY-MM-DD' 문자열로 반환
+    const isNewDay = !row.daily_earned_date || String(row.daily_earned_date).slice(0, 10) !== today;
     const currentDailyEarned = isNewDay ? 0 : (row.daily_earned ?? 0);
+    const remaining = DAILY_LIMIT - currentDailyEarned;
 
-    if (currentDailyEarned >= DAILY_LIMIT) {
+    if (remaining <= 0) {
       await client.query('ROLLBACK');
       return res.status(429).json({
         error: 'DAILY_LIMIT_REACHED',
@@ -136,8 +142,9 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    const earned = randomTickets();
-    const newDailyEarned = currentDailyEarned + earned;
+    // 남은 한도만큼 clamp — 정책 상한(30개)을 절대 초과하지 않음
+    const earned = Math.min(randomTickets(), remaining);
+    const newDailyEarned = currentDailyEarned + earned; // 항상 <= DAILY_LIMIT
 
     const { rows: updated } = await client.query(
       `UPDATE user_tickets
@@ -182,7 +189,10 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
  */
 router.post('/exchange', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
-  const promotionCode = process.env.PROMOTION_CODE ?? '';
+  const promotionCode = process.env.PROMOTION_CODE;
+  if (!promotionCode) {
+    return res.status(503).json({ error: 'PROMOTION_NOT_CONFIGURED' });
+  }
 
   // 티켓 보유량 확인
   const { rows: ticketRows } = await pool.query(
@@ -193,11 +203,26 @@ router.post('/exchange', requireAuth, async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'NOT_ENOUGH_TICKETS' });
   }
 
-  // 미만료 pending 재사용
+  // 원자적 INSERT + ON CONFLICT — partial unique index(user_id WHERE status='pending')로 레이스 컨디션 방지
+  // 동시 요청이 와도 DB 레벨에서 pending 중복 생성 차단
+  const { rows: inserted } = await pool.query(
+    `INSERT INTO user_ticket_exchanges (user_id, promotion_code, amount, expires_at)
+     VALUES ($1, $2, 1, NOW() + ($3 || ' hours')::INTERVAL)
+     ON CONFLICT (user_id) WHERE status = 'pending' DO NOTHING
+     RETURNING id`,
+    [userId, promotionCode, String(EXCHANGE_EXPIRES_HOURS)]
+  );
+
+  if (inserted.length > 0) {
+    console.log(`[Tickets] 🆕 exchange pending: user=${userId} exchangeId=${inserted[0].id}`);
+    return res.json({ exchangeId: inserted[0].id });
+  }
+
+  // 충돌 발생 → 기존 미만료 pending 재사용
   const { rows: existing } = await pool.query(
     `SELECT id FROM user_ticket_exchanges
      WHERE user_id = $1 AND status = 'pending' AND expires_at > NOW()
-     ORDER BY created_at DESC LIMIT 1`,
+     LIMIT 1`,
     [userId]
   );
   if (existing.length > 0) {
@@ -205,16 +230,8 @@ router.post('/exchange', requireAuth, async (req: Request, res: Response) => {
     return res.json({ exchangeId: existing[0].id });
   }
 
-  // 신규 pending 생성
-  const { rows: newExchange } = await pool.query(
-    `INSERT INTO user_ticket_exchanges (user_id, promotion_code, amount, expires_at)
-     VALUES ($1, $2, 1, NOW() + ($3 || ' hours')::INTERVAL)
-     RETURNING id`,
-    [userId, promotionCode, String(EXCHANGE_EXPIRES_HOURS)]
-  );
-
-  console.log(`[Tickets] 🆕 exchange pending: user=${userId} exchangeId=${newExchange[0].id}`);
-  return res.json({ exchangeId: newExchange[0].id });
+  // pending이 막 만료된 타이밍 — 재시도 안내
+  return res.status(409).json({ error: 'EXCHANGE_PENDING_EXPIRED_RETRY' });
 });
 
 /**

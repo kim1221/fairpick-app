@@ -429,11 +429,24 @@ function EventDetailPage() {
             const result = await earnTickets();
             showTicketToast(result.earned);
             setTicketInfo((prev) => prev ? { ...prev, ticketCount: result.ticketCount } : null);
-          } catch {
-            dialog.openAlert({
-              title: '티켓 지급 실패',
-              description: '광고 시청은 완료됐지만 티켓 지급에 실패했어요.\n잠시 후 다시 확인해 주세요.',
-            });
+          } catch (earnErr: any) {
+            const errCode = earnErr?.response?.data?.error;
+            if (errCode === 'COOLDOWN') {
+              dialog.openAlert({
+                title: '잠깐만요',
+                description: '조금 전에 이미 받았어요.\n잠시 후 다시 시도해 주세요.',
+              });
+            } else if (errCode === 'DAILY_LIMIT_REACHED') {
+              dialog.openAlert({
+                title: '오늘 티켓 완료!',
+                description: '오늘 받을 수 있는 티켓을 모두 모았어요 🎟\n내일 자정에 다시 받을 수 있어요.',
+              });
+            } else {
+              dialog.openAlert({
+                title: '티켓 지급 실패',
+                description: '광고 시청은 완료됐지만 티켓 지급에 실패했어요.\n잠시 후 다시 확인해 주세요.',
+              });
+            }
           }
         }
         if (ev.type === 'dismissed') {
@@ -463,8 +476,13 @@ function EventDetailPage() {
       setTicketInfo((prev) => prev ? { ...prev, ticketCount: result.ticketCount } : null);
       dialog.openAlert({ title: '교환 완료!', description: '1포인트가 지급됐어요 🎉' });
     } catch (err: any) {
-      const msg = err?.message === 'NOT_ENOUGH_TICKETS' ? '티켓이 부족해요.' : '교환 중 오류가 발생했어요.';
-      dialog.openAlert({ title: '오류', description: msg });
+      // grantPromotionReward 오류는 err.message, HTTP 오류는 err.response.data.error
+      const errCode = err?.response?.data?.error ?? err?.message;
+      let description = '교환 중 오류가 발생했어요.';
+      if (errCode === 'NOT_ENOUGH_TICKETS') description = '티켓이 부족해요.';
+      else if (errCode === 'EXCHANGE_EXPIRED') description = '교환 요청이 만료됐어요. 다시 시도해 주세요.';
+      else if (errCode === 'UNSUPPORTED_VERSION') description = '토스 앱을 최신 버전으로 업데이트해 주세요.';
+      dialog.openAlert({ title: '오류', description });
     } finally {
       setTicketLoading(false);
     }
