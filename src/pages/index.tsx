@@ -312,10 +312,20 @@ function HorizontalSectionSkeleton() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// AdSlot — InlineAd 독립 래퍼 (재설계 전 클린 베이스)
+// AdSlot — InlineAd 독립 래퍼
 //
-// list: toss-docs 공식 패턴 (height:96, overflow:'hidden')
-// feed: InlineAd 자체 높이에 위임, failed → return null
+// list 광고 클리핑 분석 결과:
+//   - 상위 컨테이너(section/scrollView/container)에는 overflow/clip 없음
+//   - ticketStickyBar/aiNoticeBanner는 FlatList 위에 별도 배치, 겹침 없음
+//   - 클리핑 경계는 이 컴포넌트의 overflow:'hidden' + height:96 으로 확인
+//
+// [L-1] list 포맷: overflow:'visible'로 전환
+//   목적: height:96은 유지하되 overflow를 열어 InlineAd 콘텐츠 클립 해소
+//   toss-docs 공식은 overflow:'hidden'이나, 실제 렌더가 잘리고 있어 실험
+//   → 잘림 해소되면 overflow가 원인 확정
+//   → 여전히 잘리면 height:96 자체가 문제이거나 광고 그룹 포맷 불일치 검토
+//
+// feed 광고: [F-0] 임시 비활성 (feedItems useMemo에서 삽입 중단)
 // ─────────────────────────────────────────────────────────────
 const AdSlot = React.memo(({ adGroupId, adFormat }: { adGroupId: string; adFormat: 'list' | 'feed' }) => {
   const [status, setStatus] = useState<'loading' | 'rendered' | 'failed'>('loading');
@@ -330,7 +340,9 @@ const AdSlot = React.memo(({ adGroupId, adFormat }: { adGroupId: string; adForma
       style={isList ? {
         width: '100%',
         height: 96,
-        overflow: 'hidden',
+        // [L-1] overflow:'visible' — 클리핑이 overflow에서 오는지 확인
+        // 기존 'hidden'에서 전환: InlineAd 콘텐츠가 96px 경계 밖으로 나오는 경우 대응
+        overflow: 'visible',
         marginVertical: 8,
       } : {
         width: '100%',
@@ -915,10 +927,9 @@ function HomePageInner() {
         }
       } else {
         magazineCardCount++;
-        // 3번째마다 피드형 광고 삽입
-        if (magazineCardCount % 3 === 0) {
-          items.push({ type: 'ad', id: `feed-${magazineCardCount}`, adType: 'feed' });
-        }
+        // [F-0] feed 광고 임시 비활성
+        // 재마운트 noFill / 성능 회귀 / 로딩 회귀 반복 확인 → 피드 안정성 우선
+        // feed 광고는 별도 단계에서 재설계
       }
     }
 
