@@ -888,9 +888,10 @@ function EventDetailPage() {
               disabled={ticketLoading || earnedToday || loginPending}
             >
               <Text style={styles.ticketCtaBtnText}>
-                {ticketLoading || loginPending ? '...' : !isLoggedIn ? '로그인하고 티켓 받기' : earnedToday ? '오늘은 이미 받았어요' : '티켓 받기'}
+                {ticketLoading || loginPending ? '...' : !isLoggedIn ? '로그인하고 티켓 받기' : earnedToday ? '오늘은 이미 받았어요' : '광고 보고 받기'}
               </Text>
             </TouchableOpacity>
+            <Text style={styles.ticketCtaHint}>모은 티켓은 포인트로 교환할 수 있어요</Text>
           </View>
 
           {/* 카테고리별 상세 정보 */}
@@ -1596,6 +1597,11 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '600',
+  },
+  ticketCtaHint: {
+    fontSize: 12,
+    color: a.grey500,
+    textAlign: 'center',
   },
   heroActionsContainer: {
     position: 'absolute',

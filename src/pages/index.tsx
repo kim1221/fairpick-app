@@ -194,6 +194,16 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     color: a.grey900,
     minWidth: 52,
   },
+  ticketStickyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  ticketStickySub: {
+    fontSize: 11,
+    color: a.grey500,
+    marginTop: 3,
+  },
   ticketStickyTrack: {
     flex: 1,
     height: 4,
@@ -1240,16 +1250,21 @@ function HomePageInner() {
         isLoggedIn && ticketInfo !== null ? (
           // ① 로그인 + 데이터 있음: 현황 + 교환하기
           <View style={styles.ticketStickyBar}>
-            <Text style={styles.ticketStickyCount}>
-              🎟 {ticketInfo.ticketCount}/{TICKETS_PER_EXCHANGE}
-            </Text>
-            <View style={styles.ticketStickyTrack}>
-              <View
-                style={[
-                  styles.ticketStickyFill,
-                  { width: `${Math.min(ticketInfo.ticketCount / TICKETS_PER_EXCHANGE, 1) * 100}%` },
-                ]}
-              />
+            <View style={{ flex: 1 }}>
+              <View style={styles.ticketStickyRow}>
+                <Text style={styles.ticketStickyCount}>
+                  🎟 {ticketInfo.ticketCount}/{TICKETS_PER_EXCHANGE}
+                </Text>
+                <View style={styles.ticketStickyTrack}>
+                  <View
+                    style={[
+                      styles.ticketStickyFill,
+                      { width: `${Math.min(ticketInfo.ticketCount / TICKETS_PER_EXCHANGE, 1) * 100}%` },
+                    ]}
+                  />
+                </View>
+              </View>
+              <Text style={styles.ticketStickySub}>티켓을 포인트로 바꾸기</Text>
             </View>
             <Pressable
               style={[
