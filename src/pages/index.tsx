@@ -964,15 +964,11 @@ function HomePageInner() {
     }
 
     if (item.type === 'ad') {
-      // [A-1] 독립 wrapper로 감싸 clip 원인이 래퍼/overflow 레이아웃 문맥인지 확인
-      // 섹션 컨테이너(margin/padding/overflow) 영향 밖에 두는 것이 목적
       return (
-        <View style={{ width: '100%', overflow: 'visible' }}>
-          <AdSlot
-            adGroupId={item.adType === 'feed' ? AD_GROUP_FEED : AD_GROUP_SECTION}
-            adFormat={item.adType === 'feed' ? 'feed' : 'list'}
-          />
-        </View>
+        <AdSlot
+          adGroupId={item.adType === 'feed' ? AD_GROUP_FEED : AD_GROUP_SECTION}
+          adFormat={item.adType === 'feed' ? 'feed' : 'list'}
+        />
       );
     }
 
@@ -1274,9 +1270,7 @@ function HomePageInner() {
         ListFooterComponent={<View style={{ height: 100 }} />}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={false}
-        // [B-1] windowSize 확대: 재마운트 빈도 줄여 noFill 재현율 변화 확인
-        // 검증 목표: 재마운트/noFill 빈도가 줄어들면 원인은 SDK보다 가상화 빈도에 가깝다고 해석
-        windowSize={21}
+        windowSize={5}
         maxToRenderPerBatch={3}
         initialNumToRender={8}
         onScrollBeginDrag={handleAiNoticeConfirm}
