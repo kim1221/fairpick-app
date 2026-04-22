@@ -9,7 +9,7 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Image, Platform, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
+import { FlatList, Image, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
 import { Icon, AnimateSkeleton, BottomSheet, Button, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
@@ -312,97 +312,38 @@ function HorizontalSectionSkeleton() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// AdSlot — InlineAd를 독립 컴포넌트로 분리
+// AdSlot — InlineAd 독립 래퍼 (재설계 전 클린 베이스)
 //
-// 현재 전략 (2단계):
-//   Step 1: 진단 로그로 Android FlatList 0px 캐싱 가설 확인
-//   Step 2 (Idea B): 고정 높이 예약으로 빠른 우회 검증
-//
-// list 포맷: overflow:'hidden' + height:96 (toss-docs 공식 패턴)
-// feed 포맷: overflow:'hidden' + height:410 (toss-docs 권장 feed 배너 높이)
-//   → 광고 없어도 공간 예약, FlatList 최초 측정 때 올바른 높이 확보
-//   → 이 우회책이 효과 있으면 장기 해법(Idea A: 카드 내부 통합)으로 전환
-//
-// NOTE: onNoFill/onAdFailedToRender 시 높이를 0으로 줄이지 않음.
-//       광고 fill rate 낮을 경우 빈 공간이 노출될 수 있으나
-//       Android 렌더링 안정성 우선으로 허용.
+// list: toss-docs 공식 패턴 (height:96, overflow:'hidden')
+// feed: InlineAd 자체 높이에 위임, failed → return null
 // ─────────────────────────────────────────────────────────────
-
-// list: 96px, feed: 410px — toss-docs 공식 권장 고정 높이
-const AD_RESERVED_HEIGHT = { list: 96, feed: 410 } as const;
-
 const AdSlot = React.memo(({ adGroupId, adFormat }: { adGroupId: string; adFormat: 'list' | 'feed' }) => {
   const [status, setStatus] = useState<'loading' | 'rendered' | 'failed'>('loading');
-  const isAndroid = Platform.OS === 'android';
-  const reservedHeight = AD_RESERVED_HEIGHT[adFormat];
 
-  // ── [Step 1] 진단 로그 ───────────────────────────────────────
-  // Android FlatList 0px 캐싱 가설 검증용.
-  // 확인 항목:
-  //   1) 컨테이너 최초 렌더 높이 (FlatList가 캐싱하는 값)
-  //   2) 광고 렌더 후 measure()로 실제 높이
-  //   두 값이 다르면 → FlatList가 0px 캐시 상태에서 광고 높이 반영 못 함 확인
-  const containerRef = useRef<View>(null);
+  if (status === 'failed') return null;
 
-  const handleContainerLayout = useCallback((e: { nativeEvent: { layout: { height: number; width: number } } }) => {
-    const { height, width } = e.nativeEvent.layout;
-    console.log(
-      `[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}][status=${status}]` +
-      ` container onLayout → h=${height} w=${width}`
-    );
-  }, [adFormat, isAndroid, status]);
-
-  const handleAdRendered = useCallback(() => {
-    setStatus('rendered');
-    setTimeout(() => {
-      containerRef.current?.measure((_x, _y, width, height) => {
-        console.log(
-          `[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}]` +
-          ` onAdRendered → measured h=${height} w=${width}` +
-          ` (reservedHeight=${reservedHeight})`
-        );
-      });
-    }, 100);
-  }, [adFormat, isAndroid, reservedHeight]);
-
-  const handleAdFailed = useCallback((reason: 'failedToRender' | 'noFill') => {
-    console.log(
-      `[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}]` +
-      ` ad ${reason} — slot stays reserved at h=${reservedHeight} (Idea B: no collapse)`
-    );
-    setStatus('failed');
-  }, [adFormat, isAndroid, reservedHeight]);
-  // ── [End] 진단 로그 ──────────────────────────────────────────
-
-  // [Idea B] 광고 실패해도 슬롯 높이 유지 (공간 예약)
-  // → FlatList가 최초에 올바른 높이를 캐싱하도록 보장
-  // → 근본 해결(Idea A: 카드 내부 통합)로 가기 전 우회책
-  const showAd = status !== 'failed';
+  const isList = adFormat === 'list';
 
   return (
     <View
-      ref={containerRef}
       collapsable={false}
-      onLayout={handleContainerLayout}
-      style={{
+      style={isList ? {
         width: '100%',
-        // [Idea B 핵심] 항상 고정 높이 예약 — 광고 로드 전/후/실패 모두 동일
-        height: reservedHeight,
+        height: 96,
         overflow: 'hidden',
         marginVertical: 8,
-        // 광고 실패 시 투명하게 (공간은 유지)
-        opacity: showAd ? 1 : 0,
+      } : {
+        width: '100%',
+        marginVertical: status === 'rendered' ? 8 : 0,
       }}
     >
-      {showAd && (
-        <InlineAd
-          adGroupId={adGroupId}
-          impressFallbackOnMount={true}
-          onAdRendered={handleAdRendered}
-          onAdFailedToRender={() => handleAdFailed('failedToRender')}
-          onNoFill={() => handleAdFailed('noFill')}
-        />
-      )}
+      <InlineAd
+        adGroupId={adGroupId}
+        impressFallbackOnMount={true}
+        onAdRendered={() => setStatus('rendered')}
+        onAdFailedToRender={() => setStatus('failed')}
+        onNoFill={() => setStatus('failed')}
+      />
     </View>
   );
 });
