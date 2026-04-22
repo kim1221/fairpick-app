@@ -87,7 +87,7 @@ let _todayPickCache: TodayPickCache | null = null;
 type FeedItem =
   | { type: 'skeleton'; skeletonType: 'today_pick' | 'horizontal'; id: string }
   | { type: 'magazine'; card: FeedCard }
-  | { type: 'ad'; id: string; adType: 'section' | 'feed' }
+  | { type: 'ad'; id: string; adType: 'section' }
   | { type: 'feed_loading'; loadingIdx: number }
   | { type: 'feed_more_dot' }
   | { type: 'feed_error' }
@@ -361,7 +361,8 @@ const AdSlot = React.memo(({ adGroupId, adFormat }: { adGroupId: string; adForma
 });
 
 const AD_GROUP_SECTION = 'ait.v2.live.b3363cb4c82643e9';
-const AD_GROUP_FEED    = 'ait.v2.live.7e6f43f894204302';
+// AD_GROUP_FEED: feed 광고 별도 기술 과제로 분리, 현재 릴리즈 비활성
+// const AD_GROUP_FEED = 'ait.v2.live.7e6f43f894204302';
 
 // ─────────────────────────────────────────────────────────────
 // SectionCard / TodayPickCard — 메모이제이션된 카드 래퍼
@@ -927,12 +928,10 @@ function HomePageInner() {
         }
       } else {
         magazineCardCount++;
-        // [F-1] feed 광고 1개만, 첫 번째 비-섹션 카드 직후 고정
-        // 보수적 재도입: 분산 삽입 대신 피드 상단 1개만 → 안정성 확인 후 빈도 확대 검토
-        // 검증 항목: 첫 진입 노출 / 스크롤 후 유지 / 새로고침 후 재노출 / 피드 성능 회귀 없음
-        if (magazineCardCount === 1) {
-          items.push({ type: 'ad', id: 'feed-1', adType: 'feed' });
-        }
+        // feed 광고 비활성 (현재 릴리즈 범위 제외)
+        // 원인: FlatList 재마운트 시 InlineAd noFill + 스크롤 버벅임 반복 확인
+        // 위치/빈도 조정으로는 해결 불가 → 별도 기술 과제로 분리
+        // 운영 광고: 추천탭 list 광고 + 이벤트 상세 광고
       }
     }
 
@@ -978,12 +977,8 @@ function HomePageInner() {
     }
 
     if (item.type === 'ad') {
-      return (
-        <AdSlot
-          adGroupId={item.adType === 'feed' ? AD_GROUP_FEED : AD_GROUP_SECTION}
-          adFormat={item.adType === 'feed' ? 'feed' : 'list'}
-        />
-      );
+      // 현재 운영: section(list) 광고만
+      return <AdSlot adGroupId={AD_GROUP_SECTION} adFormat="list" />;
     }
 
     if (item.type === 'magazine') {
