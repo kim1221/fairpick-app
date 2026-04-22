@@ -247,6 +247,7 @@ function EventDetailPage() {
   const REWARDED_AD_ID = 'ait.v2.live.b50cf7d900884c5b';
   const [rewardedAdLoaded, setRewardedAdLoaded] = useState(false);
   const [ticketLoading, setTicketLoading] = useState(false);
+  const [loginPending, setLoginPending] = useState(false);
   const [ticketResult, setTicketResult] = useState<{ earned: number } | null>(null);
   const [earnedToday, setEarnedToday] = useState(false);
   const loadUnregisterRef = React.useRef<(() => void) | null>(null);
@@ -265,7 +266,7 @@ function EventDetailPage() {
     endAt: event.endAt,
   } : undefined, [event]);
   const { isLiked, toggle: toggleLikeWithSync } = useLike({ eventId: params?.id, snapshot: eventSnapshot });
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, login } = useAuth();
   const dialog = useDialog();
 
   useEffect(() => {
@@ -411,7 +412,9 @@ function EventDetailPage() {
   // 광고 보고 티켓 받기
   const handleWatchAdForTicket = React.useCallback(() => {
     if (!isLoggedIn) {
-      dialog.openAlert({ title: '로그인 필요', description: '티켓을 받으려면 로그인이 필요해요.' });
+      if (loginPending) return;
+      setLoginPending(true);
+      login().catch(() => {}).finally(() => setLoginPending(false));
       return;
     }
     if (earnedToday) return; // 오늘 이미 받음 — 버튼 비활성 상태에서 호출 방어
@@ -470,7 +473,7 @@ function EventDetailPage() {
       },
     });
     showUnregisterRef.current = unregister;
-  }, [isLoggedIn, earnedToday, rewardedAdLoaded, dialog, showTicketToast, resetAdState, event]);
+  }, [isLoggedIn, loginPending, earnedToday, rewardedAdLoaded, dialog, showTicketToast, resetAdState, login, event]);
 
   // 이벤트별 오늘 적립 여부 조회 (로그인 + 이벤트 로드 후)
   useEffect(() => {
@@ -879,13 +882,13 @@ function EventDetailPage() {
             <TouchableOpacity
               style={[
                 styles.ticketCtaBtn,
-                (ticketLoading || earnedToday) && { opacity: 0.4 },
+                (ticketLoading || earnedToday || loginPending) && { opacity: 0.4 },
               ]}
               onPress={handleWatchAdForTicket}
-              disabled={ticketLoading || earnedToday}
+              disabled={ticketLoading || earnedToday || loginPending}
             >
               <Text style={styles.ticketCtaBtnText}>
-                {ticketLoading ? '...' : earnedToday ? '오늘은 이미 받았어요' : '티켓 받기'}
+                {ticketLoading || loginPending ? '...' : !isLoggedIn ? '로그인하고 티켓 받기' : earnedToday ? '오늘은 이미 받았어요' : '티켓 받기'}
               </Text>
             </TouchableOpacity>
           </View>

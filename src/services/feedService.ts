@@ -26,7 +26,9 @@ export interface FeedEvent {
 
 export interface FeedCard {
   id: string;
-  content_type: 'TREND' | 'BUNDLE' | 'SPOTLIGHT' | 'HERO' | 'RANKING';
+  // TODAY_PICK / SECTION: /api/home/sections 에서 변환된 섹션 카드
+  // 나머지: /api/home/feed 에서 오는 매거진 카드
+  content_type: 'TREND' | 'BUNDLE' | 'SPOTLIGHT' | 'HERO' | 'RANKING' | 'TODAY_PICK' | 'SECTION';
   framing_type: string;
   framing_label: string | null;
   title: string | null;
@@ -44,7 +46,8 @@ export interface FeedResponse {
 
 /**
  * FeedEvent → ScoredEvent 어댑터
- * BUNDLE 카드에서 EventCard(ScoredEvent 전용)를 직접 재사용하기 위해 사용
+ * EventCard(ScoredEvent 전용)를 재사용하기 위해 사용
+ * price_min은 ScoredEvent 타입에 없지만 getSectionSignal에서 (as any)로 접근하므로 포함
  */
 export function feedEventToScoredEvent(e: FeedEvent): ScoredEvent {
   return {
@@ -64,9 +67,59 @@ export function feedEventToScoredEvent(e: FeedEvent): ScoredEvent {
     share_count: 0,
     score: e.buzz_score,
     is_free: e.is_free ?? undefined,
+    // budget_pick / ending_soon 신호 계산용 (getSectionSignal이 (as any)로 접근)
+    price_min: e.price_min,
     created_at: '',
     updated_at: '',
   } as ScoredEvent;
+}
+
+/**
+ * ScoredEvent → FeedEvent 어댑터
+ * /api/home/sections 응답(ScoredEvent[])을 FeedCard.events(FeedEvent[])로 변환할 때 사용
+ */
+function scoredEventToFeedEvent(e: ScoredEvent): FeedEvent {
+  return {
+    id: e.id,
+    title: e.title,
+    main_category: e.category,
+    sub_category: null,
+    region: e.region ?? null,
+    start_at: e.start_date ?? null,
+    end_at: e.end_date ?? null,
+    image_url: e.thumbnail_url ?? null,
+    venue: e.venue ?? null,
+    buzz_score: e.buzz_score,
+    is_free: e.is_free ?? null,
+    price_min: (e as any).price_min ?? null,
+    overview: null,
+    derived_tags: null,
+  };
+}
+
+/**
+ * /api/home/sections 응답 섹션 배열 → FeedCard[] 변환
+ * today_pick → TODAY_PICK, 나머지 → SECTION content_type으로 매핑
+ */
+export function sectionToFeedCards(sections: Array<{
+  slug: string;
+  title: string;
+  subtitle: string | null;
+  events: ScoredEvent[];
+}>): FeedCard[] {
+  return sections
+    .filter(s => s.events.length > 0)
+    .map(s => ({
+      id: `section-${s.slug}`,
+      content_type: (s.slug === 'today_pick' ? 'TODAY_PICK' : 'SECTION') as FeedCard['content_type'],
+      framing_type: s.slug,
+      framing_label: s.title,
+      title: s.subtitle ?? null,
+      body: null,
+      events: s.events.map(scoredEventToFeedEvent),
+      target_region: null,
+      metadata: {},
+    }));
 }
 
 export async function fetchFeed(params: {

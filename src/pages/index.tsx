@@ -30,6 +30,7 @@ import { fetchFeed, feedEventToScoredEvent, sectionToFeedCards, type FeedCard } 
 import { API_TIMEOUT } from '../config/api';
 import { getTickets, exchangeTickets, subscribeTicketCount, TICKETS_PER_EXCHANGE, type TicketInfo } from '../services/ticketService';
 import { getToken } from '../utils/authStorage';
+import { useAuth } from '../hooks/useAuth';
 
 import type { ScoredEvent, Location } from '../types/recommendation';
 
@@ -177,48 +178,57 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   },
   locationButtonContent: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   locationButtonText: { fontSize: 13, color: a.blue600, fontWeight: '600' },
-  ticketWidget: {
-    marginTop: 12,
-    backgroundColor: a.grey100,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 8,
-  },
-  ticketWidgetTop: {
+  ticketStickyBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    backgroundColor: a.background,
+    borderBottomWidth: 1,
+    borderBottomColor: a.grey200,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 10,
   },
-  ticketWidgetCount: {
-    fontSize: 15,
+  ticketStickyCount: {
+    fontSize: 13,
     fontWeight: '700',
     color: a.grey900,
+    minWidth: 52,
   },
-  ticketWidgetBtn: {
-    backgroundColor: a.blue500,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  ticketWidgetBtnDisabled: {
-    backgroundColor: a.grey300,
-  },
-  ticketWidgetBtnText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  ticketProgressTrack: {
+  ticketStickyTrack: {
+    flex: 1,
     height: 4,
-    backgroundColor: a.grey300,
+    backgroundColor: a.grey200,
     borderRadius: 2,
     overflow: 'hidden',
   },
-  ticketProgressFill: {
+  ticketStickyFill: {
     height: 4,
     backgroundColor: a.blue500,
     borderRadius: 2,
+  },
+  ticketStickyBtn: {
+    backgroundColor: a.blue500,
+    borderRadius: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  ticketStickyBtnDisabled: {
+    backgroundColor: a.grey300,
+  },
+  ticketStickyBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  ticketStickyLoginTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: a.grey900,
+  },
+  ticketStickyLoginSub: {
+    fontSize: 11,
+    color: a.grey500,
+    marginTop: 1,
   },
   onboardingSheet: {
     paddingHorizontal: 20,
@@ -303,46 +313,96 @@ function HorizontalSectionSkeleton() {
 
 // ─────────────────────────────────────────────────────────────
 // AdSlot — InlineAd를 독립 컴포넌트로 분리
-// Android 광고 렌더링 이슈:
 //
-// [list 포맷 — 섹션 사이 리스트형 배너 ~73px]
-//   overflow:'hidden' + height:96 → yoga가 96px 정확히 측정
-//   → FlatList 다음 아이템 위치 정상 → 겹침 없음
-//   (overflow:'visible'은 WRAP_CONTENT 측정으로 height:96 무시 → 0px 측정 → 겹침 발생)
+// 현재 전략 (2단계):
+//   Step 1: 진단 로그로 Android FlatList 0px 캐싱 가설 확인
+//   Step 2 (Idea B): 고정 높이 예약으로 빠른 우회 검증
 //
-// [feed 포맷 — 피드 카드 사이 피드형 배너 ~430px]
-//   overflow:'visible' → FlatList 0px 캐시 상태에서도 콘텐츠 가시
-//   height 미지정 → InlineAd 자체 높이로 자동 결정
+// list 포맷: overflow:'hidden' + height:96 (toss-docs 공식 패턴)
+// feed 포맷: overflow:'hidden' + height:410 (toss-docs 권장 feed 배너 높이)
+//   → 광고 없어도 공간 예약, FlatList 최초 측정 때 올바른 높이 확보
+//   → 이 우회책이 효과 있으면 장기 해법(Idea A: 카드 내부 통합)으로 전환
+//
+// NOTE: onNoFill/onAdFailedToRender 시 높이를 0으로 줄이지 않음.
+//       광고 fill rate 낮을 경우 빈 공간이 노출될 수 있으나
+//       Android 렌더링 안정성 우선으로 허용.
 // ─────────────────────────────────────────────────────────────
+
+// list: 96px, feed: 410px — toss-docs 공식 권장 고정 높이
+const AD_RESERVED_HEIGHT = { list: 96, feed: 410 } as const;
+
 const AdSlot = React.memo(({ adGroupId, adFormat }: { adGroupId: string; adFormat: 'list' | 'feed' }) => {
   const [status, setStatus] = useState<'loading' | 'rendered' | 'failed'>('loading');
-
-  if (status === 'failed') return null;
-
   const isAndroid = Platform.OS === 'android';
-  const isList = adFormat === 'list';
+  const reservedHeight = AD_RESERVED_HEIGHT[adFormat];
+
+  // ── [Step 1] 진단 로그 ───────────────────────────────────────
+  // Android FlatList 0px 캐싱 가설 검증용.
+  // 확인 항목:
+  //   1) 컨테이너 최초 렌더 높이 (FlatList가 캐싱하는 값)
+  //   2) 광고 렌더 후 measure()로 실제 높이
+  //   두 값이 다르면 → FlatList가 0px 캐시 상태에서 광고 높이 반영 못 함 확인
+  const containerRef = useRef<View>(null);
+
+  const handleContainerLayout = useCallback((e: { nativeEvent: { layout: { height: number; width: number } } }) => {
+    const { height, width } = e.nativeEvent.layout;
+    console.log(
+      `[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}][status=${status}]` +
+      ` container onLayout → h=${height} w=${width}`
+    );
+  }, [adFormat, isAndroid, status]);
+
+  const handleAdRendered = useCallback(() => {
+    setStatus('rendered');
+    setTimeout(() => {
+      containerRef.current?.measure((_x, _y, width, height) => {
+        console.log(
+          `[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}]` +
+          ` onAdRendered → measured h=${height} w=${width}` +
+          ` (reservedHeight=${reservedHeight})`
+        );
+      });
+    }, 100);
+  }, [adFormat, isAndroid, reservedHeight]);
+
+  const handleAdFailed = useCallback((reason: 'failedToRender' | 'noFill') => {
+    console.log(
+      `[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}]` +
+      ` ad ${reason} — slot stays reserved at h=${reservedHeight} (Idea B: no collapse)`
+    );
+    setStatus('failed');
+  }, [adFormat, isAndroid, reservedHeight]);
+  // ── [End] 진단 로그 ──────────────────────────────────────────
+
+  // [Idea B] 광고 실패해도 슬롯 높이 유지 (공간 예약)
+  // → FlatList가 최초에 올바른 높이를 캐싱하도록 보장
+  // → 근본 해결(Idea A: 카드 내부 통합)로 가기 전 우회책
+  const showAd = status !== 'failed';
 
   return (
     <View
+      ref={containerRef}
       collapsable={false}
-      style={isList ? {
+      onLayout={handleContainerLayout}
+      style={{
         width: '100%',
-        height: isAndroid ? 96 : (status === 'rendered' ? undefined : 0),
-        marginVertical: isAndroid ? 8 : (status === 'rendered' ? 8 : 0),
+        // [Idea B 핵심] 항상 고정 높이 예약 — 광고 로드 전/후/실패 모두 동일
+        height: reservedHeight,
         overflow: 'hidden',
-      } : {
-        width: '100%',
-        overflow: isAndroid ? 'visible' : 'hidden',
-        marginVertical: status === 'rendered' ? 8 : 0,
+        marginVertical: 8,
+        // 광고 실패 시 투명하게 (공간은 유지)
+        opacity: showAd ? 1 : 0,
       }}
     >
-      <InlineAd
-        adGroupId={adGroupId}
-        impressFallbackOnMount={true}
-        onAdRendered={() => setStatus('rendered')}
-        onAdFailedToRender={() => setStatus('failed')}
-        onNoFill={() => setStatus('failed')}
-      />
+      {showAd && (
+        <InlineAd
+          adGroupId={adGroupId}
+          impressFallbackOnMount={true}
+          onAdRendered={handleAdRendered}
+          onAdFailedToRender={() => handleAdFailed('failedToRender')}
+          onNoFill={() => handleAdFailed('noFill')}
+        />
+      )}
     </View>
   );
 });
@@ -415,6 +475,7 @@ function HomePageInner() {
   const [ticketExchangeLoading, setTicketExchangeLoading] = useState(false);
   const [showTicketOnboarding, setShowTicketOnboarding] = useState(false);
   const dialog = useDialog();
+  const { isLoggedIn, isLoading: authLoading, login } = useAuth();
 
   // 통합 피드 상태 (섹션 카드 + 매거진 카드 한 배열)
   const [feedCards, setFeedCards] = useState<FeedCard[]>(validCache?.feedCards ?? []);
@@ -1192,39 +1253,9 @@ function HomePageInner() {
           ) : null}
         </View>
 
-        {/* 티켓 현황 위젯 (로그인 유저만) */}
-        {ticketInfo !== null && (
-          <View style={styles.ticketWidget}>
-            <View style={styles.ticketWidgetTop}>
-              <Text style={styles.ticketWidgetCount}>
-                🎟 {ticketInfo.ticketCount} / {TICKETS_PER_EXCHANGE}
-              </Text>
-              <Pressable
-                style={[
-                  styles.ticketWidgetBtn,
-                  (ticketInfo.ticketCount < TICKETS_PER_EXCHANGE || ticketExchangeLoading) && styles.ticketWidgetBtnDisabled,
-                ]}
-                onPress={handleTicketExchange}
-                disabled={ticketInfo.ticketCount < TICKETS_PER_EXCHANGE || ticketExchangeLoading}
-              >
-                <Text style={styles.ticketWidgetBtnText}>
-                  {ticketExchangeLoading ? '...' : '교환하기'}
-                </Text>
-              </Pressable>
-            </View>
-            <View style={styles.ticketProgressTrack}>
-              <View
-                style={[
-                  styles.ticketProgressFill,
-                  { width: `${Math.min(ticketInfo.ticketCount / TICKETS_PER_EXCHANGE, 1) * 100}%` },
-                ]}
-              />
-            </View>
-          </View>
-        )}
       </View>
     </>
-  ), [adaptive, styles, top, location, currentAddress, handleRefresh, ticketInfo, ticketExchangeLoading, handleTicketExchange]);
+  ), [adaptive, styles, top, location, currentAddress, handleRefresh]);
 
   return (
     <View style={styles.container}>
@@ -1235,6 +1266,49 @@ function HomePageInner() {
             <Text style={styles.aiNoticeClose}>✕</Text>
           </Pressable>
         </View>
+      )}
+
+      {/* 티켓 sticky 바 */}
+      {!authLoading && (
+        isLoggedIn && ticketInfo !== null ? (
+          // 로그인 유저: 현황 + 교환하기
+          <View style={styles.ticketStickyBar}>
+            <Text style={styles.ticketStickyCount}>
+              🎟 {ticketInfo.ticketCount}/{TICKETS_PER_EXCHANGE}
+            </Text>
+            <View style={styles.ticketStickyTrack}>
+              <View
+                style={[
+                  styles.ticketStickyFill,
+                  { width: `${Math.min(ticketInfo.ticketCount / TICKETS_PER_EXCHANGE, 1) * 100}%` },
+                ]}
+              />
+            </View>
+            <Pressable
+              style={[
+                styles.ticketStickyBtn,
+                (ticketInfo.ticketCount < TICKETS_PER_EXCHANGE || ticketExchangeLoading) && styles.ticketStickyBtnDisabled,
+              ]}
+              onPress={handleTicketExchange}
+              disabled={ticketInfo.ticketCount < TICKETS_PER_EXCHANGE || ticketExchangeLoading}
+            >
+              <Text style={styles.ticketStickyBtnText}>
+                {ticketExchangeLoading ? '...' : '교환하기'}
+              </Text>
+            </Pressable>
+          </View>
+        ) : !isLoggedIn ? (
+          // 비로그인 유저: 로그인 유도
+          <View style={styles.ticketStickyBar}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.ticketStickyLoginTitle}>로그인하고 티켓 모으기</Text>
+              <Text style={styles.ticketStickyLoginSub}>티켓으로 토스 포인트를 교환할 수 있어요</Text>
+            </View>
+            <Pressable style={styles.ticketStickyBtn} onPress={login}>
+              <Text style={styles.ticketStickyBtnText}>로그인하기</Text>
+            </Pressable>
+          </View>
+        ) : null
       )}
 
       <FlatList
