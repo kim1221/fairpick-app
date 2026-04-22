@@ -84,10 +84,11 @@ let _todayPickCache: TodayPickCache | null = null;
 // ─────────────────────────────────────────────────────────────
 
 // FlatList 아이템 타입
+// [Idea A] 'ad' 독립 아이템 제거 → magazine 카드에 adSlot 필드로 통합
+// → 카드+광고가 하나의 FlatList 아이템 = 함께 가상화 = 재마운트 동기화
 type FeedItem =
   | { type: 'skeleton'; skeletonType: 'today_pick' | 'horizontal'; id: string }
-  | { type: 'magazine'; card: FeedCard }
-  | { type: 'ad'; id: string; adType: 'section' | 'feed' }
+  | { type: 'magazine'; card: FeedCard; adSlot?: 'list' | 'feed' }
   | { type: 'feed_loading'; loadingIdx: number }
   | { type: 'feed_more_dot' }
   | { type: 'feed_error' }
@@ -312,23 +313,21 @@ function HorizontalSectionSkeleton() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// AdSlot — InlineAd를 독립 컴포넌트로 분리
+// AdSlot — [Idea A] 카드 내부 슬롯으로 통합된 InlineAd 래퍼
 //
-// 현재 전략 (2단계):
-//   Step 1: 진단 로그로 Android FlatList 0px 캐싱 가설 확인
-//   Step 2 (Idea B): 고정 높이 예약으로 빠른 우회 검증
+// 구조:
+//   FlatList item = 카드 + AdSlot (단일 아이템으로 함께 가상화)
+//   → 카드와 광고가 같은 생명주기 = 재마운트 동기화
 //
-// list 포맷: overflow:'hidden' + height:96 (toss-docs 공식 패턴)
-// feed 포맷: overflow:'hidden' + height:410 (toss-docs 권장 feed 배너 높이)
-//   → 광고 없어도 공간 예약, FlatList 최초 측정 때 올바른 높이 확보
-//   → 이 우회책이 효과 있으면 장기 해법(Idea A: 카드 내부 통합)으로 전환
+// _adStatusCache:
+//   FlatList 가상화로 언마운트/리마운트돼도 마지막 상태(rendered/failed) 유지
+//   → 재마운트 시 'loading'으로 리셋되지 않음
+//   → failed 캐시 → 즉시 null → 공백 없음
+//   → rendered 캐시 → 예약 높이로 시작 → InlineAd가 그 안에서 복원
 //
-// NOTE: onNoFill/onAdFailedToRender 시 높이를 0으로 줄이지 않음.
-//       광고 fill rate 낮을 경우 빈 공간이 노출될 수 있으나
-//       Android 렌더링 안정성 우선으로 허용.
+// list: 96px / feed: 410px — toss-docs 공식 권장 고정 높이
 // ─────────────────────────────────────────────────────────────
 
-// list: 96px, feed: 410px — toss-docs 공식 권장 고정 높이
 const AD_RESERVED_HEIGHT = { list: 96, feed: 410 } as const;
 
 // ── 광고 상태 외부 캐시 (FlatList 가상화 재마운트 시 status 리셋 방지)
@@ -944,7 +943,9 @@ function HomePageInner() {
       return items;
     }
 
-    // 섹션 카드 / 매거진 카드 순회하며 광고 삽입
+    // 섹션 카드 / 매거진 카드 순회하며 광고 슬롯 마킹
+    // [Idea A] 독립 ad 아이템 대신 해당 카드의 adSlot 필드로 표시
+    // → 카드+광고가 하나의 FlatList 아이템으로 묶여 함께 가상화됨
     let sectionCardCount = 0;
     let magazineCardCount = 0;
 
@@ -952,21 +953,18 @@ function HomePageInner() {
       const card = feedCards[i]!;
       const isSection = card.content_type === 'TODAY_PICK' || card.content_type === 'SECTION';
 
-      items.push({ type: 'magazine', card });
-
+      let adSlot: 'list' | 'feed' | undefined;
       if (isSection) {
         sectionCardCount++;
-        // 두 번째 섹션 카드 뒤에 리스트형 광고 삽입
-        if (sectionCardCount === 2) {
-          items.push({ type: 'ad', id: 'section-1', adType: 'section' });
-        }
+        // 두 번째 섹션 카드 하단에 리스트형 광고
+        if (sectionCardCount === 2) adSlot = 'list';
       } else {
         magazineCardCount++;
-        // 3번째마다 피드형 광고 삽입
-        if (magazineCardCount % 3 === 0) {
-          items.push({ type: 'ad', id: `feed-${magazineCardCount}`, adType: 'feed' });
-        }
+        // 3번째 매거진 카드마다 피드형 광고
+        if (magazineCardCount % 3 === 0) adSlot = 'feed';
       }
+
+      items.push({ type: 'magazine', card, adSlot });
     }
 
     // 로딩 / 에러 / 완료 표시
@@ -1010,22 +1008,29 @@ function HomePageInner() {
       );
     }
 
-    if (item.type === 'ad') {
-      return (
-        <AdSlot
-          adGroupId={item.adType === 'feed' ? AD_GROUP_FEED : AD_GROUP_SECTION}
-          adFormat={item.adType === 'feed' ? 'feed' : 'list'}
-        />
-      );
-    }
-
     if (item.type === 'magazine') {
-      const { card } = item;
+      const { card, adSlot } = item;
+
+      // [Idea A] 카드 JSX를 변수에 담고 adSlot이 있으면 하단에 AdSlot을 포함한 View로 래핑
+      // → 카드+광고가 단일 FlatList 아이템 = 함께 가상화 = 재마운트 동기화
+      // → _adStatusCache가 재마운트 시 광고 상태를 복원하므로 공백/재로드 없음
+      const withAd = (cardJSX: React.ReactElement | null) => {
+        if (!adSlot || !cardJSX) return cardJSX;
+        return (
+          <View>
+            {cardJSX}
+            <AdSlot
+              adGroupId={adSlot === 'feed' ? AD_GROUP_FEED : AD_GROUP_SECTION}
+              adFormat={adSlot}
+            />
+          </View>
+        );
+      };
 
       // ── 섹션형 카드 ─────────────────────────────────────────
       if (card.content_type === 'TODAY_PICK') {
         if (!card.events[0]) return null;
-        return (
+        return withAd(
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>{card.framing_label ?? '오늘의 픽'}</Text>
@@ -1046,7 +1051,7 @@ function HomePageInner() {
           const scored = feedEventToScoredEvent(e);
           return { ...scored, signal: getSectionSignal(card.framing_type, scored) };
         });
-        return (
+        return withAd(
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>{card.framing_label ?? ''}</Text>
@@ -1076,7 +1081,7 @@ function HomePageInner() {
       // ── 매거진형 카드 ────────────────────────────────────────
       if (card.content_type === 'HERO') {
         if (!card.events[0]) return null;
-        return (
+        return withAd(
           <HeroCard
             framingLabel={card.framing_label ?? ''}
             event={card.events[0]}
@@ -1086,7 +1091,7 @@ function HomePageInner() {
       }
 
       if (card.content_type === 'TREND' || card.content_type === 'RANKING') {
-        return (
+        return withAd(
           <TrendCard
             title={card.framing_label ?? card.title ?? ''}
             events={card.events}
@@ -1097,7 +1102,7 @@ function HomePageInner() {
 
       if (card.content_type === 'BUNDLE') {
         const adaptedEvents = card.events.map(feedEventToScoredEvent);
-        return (
+        return withAd(
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>{card.framing_label ?? card.title ?? ''}</Text>
@@ -1124,7 +1129,7 @@ function HomePageInner() {
       }
 
       // SPOTLIGHT 등 fallback
-      return (
+      return withAd(
         <MagazineCard
           contentType="BUNDLE"
           title={card.framing_label ?? card.title ?? ''}
@@ -1310,7 +1315,6 @@ function HomePageInner() {
           if (item.type === 'feed_loading') return `feed_loading_${item.loadingIdx}`;
           if (item.type === 'feed_more_dot') return 'feed_more_dot';
           if (item.type === 'feed_end') return 'feed_end';
-          if (item.type === 'ad') return `ad-${item.id}`;
           return item.type;
         }}
         ListHeaderComponent={listHeader}
