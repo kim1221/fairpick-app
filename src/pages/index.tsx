@@ -331,66 +331,78 @@ function HorizontalSectionSkeleton() {
 // list: 96px, feed: 410px — toss-docs 공식 권장 고정 높이
 const AD_RESERVED_HEIGHT = { list: 96, feed: 410 } as const;
 
-// ── 광고 상태 외부 캐시 (FlatList 가상화 재마운트 시 status 리셋 방지)
-// key: adGroupId+adFormat, value: 'rendered' | 'failed'
-// AdSlot이 언마운트/리마운트되어도 마지막 결과를 기억
-const _adStatusCache = new Map<string, 'rendered' | 'failed'>();
-
 const AdSlot = React.memo(({ adGroupId, adFormat }: { adGroupId: string; adFormat: 'list' | 'feed' }) => {
-  const cacheKey = `${adGroupId}:${adFormat}`;
-  const cachedStatus = _adStatusCache.get(cacheKey);
-
-  const [status, setStatus] = useState<'loading' | 'rendered' | 'failed'>(
-    cachedStatus ?? 'loading'
-  );
+  const [status, setStatus] = useState<'loading' | 'rendered' | 'failed'>('loading');
   const isAndroid = Platform.OS === 'android';
   const reservedHeight = AD_RESERVED_HEIGHT[adFormat];
-  const mountCount = useRef(0);
 
-  // ── 진단 로그: mount/unmount 추적 ────────────────────────────
-  useEffect(() => {
-    mountCount.current += 1;
-    const mc = mountCount.current;
-    console.log(`[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}] MOUNT #${mc} cachedStatus=${cachedStatus ?? 'none'} → initialStatus=${cachedStatus ?? 'loading'}`);
-    return () => {
-      console.log(`[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}] UNMOUNT #${mc} finalStatus=${status}`);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // ── [Step 1] 진단 로그 ───────────────────────────────────────
+  // Android FlatList 0px 캐싱 가설 검증용.
+  // 확인 항목:
+  //   1) 컨테이너 최초 렌더 높이 (FlatList가 캐싱하는 값)
+  //   2) 광고 렌더 후 measure()로 실제 높이
+  //   두 값이 다르면 → FlatList가 0px 캐시 상태에서 광고 높이 반영 못 함 확인
+  const containerRef = useRef<View>(null);
+
+  const handleContainerLayout = useCallback((e: { nativeEvent: { layout: { height: number; width: number } } }) => {
+    const { height, width } = e.nativeEvent.layout;
+    console.log(
+      `[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}][status=${status}]` +
+      ` container onLayout → h=${height} w=${width}`
+    );
+  }, [adFormat, isAndroid, status]);
 
   const handleAdRendered = useCallback(() => {
-    console.log(`[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}] onAdRendered → status: loading→rendered`);
-    _adStatusCache.set(cacheKey, 'rendered');
     setStatus('rendered');
-  }, [adFormat, isAndroid, cacheKey]);
+    setTimeout(() => {
+      containerRef.current?.measure((_x, _y, width, height) => {
+        console.log(
+          `[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}]` +
+          ` onAdRendered → measured h=${height} w=${width}` +
+          ` (reservedHeight=${reservedHeight})`
+        );
+      });
+    }, 100);
+  }, [adFormat, isAndroid, reservedHeight]);
 
   const handleAdFailed = useCallback((reason: 'failedToRender' | 'noFill') => {
-    console.log(`[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}] ${reason} → status: loading→failed (cacheKey=${cacheKey})`);
-    _adStatusCache.set(cacheKey, 'failed');
+    console.log(
+      `[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}]` +
+      ` ad ${reason} — slot stays reserved at h=${reservedHeight} (Idea B: no collapse)`
+    );
     setStatus('failed');
-  }, [adFormat, isAndroid, cacheKey]);
+  }, [adFormat, isAndroid, reservedHeight]);
   // ── [End] 진단 로그 ──────────────────────────────────────────
 
-  // 이미 실패 캐시 → 즉시 null (공백 없음)
-  if (status === 'failed') return null;
+  // [Idea B] 광고 실패해도 슬롯 높이 유지 (공간 예약)
+  // → FlatList가 최초에 올바른 높이를 캐싱하도록 보장
+  // → 근본 해결(Idea A: 카드 내부 통합)로 가기 전 우회책
+  const showAd = status !== 'failed';
 
   return (
     <View
+      ref={containerRef}
       collapsable={false}
+      onLayout={handleContainerLayout}
       style={{
         width: '100%',
+        // [Idea B 핵심] 항상 고정 높이 예약 — 광고 로드 전/후/실패 모두 동일
         height: reservedHeight,
         overflow: 'hidden',
         marginVertical: 8,
+        // 광고 실패 시 투명하게 (공간은 유지)
+        opacity: showAd ? 1 : 0,
       }}
     >
-      <InlineAd
-        adGroupId={adGroupId}
-        impressFallbackOnMount={true}
-        onAdRendered={handleAdRendered}
-        onAdFailedToRender={() => handleAdFailed('failedToRender')}
-        onNoFill={() => handleAdFailed('noFill')}
-      />
+      {showAd && (
+        <InlineAd
+          adGroupId={adGroupId}
+          impressFallbackOnMount={true}
+          onAdRendered={handleAdRendered}
+          onAdFailedToRender={() => handleAdFailed('failedToRender')}
+          onNoFill={() => handleAdFailed('noFill')}
+        />
+      )}
     </View>
   );
 });
