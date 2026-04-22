@@ -10,7 +10,7 @@ import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-nat
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Image, Platform, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
-import { Icon, AnimateSkeleton, BottomSheet, Button } from '@toss/tds-react-native';
+import { Icon, AnimateSkeleton, BottomSheet, Button, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { EventCard } from '../components/EventCard';
@@ -28,7 +28,7 @@ import { TrendCard } from '../components/TrendCard';
 import { HeroCard } from '../components/HeroCard';
 import { fetchFeed, feedEventToScoredEvent, sectionToFeedCards, type FeedCard } from '../services/feedService';
 import { API_TIMEOUT } from '../config/api';
-import { getTickets, TICKETS_PER_EXCHANGE, type TicketInfo } from '../services/ticketService';
+import { getTickets, exchangeTickets, subscribeTicketCount, TICKETS_PER_EXCHANGE, type TicketInfo } from '../services/ticketService';
 import { getToken } from '../utils/authStorage';
 
 import type { ScoredEvent, Location } from '../types/recommendation';
@@ -177,25 +177,48 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   },
   locationButtonContent: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   locationButtonText: { fontSize: 13, color: a.blue600, fontWeight: '600' },
-  ticketBanner: {
+  ticketWidget: {
     marginTop: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: a.grey100,
     borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
     gap: 8,
   },
-  ticketBannerText: {
-    fontSize: 14,
+  ticketWidgetTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  ticketWidgetCount: {
+    fontSize: 15,
     fontWeight: '700',
     color: a.grey900,
   },
-  ticketBannerSub: {
+  ticketWidgetBtn: {
+    backgroundColor: a.blue500,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  ticketWidgetBtnDisabled: {
+    backgroundColor: a.grey300,
+  },
+  ticketWidgetBtnText: {
+    color: '#fff',
     fontSize: 13,
-    color: a.grey500,
-    flex: 1,
+    fontWeight: '600',
+  },
+  ticketProgressTrack: {
+    height: 4,
+    backgroundColor: a.grey300,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  ticketProgressFill: {
+    height: 4,
+    backgroundColor: a.blue500,
+    borderRadius: 2,
   },
   onboardingSheet: {
     paddingHorizontal: 20,
@@ -389,7 +412,9 @@ function HomePageInner() {
   const [showAiNotice, setShowAiNotice] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [ticketInfo, setTicketInfo] = useState<TicketInfo | null>(null);
+  const [ticketExchangeLoading, setTicketExchangeLoading] = useState(false);
   const [showTicketOnboarding, setShowTicketOnboarding] = useState(false);
+  const dialog = useDialog();
 
   // 통합 피드 상태 (섹션 카드 + 매거진 카드 한 배열)
   const [feedCards, setFeedCards] = useState<FeedCard[]>(validCache?.feedCards ?? []);
@@ -398,6 +423,9 @@ function HomePageInner() {
   const [feedError, setFeedError] = useState(false);
 
   // ── Ref ─────────────────────────────────────────────────────
+  const ticketInfoRef = useRef(ticketInfo);
+  useEffect(() => { ticketInfoRef.current = ticketInfo; }, [ticketInfo]);
+
   const flatListRef = useRef<FlatList>(null);
   const feedLoadingRef = useRef(false);
   const feedSeenEventIds = useRef<Set<string>>(new Set());
@@ -431,6 +459,37 @@ function HomePageInner() {
       }
     });
   }, []);
+
+  // 다른 화면(상세페이지)에서 적립 성공 시 즉시 카운터 갱신
+  useEffect(() => {
+    return subscribeTicketCount((ticketCount) => {
+      if (ticketInfoRef.current) {
+        setTicketInfo((prev) => prev ? { ...prev, ticketCount } : null);
+      } else {
+        // ticketInfo가 아직 없으면 전체 조회로 채움 (updater 바깥에서 호출)
+        getTickets().then(setTicketInfo).catch(() => {});
+      }
+    });
+  }, []);
+
+  const handleTicketExchange = async () => {
+    if (!ticketInfo || ticketInfo.ticketCount < TICKETS_PER_EXCHANGE) return;
+    try {
+      setTicketExchangeLoading(true);
+      const result = await exchangeTickets();
+      setTicketInfo((prev) => prev ? { ...prev, ticketCount: result.ticketCount } : null);
+      dialog.openAlert({ title: '교환 완료!', description: '1포인트가 지급됐어요 🎉' });
+    } catch (err: any) {
+      const errCode = err?.response?.data?.error ?? err?.message;
+      let description = '교환 중 오류가 발생했어요.';
+      if (errCode === 'NOT_ENOUGH_TICKETS') description = '티켓이 부족해요.';
+      else if (errCode === 'EXCHANGE_EXPIRED') description = '교환 요청이 만료됐어요. 다시 시도해 주세요.';
+      else if (errCode === 'UNSUPPORTED_VERSION') description = '토스 앱을 최신 버전으로 업데이트해 주세요.';
+      dialog.openAlert({ title: '오류', description });
+    } finally {
+      setTicketExchangeLoading(false);
+    }
+  };
 
   // ── 초기화 ───────────────────────────────────────────────────
 
@@ -1133,22 +1192,39 @@ function HomePageInner() {
           ) : null}
         </View>
 
-        {/* 티켓 배너 (로그인 유저만) */}
+        {/* 티켓 현황 위젯 (로그인 유저만) */}
         {ticketInfo !== null && (
-          <View style={styles.ticketBanner}>
-            <Text style={styles.ticketBannerText}>
-              🎟 {ticketInfo.ticketCount}/{TICKETS_PER_EXCHANGE}
-            </Text>
-            <Text style={styles.ticketBannerSub}>
-              {ticketInfo.ticketCount >= TICKETS_PER_EXCHANGE
-                ? '토스 포인트로 바꿀 수 있어요 →'
-                : '이벤트를 탐색하고 티켓을 모아보세요'}
-            </Text>
+          <View style={styles.ticketWidget}>
+            <View style={styles.ticketWidgetTop}>
+              <Text style={styles.ticketWidgetCount}>
+                🎟 {ticketInfo.ticketCount} / {TICKETS_PER_EXCHANGE}
+              </Text>
+              <Pressable
+                style={[
+                  styles.ticketWidgetBtn,
+                  (ticketInfo.ticketCount < TICKETS_PER_EXCHANGE || ticketExchangeLoading) && styles.ticketWidgetBtnDisabled,
+                ]}
+                onPress={handleTicketExchange}
+                disabled={ticketInfo.ticketCount < TICKETS_PER_EXCHANGE || ticketExchangeLoading}
+              >
+                <Text style={styles.ticketWidgetBtnText}>
+                  {ticketExchangeLoading ? '...' : '교환하기'}
+                </Text>
+              </Pressable>
+            </View>
+            <View style={styles.ticketProgressTrack}>
+              <View
+                style={[
+                  styles.ticketProgressFill,
+                  { width: `${Math.min(ticketInfo.ticketCount / TICKETS_PER_EXCHANGE, 1) * 100}%` },
+                ]}
+              />
+            </View>
           </View>
         )}
       </View>
     </>
-  ), [adaptive, styles, top, location, currentAddress, handleRefresh, ticketInfo]);
+  ), [adaptive, styles, top, location, currentAddress, handleRefresh, ticketInfo, ticketExchangeLoading, handleTicketExchange]);
 
   return (
     <View style={styles.container}>

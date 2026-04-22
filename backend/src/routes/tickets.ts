@@ -96,27 +96,70 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/tickets/earn-status/:eventId
+ * 오늘 해당 이벤트에서 이미 적립했는지 조회
+ */
+router.get('/earn-status/:eventId', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { eventId } = req.params;
+  const today = todayKst();
+
+  const { rows } = await pool.query(
+    `SELECT id FROM user_ticket_earn_log
+     WHERE user_id = $1 AND event_id = $2 AND earn_date = $3
+     LIMIT 1`,
+    [userId, eventId, today]
+  );
+
+  return res.json({ earnedToday: rows.length > 0 });
+});
+
+/**
  * POST /api/tickets/earn
  * 광고 시청 완료 후 티켓 조각 획득
- * - cooldown, daily_limit 검사와 갱신을 단일 트랜잭션으로 처리 (동시 요청 우회 방지)
+ *
+ * 트랜잭션 흐름 (동시 요청 race condition 방지):
+ * 1. earn_log INSERT ON CONFLICT DO NOTHING — unique index가 실제 중복 게이트
+ * 2. RETURNING 없으면 → ROLLBACK + 409 (이미 오늘 이 이벤트에서 받음)
+ * 3. user_tickets FOR UPDATE lock → daily_limit 검사
+ * 4. daily_limit 초과 → ROLLBACK (earn_log INSERT도 함께 취소)
+ * 5. earned 산출 → user_tickets 갱신 → earn_log earned 업데이트 → COMMIT
  */
 router.post('/earn', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
+  const { eventId } = req.body as { eventId?: string };
+  if (!eventId) {
+    return res.status(400).json({ error: 'MISSING_EVENT_ID' });
+  }
   const today = todayKst();
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // 레코드 없으면 생성, 있으면 그대로
+    // 1. earn_log에 gate row INSERT — unique(user_id, event_id, earn_date)로 중복 방지
+    const { rows: logRows } = await client.query(
+      `INSERT INTO user_ticket_earn_log (user_id, event_id, earn_date, earned)
+       VALUES ($1, $2, $3, 0)
+       ON CONFLICT (user_id, event_id, earn_date) DO NOTHING
+       RETURNING id`,
+      [userId, eventId, today]
+    );
+
+    // 2. RETURNING 없으면 오늘 이미 적립한 이벤트 → ROLLBACK + 409
+    if (logRows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'EVENT_ALREADY_EARNED_TODAY' });
+    }
+    const logId = logRows[0].id;
+
+    // 3. user_tickets 레코드 보장 후 row lock (동시 요청 직렬화)
     await client.query(
       `INSERT INTO user_tickets (user_id, ticket_count, total_earned, total_exchanged)
        VALUES ($1, 0, 0, 0)
        ON CONFLICT (user_id) DO NOTHING`,
       [userId]
     );
-
-    // row lock으로 동시 요청 직렬화 (daily_limit 검사와 갱신을 단일 트랜잭션 안에서)
     const { rows: lockRows } = await client.query(
       `SELECT ticket_count, daily_earned, daily_earned_date
        FROM user_tickets WHERE user_id = $1 FOR UPDATE`,
@@ -124,8 +167,7 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
     );
     const row = lockRows[0];
 
-    // daily_limit 검사 (KST 날짜 기준 리셋)
-    // pg는 DATE 컬럼을 'YYYY-MM-DD' 문자열로 반환
+    // 4. daily_limit 검사 — 초과 시 ROLLBACK (earn_log INSERT도 취소)
     const isNewDay = !row.daily_earned_date || String(row.daily_earned_date).slice(0, 10) !== today;
     const currentDailyEarned = isNewDay ? 0 : (row.daily_earned ?? 0);
     const remaining = DAILY_LIMIT - currentDailyEarned;
@@ -140,9 +182,9 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    // 남은 한도만큼 clamp — 정책 상한(30개)을 절대 초과하지 않음
+    // 5. earned 산출 → user_tickets 갱신 → earn_log earned 업데이트 → COMMIT
     const earned = Math.min(randomTickets(), remaining);
-    const newDailyEarned = currentDailyEarned + earned; // 항상 <= DAILY_LIMIT
+    const newDailyEarned = currentDailyEarned + earned;
 
     const { rows: updated } = await client.query(
       `UPDATE user_tickets
@@ -157,9 +199,14 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
       [earned, newDailyEarned, today, userId]
     );
 
+    await client.query(
+      `UPDATE user_ticket_earn_log SET earned = $1 WHERE id = $2`,
+      [earned, logId]
+    );
+
     await client.query('COMMIT');
 
-    console.log(`[Tickets] 🎟 earn: user=${userId} earned=${earned} daily=${newDailyEarned}/${DAILY_LIMIT}`);
+    console.log(`[Tickets] 🎟 earn: user=${userId} event=${eventId} earned=${earned} daily=${newDailyEarned}/${DAILY_LIMIT}`);
 
     return res.json({
       earned,

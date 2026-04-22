@@ -32,7 +32,7 @@ import { useLike } from '../../src/hooks/useLike';
 import { LikesProvider } from '../../src/contexts/LikesContext';
 import { useAuth } from '../../src/hooks/useAuth';
 import http from '../../src/lib/http';
-import { earnTickets, exchangeTickets, getTickets, TICKETS_PER_EXCHANGE, type TicketInfo } from '../../src/services/ticketService';
+import { earnTickets, getEarnStatus } from '../../src/services/ticketService';
 
 type EventDetailParams = {
   id?: string;
@@ -245,10 +245,10 @@ function EventDetailPage() {
 
   // 티켓 조각
   const REWARDED_AD_ID = 'ait.v2.live.b50cf7d900884c5b';
-  const [ticketInfo, setTicketInfo] = useState<TicketInfo | null>(null);
   const [rewardedAdLoaded, setRewardedAdLoaded] = useState(false);
   const [ticketLoading, setTicketLoading] = useState(false);
   const [ticketResult, setTicketResult] = useState<{ earned: number } | null>(null);
+  const [earnedToday, setEarnedToday] = useState(false);
   const loadUnregisterRef = React.useRef<(() => void) | null>(null);
   const showUnregisterRef = React.useRef<(() => void) | null>(null);
   const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -380,10 +380,9 @@ function EventDetailPage() {
     loadUnregisterRef.current = unregister;
   }, []);
 
-  // 티켓 조회 + 리워드 광고 프리로드
+  // 리워드 광고 프리로드
   useEffect(() => {
     if (!isLoggedIn) return;
-    getTickets().then(setTicketInfo).catch(() => {});
     preloadRewardedAd();
     return () => {
       loadUnregisterRef.current?.();
@@ -415,6 +414,7 @@ function EventDetailPage() {
       dialog.openAlert({ title: '로그인 필요', description: '티켓을 받으려면 로그인이 필요해요.' });
       return;
     }
+    if (earnedToday) return; // 오늘 이미 받음 — 버튼 비활성 상태에서 호출 방어
     if (!rewardedAdLoaded || !showFullScreenAd.isSupported()) {
       dialog.openAlert({ title: '광고 없음', description: '지금은 광고를 불러올 수 없어요.\n잠시 후 다시 시도해 주세요.' });
       return;
@@ -426,12 +426,18 @@ function EventDetailPage() {
       onEvent: async (ev) => {
         if (ev.type === 'userEarnedReward') {
           try {
-            const result = await earnTickets();
+            const result = await earnTickets(event!.id);
             showTicketToast(result.earned);
-            setTicketInfo((prev) => prev ? { ...prev, ticketCount: result.ticketCount } : null);
+            setEarnedToday(true);
           } catch (earnErr: any) {
             const errCode = earnErr?.response?.data?.error;
-            if (errCode === 'DAILY_LIMIT_REACHED') {
+            if (errCode === 'EVENT_ALREADY_EARNED_TODAY') {
+              setEarnedToday(true);
+              dialog.openAlert({
+                title: '이미 받았어요',
+                description: '오늘 이 이벤트에서 이미 티켓을 받았어요.\n내일 자정에 다시 받을 수 있어요.',
+              });
+            } else if (errCode === 'DAILY_LIMIT_REACHED') {
               dialog.openAlert({
                 title: '오늘 티켓 완료!',
                 description: '오늘 받을 수 있는 티켓을 모두 모았어요 🎟\n내일 자정에 다시 받을 수 있어요.',
@@ -464,28 +470,13 @@ function EventDetailPage() {
       },
     });
     showUnregisterRef.current = unregister;
-  }, [isLoggedIn, rewardedAdLoaded, dialog, showTicketToast, resetAdState]);
+  }, [isLoggedIn, earnedToday, rewardedAdLoaded, dialog, showTicketToast, resetAdState, event]);
 
-  // 포인트 교환
-  const handleExchange = async () => {
-    if (!ticketInfo || ticketInfo.ticketCount < TICKETS_PER_EXCHANGE) return;
-    try {
-      setTicketLoading(true);
-      const result = await exchangeTickets();
-      setTicketInfo((prev) => prev ? { ...prev, ticketCount: result.ticketCount } : null);
-      dialog.openAlert({ title: '교환 완료!', description: '1포인트가 지급됐어요 🎉' });
-    } catch (err: any) {
-      // grantPromotionReward 오류는 err.message, HTTP 오류는 err.response.data.error
-      const errCode = err?.response?.data?.error ?? err?.message;
-      let description = '교환 중 오류가 발생했어요.';
-      if (errCode === 'NOT_ENOUGH_TICKETS') description = '티켓이 부족해요.';
-      else if (errCode === 'EXCHANGE_EXPIRED') description = '교환 요청이 만료됐어요. 다시 시도해 주세요.';
-      else if (errCode === 'UNSUPPORTED_VERSION') description = '토스 앱을 최신 버전으로 업데이트해 주세요.';
-      dialog.openAlert({ title: '오류', description });
-    } finally {
-      setTicketLoading(false);
-    }
-  };
+  // 이벤트별 오늘 적립 여부 조회 (로그인 + 이벤트 로드 후)
+  useEffect(() => {
+    if (!isLoggedIn || !event?.id) return;
+    getEarnStatus(event.id).then((s) => setEarnedToday(s.earnedToday)).catch(() => {});
+  }, [isLoggedIn, event?.id]);
 
   // dwell 시간 측정: 이벤트 데이터가 로드된 시점부터 페이지 이탈까지
   // 5초 미만은 노이즈로 간주하여 기록하지 않음
@@ -877,6 +868,28 @@ function EventDetailPage() {
             </View>
           )}
 
+          {/* 광고 보고 티켓 받기 CTA */}
+          <View style={styles.ticketCtaSection}>
+            <Text style={styles.ticketCtaTitle}>광고 보고 티켓 받기</Text>
+            {ticketResult && (
+              <View style={styles.ticketToast}>
+                <Text style={styles.ticketToastText}>🎟 티켓 조각 +{ticketResult.earned}개!</Text>
+              </View>
+            )}
+            <TouchableOpacity
+              style={[
+                styles.ticketCtaBtn,
+                (ticketLoading || earnedToday) && { opacity: 0.4 },
+              ]}
+              onPress={handleWatchAdForTicket}
+              disabled={ticketLoading || earnedToday}
+            >
+              <Text style={styles.ticketCtaBtnText}>
+                {ticketLoading ? '...' : earnedToday ? '오늘은 이미 받았어요' : '티켓 받기'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           {/* 카테고리별 상세 정보 */}
           {renderCategoryMeta(event, styles)}
 
@@ -967,58 +980,24 @@ function EventDetailPage() {
 
       </ScrollView>
 
-      {/* 하단 CTA — ScrollView 아래 일반 View로 배치 (iOS/Android 모두 오버스크롤 없음) */}
-      <View style={[styles.stickyBar, { backgroundColor: adaptive.background }]}>
-        {/* 티켓 결과 토스트 */}
-        {ticketResult && (
-          <View style={styles.ticketToast}>
-            <Text style={styles.ticketToastText}>🎟 티켓 조각 +{ticketResult.earned}개!</Text>
-          </View>
-        )}
-
-        {/* 티켓 조각 배너 */}
-        <View style={styles.ticketBannerRow}>
-          <TouchableOpacity
-            style={styles.ticketCountBadge}
-            onPress={ticketInfo && ticketInfo.ticketCount >= TICKETS_PER_EXCHANGE ? handleExchange : undefined}
-            activeOpacity={ticketInfo && ticketInfo.ticketCount >= TICKETS_PER_EXCHANGE ? 0.7 : 1}
-          >
-            <Text style={styles.ticketCountText}>
-              🎟 {ticketInfo?.ticketCount ?? 0}/{TICKETS_PER_EXCHANGE}
+      {/* 하단 CTA — 예매 버튼만 (ScrollView 아래 일반 View로 배치) */}
+      {primaryCTALink && (
+        <View style={[styles.stickyBar, { backgroundColor: adaptive.background }]}>
+          {primaryCTALink.label === '티켓 예매하기' && (
+            <Text style={styles.ctaHint}>
+              {getTicketSiteName(primaryCTALink.url)}에서 예매할 수 있어요
             </Text>
-            {ticketInfo && ticketInfo.ticketCount >= TICKETS_PER_EXCHANGE && (
-              <Text style={styles.ticketExchangeLabel}> · 교환하기</Text>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.ticketAdBtn, ticketLoading && { opacity: 0.5 }]}
-            onPress={handleWatchAdForTicket}
-            disabled={ticketLoading}
+          )}
+          <Button
+            type="primary"
+            size="big"
+            viewStyle={{ width: '100%' }}
+            onPress={() => handleOpenLink(primaryCTALink.url)}
           >
-            <Text style={styles.ticketAdBtnText}>
-              {ticketLoading ? '...' : '광고 보고 받기'}
-            </Text>
-          </TouchableOpacity>
+            {primaryCTALink.label}
+          </Button>
         </View>
-
-        {primaryCTALink && (
-          <>
-            {primaryCTALink.label === '티켓 예매하기' && (
-              <Text style={styles.ctaHint}>
-                {getTicketSiteName(primaryCTALink.url)}에서 예매할 수 있어요
-              </Text>
-            )}
-            <Button
-              type="primary"
-              size="big"
-              viewStyle={{ width: '100%' }}
-              onPress={() => handleOpenLink(primaryCTALink.url)}
-            >
-              {primaryCTALink.label}
-            </Button>
-          </>
-        )}
-      </View>
+      )}
 
       {/* TDS BottomSheet */}
       <BottomSheet.Root
@@ -1579,7 +1558,7 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     gap: 8,
   },
   ticketToast: {
-    alignSelf: 'center',
+    alignSelf: 'flex-start',
     backgroundColor: a.blue500,
     borderRadius: 20,
     paddingHorizontal: 14,
@@ -1590,38 +1569,29 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  ticketBannerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  ticketCtaSection: {
+    marginHorizontal: 20,
+    marginTop: 12,
     backgroundColor: a.grey100,
     borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 10,
   },
-  ticketCountBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  ticketCountText: {
-    fontSize: 14,
+  ticketCtaTitle: {
+    fontSize: 15,
     fontWeight: '700',
     color: a.grey900,
   },
-  ticketExchangeLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: a.blue500,
-  },
-  ticketAdBtn: {
+  ticketCtaBtn: {
     backgroundColor: a.blue500,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
   },
-  ticketAdBtnText: {
+  ticketCtaBtnText: {
     color: '#fff',
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '600',
   },
   heroActionsContainer: {

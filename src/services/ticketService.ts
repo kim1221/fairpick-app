@@ -26,6 +26,21 @@ export interface TicketConfig {
 // 메모리 캐시 (앱 세션 내 재사용, Storage 저장 안 함)
 let _configCache: TicketConfig | null = null;
 
+// ── 티켓 수 실시간 동기화 ────────────────────────────────────────
+// earn 성공 시 notifyTicketCountUpdate를 호출하면 구독자에게 즉시 전달
+// Context/이벤트버스 없이 서비스 모듈 레벨에서 완결
+type TicketCountListener = (ticketCount: number) => void;
+const _ticketListeners = new Set<TicketCountListener>();
+
+export function subscribeTicketCount(fn: TicketCountListener): () => void {
+  _ticketListeners.add(fn);
+  return () => _ticketListeners.delete(fn);
+}
+
+function _notifyTicketCount(ticketCount: number) {
+  _ticketListeners.forEach((fn) => fn(ticketCount));
+}
+
 export async function getTicketConfig(): Promise<TicketConfig> {
   if (_configCache) return _configCache;
   const { data } = await http.get<TicketConfig>('/api/tickets/config');
@@ -38,14 +53,20 @@ export async function getTickets(): Promise<TicketInfo> {
   return data;
 }
 
-export async function earnTickets(): Promise<{
+export async function getEarnStatus(eventId: string): Promise<{ earnedToday: boolean }> {
+  const { data } = await http.get<{ earnedToday: boolean }>(`/api/tickets/earn-status/${eventId}`);
+  return data;
+}
+
+export async function earnTickets(eventId: string): Promise<{
   earned: number;
   ticketCount: number;
   canExchange: boolean;
   dailyEarned: number;
   dailyLimit: number;
 }> {
-  const { data } = await http.post('/api/tickets/earn');
+  const { data } = await http.post('/api/tickets/earn', { eventId });
+  _notifyTicketCount(data.ticketCount);
   return data;
 }
 
