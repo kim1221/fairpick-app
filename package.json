@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "granite dev",
+    "prebuild": "find . -name '.DS_Store' -not -path '*/node_modules/*' -delete",
     "build": "ait build",
     "test": "jest --passWithNoTests",
     "typecheck": "tsc --noEmit",
