@@ -339,9 +339,9 @@ const AdSlot = React.memo(({ adGroupId, adFormat }: { adGroupId: string; adForma
       collapsable={false}
       style={isList ? {
         width: '100%',
-        height: 96,
-        // [L-1] overflow:'visible' — 클리핑이 overflow에서 오는지 확인
-        // 기존 'hidden'에서 전환: InlineAd 콘텐츠가 96px 경계 밖으로 나오는 경우 대응
+        // [L-2] height 고정 해제 → InlineAd 실제 크기대로 렌더되는지 확인
+        // 기존 height:96이 클리핑 원인으로 유력 판단 (overflow:visible로도 여전히 잘림)
+        minHeight: 96,
         overflow: 'visible',
         marginVertical: 8,
       } : {
