@@ -927,9 +927,12 @@ function HomePageInner() {
         }
       } else {
         magazineCardCount++;
-        // [F-0] feed 광고 임시 비활성
-        // 재마운트 noFill / 성능 회귀 / 로딩 회귀 반복 확인 → 피드 안정성 우선
-        // feed 광고는 별도 단계에서 재설계
+        // [F-1] feed 광고 1개만, 첫 번째 비-섹션 카드 직후 고정
+        // 보수적 재도입: 분산 삽입 대신 피드 상단 1개만 → 안정성 확인 후 빈도 확대 검토
+        // 검증 항목: 첫 진입 노출 / 스크롤 후 유지 / 새로고침 후 재노출 / 피드 성능 회귀 없음
+        if (magazineCardCount === 1) {
+          items.push({ type: 'ad', id: 'feed-1', adType: 'feed' });
+        }
       }
     }
 
