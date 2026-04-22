@@ -426,6 +426,7 @@ function HomePageInner() {
   const [showAiNotice, setShowAiNotice] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [ticketInfo, setTicketInfo] = useState<TicketInfo | null>(null);
+  const [ticketFetching, setTicketFetching] = useState(false);
   const [ticketExchangeLoading, setTicketExchangeLoading] = useState(false);
   const [showTicketOnboarding, setShowTicketOnboarding] = useState(false);
   const dialog = useDialog();
@@ -461,12 +462,12 @@ function HomePageInner() {
   // 첫 로드 타임아웃: Railway 콜드 스타트(15~30초) 커버
   const COLD_START_TIMEOUT = 30000;
 
-  // ── 티켓 조회 + 온보딩 ──────────────────────────────────────
+  // ── 티켓 조회 + 온보딩 (앱 최초 마운트) ──────────────────────
   useEffect(() => {
     getToken().then(async (token) => {
       if (!token) return;
-      getTickets().then(setTicketInfo).catch(() => {});
-      // 첫 방문 시에만 온보딩 시트 표시
+      setTicketFetching(true);
+      getTickets().then(setTicketInfo).catch(() => {}).finally(() => setTicketFetching(false));
       const seen = await Storage.getItem('ticket_onboarding_seen');
       if (!seen) {
         setShowTicketOnboarding(true);
@@ -474,6 +475,22 @@ function HomePageInner() {
       }
     });
   }, []);
+
+  // ── 로그인 직후 즉시 티켓 조회 ──────────────────────────────
+  // isLoggedIn false→true 전환 시 ticketInfo가 없으면 바로 fetch
+  const prevIsLoggedInRef = useRef(isLoggedIn);
+  useEffect(() => {
+    const prev = prevIsLoggedInRef.current;
+    prevIsLoggedInRef.current = isLoggedIn;
+    if (!prev && isLoggedIn) {
+      setTicketFetching(true);
+      getTickets().then(setTicketInfo).catch(() => {}).finally(() => setTicketFetching(false));
+    }
+    if (prev && !isLoggedIn) {
+      // 로그아웃 시 티켓 상태 초기화
+      setTicketInfo(null);
+    }
+  }, [isLoggedIn]);
 
   // 다른 화면(상세페이지)에서 적립 성공 시 즉시 카운터 갱신
   useEffect(() => {
@@ -1221,7 +1238,7 @@ function HomePageInner() {
       {/* 티켓 sticky 바 */}
       {!authLoading && (
         isLoggedIn && ticketInfo !== null ? (
-          // 로그인 유저: 현황 + 교환하기
+          // ① 로그인 + 데이터 있음: 현황 + 교환하기
           <View style={styles.ticketStickyBar}>
             <Text style={styles.ticketStickyCount}>
               🎟 {ticketInfo.ticketCount}/{TICKETS_PER_EXCHANGE}
@@ -1247,8 +1264,13 @@ function HomePageInner() {
               </Text>
             </Pressable>
           </View>
+        ) : isLoggedIn && ticketFetching ? (
+          // ② 로그인 + 로딩 중: 플레이스홀더
+          <View style={styles.ticketStickyBar}>
+            <View style={[styles.ticketStickyTrack, { flex: 1, height: 8, borderRadius: 4, backgroundColor: adaptive.grey200 }]} />
+          </View>
         ) : !isLoggedIn ? (
-          // 비로그인 유저: 로그인 유도
+          // ③ 비로그인: 로그인 유도
           <View style={styles.ticketStickyBar}>
             <View style={{ flex: 1 }}>
               <Text style={styles.ticketStickyLoginTitle}>로그인하고 티켓 모으기</Text>
