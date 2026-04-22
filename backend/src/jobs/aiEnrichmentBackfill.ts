@@ -132,27 +132,35 @@ async function enrichSingleEvent(
 
     if (useNaverSearch) {
       // 네이버 검색 + AI 추출 (플레이스, 블로그, 웹)
-      const searchResult = await searchEventInfo(event.title, event.venue || undefined);
-      const searchText = mergeSearchResults(searchResult.place, searchResult.blog, searchResult.web);
+      // naverApi는 에러를 throw로 다시 던지므로 별도 try-catch 처리
+      // Naver 실패 시 derived_tags만 추출하는 fallback으로 넘어감 (이벤트 전체 실패 방지)
+      try {
+        const searchResult = await searchEventInfo(event.title, event.venue || undefined);
+        const searchText = mergeSearchResults(searchResult.place, searchResult.blog, searchResult.web);
 
-      // 네이버 플레이스 링크 추출 (AI가 못 찾을 때를 대비)
-      if (searchResult.place && searchResult.place.items && searchResult.place.items.length > 0) {
-        const firstPlace = searchResult.place.items[0];
-        if (firstPlace.link && firstPlace.link.trim()) {
-          naverPlaceLink = firstPlace.link.trim();
-          console.log(`[Enrich] 네이버 플레이스 링크 발견: ${naverPlaceLink}`);
+        // 네이버 플레이스 링크 추출 (AI가 못 찾을 때를 대비)
+        if (searchResult.place && searchResult.place.items && searchResult.place.items.length > 0) {
+          const firstPlace = searchResult.place.items[0];
+          if (firstPlace.link && firstPlace.link.trim()) {
+            naverPlaceLink = firstPlace.link.trim();
+            console.log(`[Enrich] 네이버 플레이스 링크 발견: ${naverPlaceLink}`);
+          }
         }
-      }
 
-      if (searchText !== '검색 결과 없음') {
-        extractedInfo = await extractEventInfo(
-          event.title,
-          event.main_category,
-          event.overview,
-          searchText
-        );
-      } else {
-        console.log('[Enrich] No search results, extracting tags only');
+        if (searchText !== '검색 결과 없음') {
+          extractedInfo = await extractEventInfo(
+            event.title,
+            event.main_category,
+            event.overview,
+            searchText
+          );
+        } else {
+          console.log('[Enrich] No search results, extracting tags only');
+        }
+      } catch (naverError: any) {
+        // Naver API 실패 (할당량 소진, rate limit, 네트워크 오류 등)
+        // → extractedInfo = null 유지 → 아래 fallback에서 derived_tags만 추출
+        console.warn(`[Enrich] Naver search failed (falling back to tags-only): ${naverError.message}`);
       }
     }
 

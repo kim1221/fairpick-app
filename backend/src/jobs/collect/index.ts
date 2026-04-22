@@ -35,8 +35,16 @@ const COLLECTION_STEPS: CollectionStep[] = [
   { name: 'Normalize', modulePath: '../normalizeCategories', functionName: 'normalizeCategories' },
 ];
 
-export async function runCollectionJob(options?: { schedulerJobName?: string }): Promise<void> {
+// geoRefreshPipeline 내에서 호출 시 스킵할 스텝 이름 목록
+// 이유: geoRefreshPipeline은 Geo 보정 후 STEP4에서 Dedupe를 별도 실행
+// → 파이프라인 내 수집 단계에서 Dedupe를 또 실행하면 60분 타임아웃 실패 반복 + 총 2회 중복 실행
+const PIPELINE_SKIP_STEPS = new Set(['Dedupe', 'Normalize']);
+
+export async function runCollectionJob(options?: { schedulerJobName?: string; skipPostProcessing?: boolean }): Promise<void> {
   const schedulerJobName = options?.schedulerJobName ?? 'geo-refresh-03';
+  // skipPostProcessing=true: Dedupe/Normalize를 건너뜀 (geoRefreshPipeline 호출 시 사용)
+  // geoRefreshPipeline은 Geo 백필 후 STEP4에서 Dedupe를 별도 실행하므로 중복 불필요
+  const skipPostProcessing = options?.skipPostProcessing ?? false;
   const logId = crypto.randomUUID();
   const startTime = new Date();
 
@@ -60,6 +68,12 @@ export async function runCollectionJob(options?: { schedulerJobName?: string }):
 
   // 각 단계 실행
   for (const step of COLLECTION_STEPS) {
+    // skipPostProcessing: geoRefreshPipeline 호출 시 Dedupe/Normalize 건너뜀
+    // (파이프라인 STEP4에서 Geo 보정 후 별도 실행)
+    if (skipPostProcessing && PIPELINE_SKIP_STEPS.has(step.name)) {
+      console.log(`[CollectJob] ⊘ ${step.name} - skipped (skipPostProcessing=true, handled by pipeline STEP4)`);
+      continue;
+    }
     const stepStartTime = Date.now();
     let stepTimeoutId: ReturnType<typeof setTimeout> | undefined;
     console.log(`[CollectJob] Running step: ${step.name}...`);

@@ -102,7 +102,10 @@ export async function runGeoRefreshPipeline(options: { lightMode?: boolean; sche
       stepResults.push({ name: 'STEP1-collect', status: 'FAILED', elapsed: parseFloat(elapsed) });
     } else {
       try {
-        await runCollectionJob({ schedulerJobName: schedulerJobName ?? 'geo-refresh-03' });
+        // skipPostProcessing=true: 내부 Dedupe/Normalize 건너뜀
+      // 이유: geoRefreshPipeline STEP4에서 Geo 보정 후 Dedupe를 별도 실행
+      // → 컬렉션 내부에서 중복 실행 시 60분 타임아웃 실패 반복 방지
+      await runCollectionJob({ schedulerJobName: schedulerJobName ?? 'geo-refresh-03', skipPostProcessing: true });
         const elapsed = ((Date.now() - step1Start) / 1000).toFixed(1);
         const elapsedMs = Date.now() - step1Start;
         const step1MemEnd = Math.round(process.memoryUsage().rss / 1024 / 1024);
