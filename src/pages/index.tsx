@@ -330,23 +330,17 @@ function HorizontalSectionSkeleton() {
 
 const AD_RESERVED_HEIGHT = { list: 96, feed: 410 } as const;
 
-// ── 광고 상태 캐시
-// key: adGroupId:format:slotId (슬롯별 고유 키)
-// rendered만 캐시 → 재마운트 시 높이 안정성 보장
-// failed는 캐시 안 함 → 재마운트 시 재시도 (cache poisoning 방지)
-const _adStatusCache = new Map<string, 'rendered'>();
+// ── 광고 상태 외부 캐시 (FlatList 가상화 재마운트 시 status 리셋 방지)
+// key: adGroupId+adFormat, value: 'rendered' | 'failed'
+// AdSlot이 언마운트/리마운트되어도 마지막 결과를 기억
+const _adStatusCache = new Map<string, 'rendered' | 'failed'>();
 
-const AdSlot = React.memo(({ adGroupId, adFormat, slotId }: {
-  adGroupId: string;
-  adFormat: 'list' | 'feed';
-  slotId: string;
-}) => {
-  // slotId 포함으로 피드 슬롯별 독립 캐시 (한 슬롯 noFill이 다른 슬롯에 영향 없음)
-  const cacheKey = `${adGroupId}:${adFormat}:${slotId}`;
-  const isRenderedCache = _adStatusCache.get(cacheKey) === 'rendered';
+const AdSlot = React.memo(({ adGroupId, adFormat }: { adGroupId: string; adFormat: 'list' | 'feed' }) => {
+  const cacheKey = `${adGroupId}:${adFormat}`;
+  const cachedStatus = _adStatusCache.get(cacheKey);
 
   const [status, setStatus] = useState<'loading' | 'rendered' | 'failed'>(
-    isRenderedCache ? 'rendered' : 'loading'
+    cachedStatus ?? 'loading'
   );
   const isAndroid = Platform.OS === 'android';
   const reservedHeight = AD_RESERVED_HEIGHT[adFormat];
@@ -356,26 +350,27 @@ const AdSlot = React.memo(({ adGroupId, adFormat, slotId }: {
   useEffect(() => {
     mountCount.current += 1;
     const mc = mountCount.current;
-    console.log(`[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}] MOUNT #${mc} slotId=${slotId} cachedRendered=${isRenderedCache} → initialStatus=${isRenderedCache ? 'rendered' : 'loading'}`);
+    console.log(`[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}] MOUNT #${mc} cachedStatus=${cachedStatus ?? 'none'} → initialStatus=${cachedStatus ?? 'loading'}`);
     return () => {
-      console.log(`[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}] UNMOUNT #${mc} slotId=${slotId} finalStatus=${status}`);
+      console.log(`[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}] UNMOUNT #${mc} finalStatus=${status}`);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleAdRendered = useCallback(() => {
-    console.log(`[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}] slotId=${slotId} onAdRendered → rendered (캐시 저장)`);
+    console.log(`[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}] onAdRendered → status: loading→rendered`);
     _adStatusCache.set(cacheKey, 'rendered');
     setStatus('rendered');
-  }, [adFormat, isAndroid, cacheKey, slotId]);
+  }, [adFormat, isAndroid, cacheKey]);
 
   const handleAdFailed = useCallback((reason: 'failedToRender' | 'noFill') => {
-    // failed는 캐시하지 않음 → 다음 마운트에서 재시도
-    console.log(`[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}] slotId=${slotId} ${reason} → failed (캐시 없음, 재마운트 시 재시도)`);
+    console.log(`[AdSlot][${adFormat}][${isAndroid ? 'Android' : 'iOS'}] ${reason} → status: loading→failed (cacheKey=${cacheKey})`);
+    _adStatusCache.set(cacheKey, 'failed');
     setStatus('failed');
-  }, [adFormat, isAndroid, slotId]);
+  }, [adFormat, isAndroid, cacheKey]);
   // ── [End] 진단 로그 ──────────────────────────────────────────
 
+  // 이미 실패 캐시 → 즉시 null (공백 없음)
   if (status === 'failed') return null;
 
   return (
@@ -1027,7 +1022,6 @@ function HomePageInner() {
             <AdSlot
               adGroupId={adSlot === 'feed' ? AD_GROUP_FEED : AD_GROUP_SECTION}
               adFormat={adSlot}
-              slotId={card.id}
             />
           </View>
         );
