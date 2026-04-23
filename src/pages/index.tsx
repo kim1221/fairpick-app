@@ -75,6 +75,10 @@ interface HomeCache {
 let _homeCache: HomeCache | null = null;
 const HOME_CACHE_TTL_MS = 5 * 60 * 1000; // 5분
 
+// 출석 상태 모듈 레벨 캐시 (탭 전환 후 재마운트 시 즉시 사용)
+let _attendanceCache: AttendanceStatus | null = null;
+let _lastCheckinDateModule: string | null = null;
+
 // today_pick KST 일별 고정 캐시
 interface TodayPickCache {
   card: FeedCard;
@@ -473,15 +477,16 @@ function HomePageInner() {
   const { isLoggedIn, isLoading: authLoading, login } = useAuth();
 
   // ── 출석체크 상태 ──────────────────────────────────────────────
-  const [attendanceStatus, setAttendanceStatus] = useState<AttendanceStatus | null>(null);
+  // 초기값: 모듈 레벨 캐시 사용 → 탭 재진입 시 즉시 렌더링
+  const [attendanceStatus, setAttendanceStatus] = useState<AttendanceStatus | null>(_attendanceCache);
   const [showAttendanceSheet, setShowAttendanceSheet] = useState(false);
   const [weeklyBonusPopup, setWeeklyBonusPopup] = useState<{
     bonusTickets: number;
     adTickets: number;
     capped: boolean;
   } | null>(null);
-  // 오늘 KST 날짜 추적 (날짜 변경 감지용)
-  const lastCheckinDateRef = useRef<string | null>(null);
+  // 오늘 KST 날짜 추적 (날짜 변경 감지용) — 모듈 레벨과 동기화
+  const lastCheckinDateRef = useRef<string | null>(_lastCheckinDateModule);
 
   // 통합 피드 상태 (섹션 카드 + 매거진 카드 한 배열)
   const [feedCards, setFeedCards] = useState<FeedCard[]>(validCache?.feedCards ?? []);
@@ -580,22 +585,25 @@ function HomePageInner() {
     if (!isLoggedIn) return;
     const today = getKstToday();
     if (lastCheckinDateRef.current === today) return; // 오늘 이미 처리
-    lastCheckinDateRef.current = today; // 낙관적 선점 (중복 호출 방지)
+    lastCheckinDateRef.current = today;
+    _lastCheckinDateModule = today; // 모듈 레벨도 갱신
     try {
       const res = await checkin();
       // 티켓 잔액 동기화
       if (!res.alreadyCheckedIn) {
         setTicketInfo((prev) => prev ? { ...prev, ticketCount: res.ticketCount } : null);
       }
-      // 출석 현황 갱신
+      // 출석 현황 갱신 + 모듈 캐시 저장
       const status = await getAttendanceStatus();
+      _attendanceCache = status;
       setAttendanceStatus(status);
       // 주간 완주 보너스 팝업
       if (res.weeklyBonus) {
         setWeeklyBonusPopup(res.weeklyBonus);
       }
     } catch {
-      lastCheckinDateRef.current = null; // 실패 시 재시도 허용
+      lastCheckinDateRef.current = null;
+      _lastCheckinDateModule = null; // 실패 시 재시도 허용
     }
   }, [isLoggedIn]);
 
@@ -1377,8 +1385,8 @@ function HomePageInner() {
         ) : null
       )}
 
-      {/* 출석 위젯 (로그인 상태에서만) */}
-      {isLoggedIn && (
+      {/* 출석 위젯: 로그인 + (status 있으면 실데이터 / 없으면 같은 높이 플레이스홀더) */}
+      {!authLoading && isLoggedIn && (
         <AttendanceWidget
           status={attendanceStatus}
           onPress={() => setShowAttendanceSheet(true)}

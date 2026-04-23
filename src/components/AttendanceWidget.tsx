@@ -18,7 +18,19 @@ export function AttendanceWidget({ status, onPress }: Props) {
   const a = useAdaptive();
   const styles = createStyles(a);
 
-  if (!status) return null;
+  // status 로딩 중: 같은 높이의 플레이스홀더 → 레이아웃 시프트 방지
+  if (!status) {
+    return (
+      <View style={[styles.container, { opacity: 0 }]} pointerEvents="none">
+        <View style={styles.dots}>
+          {Array.from({ length: 7 }).map((_, i) => (
+            <View key={i} style={[styles.dot, styles.dotEmpty]} />
+          ))}
+        </View>
+        <Text style={styles.statusText}> </Text>
+      </View>
+    );
+  }
 
   const { weekDates, attendedDates, attendedCount, todayCheckedIn, weeklyBonusGranted } = status;
 
