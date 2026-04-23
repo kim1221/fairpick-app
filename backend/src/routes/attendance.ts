@@ -49,7 +49,7 @@ function weekDates(weekStart: string): string[] {
 // POST /checkin
 // ─────────────────────────────────────────
 router.post('/checkin', requireAuth, async (req: Request, res: Response) => {
-  const userId = (req as any).userId as string;
+  const userId = req.user!.userId;
   const today = todayKst();
   const wStart = weekStartKst();
   const dates = weekDates(wStart);      // ['YYYY-MM-DD', ...] 7개
@@ -183,7 +183,7 @@ router.post('/checkin', requireAuth, async (req: Request, res: Response) => {
 // GET /status
 // ─────────────────────────────────────────
 router.get('/status', requireAuth, async (req: Request, res: Response) => {
-  const userId = (req as any).userId as string;
+  const userId = req.user!.userId;
   const today = todayKst();
   const wStart = weekStartKst();
   const dates = weekDates(wStart);

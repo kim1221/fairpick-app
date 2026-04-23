@@ -601,7 +601,8 @@ function HomePageInner() {
       if (res.weeklyBonus) {
         setWeeklyBonusPopup(res.weeklyBonus);
       }
-    } catch {
+    } catch (err: any) {
+      console.error('[attendance] maybeCheckin failed:', err?.response?.status, err?.response?.data ?? err?.message);
       lastCheckinDateRef.current = null;
       _lastCheckinDateModule = null; // 실패 시 재시도 허용
     }
