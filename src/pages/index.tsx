@@ -9,7 +9,7 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Image, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
+import { AppState, FlatList, Image, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
 import { Icon, AnimateSkeleton, BottomSheet, Button, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
@@ -29,6 +29,9 @@ import { HeroCard } from '../components/HeroCard';
 import { fetchFeed, feedEventToScoredEvent, sectionToFeedCards, type FeedCard } from '../services/feedService';
 import { API_TIMEOUT } from '../config/api';
 import { getTickets, exchangeTickets, subscribeTicketCount, TICKETS_PER_EXCHANGE, type TicketInfo } from '../services/ticketService';
+import { checkin, getAttendanceStatus, getKstToday, type AttendanceStatus } from '../services/attendanceService';
+import { AttendanceWidget } from '../components/AttendanceWidget';
+import { AttendanceBottomSheet } from '../components/AttendanceBottomSheet';
 import { getToken } from '../utils/authStorage';
 import { useAuth } from '../hooks/useAuth';
 
@@ -271,6 +274,33 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   onboardingBtn: {
     marginTop: 8,
   },
+  bonusPopup: {
+    paddingHorizontal: 20,
+    paddingBottom: 32,
+    gap: 16,
+  },
+  bonusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  bonusLabel: {
+    fontSize: 14,
+    color: a.grey700,
+  },
+  bonusValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: a.grey900,
+  },
+  bonusHighlight: {
+    color: a.blue500,
+  },
+  bonusCappedNote: {
+    fontSize: 12,
+    color: a.grey500,
+    textAlign: 'center',
+  },
   section: { marginTop: 24, marginBottom: 8 },
   sectionHeader: { paddingHorizontal: 20, marginBottom: 16 },
   sectionTitle: { fontSize: 20, fontWeight: '700', color: a.grey900, letterSpacing: -0.3 },
@@ -442,6 +472,17 @@ function HomePageInner() {
   const dialog = useDialog();
   const { isLoggedIn, isLoading: authLoading, login } = useAuth();
 
+  // ── 출석체크 상태 ──────────────────────────────────────────────
+  const [attendanceStatus, setAttendanceStatus] = useState<AttendanceStatus | null>(null);
+  const [showAttendanceSheet, setShowAttendanceSheet] = useState(false);
+  const [weeklyBonusPopup, setWeeklyBonusPopup] = useState<{
+    bonusTickets: number;
+    adTickets: number;
+    capped: boolean;
+  } | null>(null);
+  // 오늘 KST 날짜 추적 (날짜 변경 감지용)
+  const lastCheckinDateRef = useRef<string | null>(null);
+
   // 통합 피드 상태 (섹션 카드 + 매거진 카드 한 배열)
   const [feedCards, setFeedCards] = useState<FeedCard[]>(validCache?.feedCards ?? []);
   const [feedHasMore, setFeedHasMore] = useState(false);
@@ -532,6 +573,44 @@ function HomePageInner() {
       setTicketExchangeLoading(false);
     }
   };
+
+  // ── 출석 체크인 ──────────────────────────────────────────────
+  // 호출 조건: 로그인 상태 + 오늘 KST 날짜로 아직 처리 안 됨
+  const maybeCheckin = useCallback(async () => {
+    if (!isLoggedIn) return;
+    const today = getKstToday();
+    if (lastCheckinDateRef.current === today) return; // 오늘 이미 처리
+    lastCheckinDateRef.current = today; // 낙관적 선점 (중복 호출 방지)
+    try {
+      const res = await checkin();
+      // 티켓 잔액 동기화
+      if (!res.alreadyCheckedIn) {
+        setTicketInfo((prev) => prev ? { ...prev, ticketCount: res.ticketCount } : null);
+      }
+      // 출석 현황 갱신
+      const status = await getAttendanceStatus();
+      setAttendanceStatus(status);
+      // 주간 완주 보너스 팝업
+      if (res.weeklyBonus) {
+        setWeeklyBonusPopup(res.weeklyBonus);
+      }
+    } catch {
+      lastCheckinDateRef.current = null; // 실패 시 재시도 허용
+    }
+  }, [isLoggedIn]);
+
+  // 로그인 상태 변화 시 체크인
+  useEffect(() => {
+    maybeCheckin();
+  }, [maybeCheckin]);
+
+  // 앱 포어그라운드 복귀 시 체크인 (날짜 변경 대응)
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') maybeCheckin();
+    });
+    return () => sub.remove();
+  }, [maybeCheckin]);
 
   // ── 초기화 ───────────────────────────────────────────────────
 
@@ -1298,6 +1377,14 @@ function HomePageInner() {
         ) : null
       )}
 
+      {/* 출석 위젯 (로그인 상태에서만) */}
+      {isLoggedIn && (
+        <AttendanceWidget
+          status={attendanceStatus}
+          onPress={() => setShowAttendanceSheet(true)}
+        />
+      )}
+
       <FlatList
         ref={flatListRef}
         style={styles.scrollView}
@@ -1369,6 +1456,46 @@ function HomePageInner() {
           </View>
         </View>
       </BottomSheet.Root>
+
+      {/* 출석 상세 바텀시트 */}
+      <AttendanceBottomSheet
+        open={showAttendanceSheet}
+        onClose={() => setShowAttendanceSheet(false)}
+        status={attendanceStatus}
+      />
+
+      {/* 주간 완주 보너스 팝업 */}
+      <BottomSheet.Root
+        open={weeklyBonusPopup !== null}
+        onClose={() => setWeeklyBonusPopup(null)}
+        onDimmerClick={() => setWeeklyBonusPopup(null)}
+      >
+        <BottomSheet.Header>이번 주 완주! 🎉</BottomSheet.Header>
+        <View style={styles.bonusPopup}>
+          <View style={styles.bonusRow}>
+            <Text style={styles.bonusLabel}>이번 주 모은 티켓</Text>
+            <Text style={styles.bonusValue}>{weeklyBonusPopup?.adTickets ?? 0}장</Text>
+          </View>
+          <View style={styles.bonusRow}>
+            <Text style={styles.bonusLabel}>출석 완주 보너스</Text>
+            <Text style={[styles.bonusValue, styles.bonusHighlight]}>
+              {weeklyBonusPopup?.bonusTickets ?? 0}장 지급
+            </Text>
+          </View>
+          {weeklyBonusPopup?.capped && (
+            <Text style={styles.bonusCappedNote}>주간 보너스 최대치가 반영되었어요</Text>
+          )}
+          <Button
+            type="primary"
+            size="big"
+            viewStyle={{ width: '100%' }}
+            onPress={() => setWeeklyBonusPopup(null)}
+          >
+            확인
+          </Button>
+        </View>
+      </BottomSheet.Root>
+
     </View>
   );
 }
