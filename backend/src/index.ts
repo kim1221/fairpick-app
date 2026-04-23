@@ -10459,6 +10459,156 @@ app.put('/admin/cost/manual/:key', requireAdminAuth, async (req, res) => {
 });
 
 // ============================================================
+// Rewards Monitor — 리워드 광고 운영 대시보드
+// ============================================================
+
+/**
+ * GET /admin/rewards/stats?days=14
+ * 일자별 광고 시청 수, 티켓 지급량, 교환 현황, 유저 분포 집계
+ */
+app.get('/admin/rewards/stats', requireAdminAuth, async (req, res) => {
+  const days = Math.min(parseInt(String(req.query.days ?? '14'), 10) || 14, 90);
+
+  try {
+    // 1. 일자별 통계: 광고 시청 수 / 티켓 지급량 / 활성 유저 수
+    const { rows: dailyEarn } = await pool.query<{
+      earn_date: string;
+      ad_views: string;
+      tickets_granted: string;
+      active_users: string;
+    }>(
+      `SELECT
+         earn_date::text,
+         COUNT(*)::text AS ad_views,
+         COALESCE(SUM(earned), 0)::text AS tickets_granted,
+         COUNT(DISTINCT user_id)::text AS active_users
+       FROM user_ticket_earn_log
+       WHERE earn_date >= CURRENT_DATE - ($1 - 1) * INTERVAL '1 day'
+         AND earned > 0
+       GROUP BY earn_date
+       ORDER BY earn_date DESC`,
+      [days],
+    );
+
+    // 2. 일자별 교환 건수
+    const { rows: dailyExchange } = await pool.query<{
+      exchange_date: string;
+      exchange_count: string;
+    }>(
+      `SELECT
+         DATE(confirmed_at AT TIME ZONE 'Asia/Seoul')::text AS exchange_date,
+         COUNT(*)::text AS exchange_count
+       FROM user_ticket_exchanges
+       WHERE status = 'completed'
+         AND confirmed_at >= NOW() - ($1 || ' days')::INTERVAL
+       GROUP BY 1
+       ORDER BY 1 DESC`,
+      [days],
+    );
+
+    // 교환 건수 맵
+    const exchangeMap: Record<string, number> = {};
+    for (const row of dailyExchange) {
+      exchangeMap[row.exchange_date] = parseInt(row.exchange_count);
+    }
+
+    // 일자별 통합
+    const dailyStats = dailyEarn.map((r) => ({
+      date: r.earn_date,
+      adViews: parseInt(r.ad_views),
+      ticketsGranted: parseInt(r.tickets_granted),
+      activeUsers: parseInt(r.active_users),
+      exchangeCount: exchangeMap[r.earn_date] ?? 0,
+    }));
+
+    // 3. 기간 내 유저별 총 광고 시청 수 (분포 계산용)
+    const { rows: userViews } = await pool.query<{
+      user_id: string;
+      total_views: string;
+    }>(
+      `SELECT
+         user_id,
+         COUNT(*)::text AS total_views
+       FROM user_ticket_earn_log
+       WHERE earn_date >= CURRENT_DATE - ($1 - 1) * INTERVAL '1 day'
+         AND earned > 0
+       GROUP BY user_id`,
+      [days],
+    );
+
+    const totalUsers = userViews.length;
+    const distribution = { '1-5': 0, '6-10': 0, '11-20': 0, '21-30': 0 };
+    let p10 = 0;
+    let p20 = 0;
+
+    for (const u of userViews) {
+      const v = parseInt(u.total_views);
+      if (v <= 5) distribution['1-5']++;
+      else if (v <= 10) distribution['6-10']++;
+      else if (v <= 20) distribution['11-20']++;
+      else distribution['21-30']++;
+      if (v >= 10) p10++;
+      if (v >= 20) p20++;
+    }
+
+    const pct = (n: number) =>
+      totalUsers > 0 ? Math.round((n / totalUsers) * 1000) / 10 : 0;
+
+    // 4. 헤비 유저 목록 (기간 내 총 시청 수 상위 30명)
+    const { rows: heavyUsers } = await pool.query<{
+      user_id: string;
+      total_views: string;
+      total_tickets: string;
+      daily_avg: string;
+    }>(
+      `SELECT
+         user_id,
+         COUNT(*)::text AS total_views,
+         COALESCE(SUM(earned), 0)::text AS total_tickets,
+         ROUND(COUNT(*) * 1.0 / $1, 1)::text AS daily_avg
+       FROM user_ticket_earn_log
+       WHERE earn_date >= CURRENT_DATE - ($1 - 1) * INTERVAL '1 day'
+         AND earned > 0
+       GROUP BY user_id
+       ORDER BY COUNT(*) DESC
+       LIMIT 30`,
+      [days],
+    );
+
+    // 5. 기간 전체 집계 요약
+    const totalAdViews = dailyStats.reduce((s, d) => s + d.adViews, 0);
+    const totalTickets = dailyStats.reduce((s, d) => s + d.ticketsGranted, 0);
+    const totalExchanges = dailyStats.reduce((s, d) => s + d.exchangeCount, 0);
+    const avgViewsPerUser =
+      totalUsers > 0 ? Math.round((totalAdViews / totalUsers) * 10) / 10 : 0;
+
+    res.json({
+      period: { days, from: dailyStats[dailyStats.length - 1]?.date ?? null, to: dailyStats[0]?.date ?? null },
+      summary: {
+        totalAdViews,
+        totalTickets,
+        totalExchanges,
+        totalActiveUsers: totalUsers,
+        avgViewsPerUser,
+        p10plus: pct(p10),
+        p20plus: pct(p20),
+      },
+      dailyStats,
+      viewDistribution: distribution,
+      heavyUsers: heavyUsers.map((u) => ({
+        userId: u.user_id,
+        totalViews: parseInt(u.total_views),
+        totalTickets: parseInt(u.total_tickets),
+        dailyAvg: parseFloat(u.daily_avg),
+      })),
+    });
+  } catch (error) {
+    console.error('[Admin] GET /admin/rewards/stats failed:', error);
+    res.status(500).json({ message: 'Failed to load rewards stats' });
+  }
+});
+
+// ============================================================
 // Graceful Shutdown
 // ============================================================
 

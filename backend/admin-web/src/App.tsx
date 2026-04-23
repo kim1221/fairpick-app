@@ -11,6 +11,7 @@ import OpsPage from './pages/OpsPage';
 import PersonalizationPage from './pages/PersonalizationPage';
 import RecommendationDebugPage from './pages/RecommendationDebugPage';
 import CostPage from './pages/CostPage';
+import RewardsMonitorPage from './pages/RewardsMonitorPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -125,6 +126,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <CostPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/rewards"
+            element={
+              <ProtectedRoute>
+                <RewardsMonitorPage />
               </ProtectedRoute>
             }
           />
