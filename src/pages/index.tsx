@@ -9,7 +9,7 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, FlatList, Image, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
+import { AppState, FlatList, Image, Platform, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
 import { Icon, AnimateSkeleton, BottomSheet, Button, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
