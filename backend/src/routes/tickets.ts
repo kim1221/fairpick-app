@@ -392,4 +392,58 @@ router.post('/exchange/confirm', requireAuth, async (req: Request, res: Response
   }
 });
 
+/**
+ * GET /api/tickets/history
+ * 티켓 적립/사용 내역 (최근 3개월)
+ * - 광고 시청, 출석 체크, 주간 보너스, 포인트 교환 통합
+ */
+router.get('/history', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+
+  const tickets = await getOrCreateTickets(userId);
+
+  const { rows: history } = await pool.query<{
+    type: string;
+    label: string;
+    amount: number;
+    occurred_at: Date;
+  }>(
+    `SELECT 'ad' AS type, '광고 시청' AS label, earned AS amount, created_at AS occurred_at
+     FROM user_ticket_earn_log
+     WHERE user_id = $1 AND earn_date >= CURRENT_DATE - INTERVAL '3 months'
+
+     UNION ALL
+
+     SELECT 'attendance', '출석 체크', 1, created_at
+     FROM user_attendance_log
+     WHERE user_id = $1 AND attend_date >= CURRENT_DATE - INTERVAL '3 months'
+
+     UNION ALL
+
+     SELECT 'bonus', '주간 보너스', bonus_tickets, granted_at
+     FROM user_weekly_bonus_log
+     WHERE user_id = $1 AND bonus_tickets > 0 AND granted_at >= NOW() - INTERVAL '3 months'
+
+     UNION ALL
+
+     SELECT 'exchange', '포인트 교환', -${TICKETS_PER_EXCHANGE}, confirmed_at
+     FROM user_ticket_exchanges
+     WHERE user_id = $1 AND status = 'completed' AND confirmed_at >= NOW() - INTERVAL '3 months'
+
+     ORDER BY occurred_at DESC`,
+    [userId]
+  );
+
+  return res.json({
+    ticketCount: tickets.ticket_count,
+    totalExchanged: tickets.total_exchanged,
+    history: history.map((row) => ({
+      type: row.type,
+      label: row.label,
+      amount: row.amount,
+      occurredAt: row.occurred_at,
+    })),
+  });
+});
+
 export default router;

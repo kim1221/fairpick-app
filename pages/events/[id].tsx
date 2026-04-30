@@ -371,6 +371,7 @@ function EventDetailPage() {
   const preloadRewardedAd = React.useCallback(() => {
     if (!loadFullScreenAd.isSupported()) return;
     loadUnregisterRef.current?.();
+    setRewardedAdLoaded(false);
     const unregister = loadFullScreenAd({
       options: { adGroupId: REWARDED_AD_ID },
       onEvent: (e) => {
@@ -418,8 +419,12 @@ function EventDetailPage() {
       return;
     }
     if (earnedToday) return; // 오늘 이미 받음 — 버튼 비활성 상태에서 호출 방어
-    if (!rewardedAdLoaded || !showFullScreenAd.isSupported()) {
+    if (!showFullScreenAd.isSupported()) {
       dialog.openAlert({ title: '광고 없음', description: '지금은 광고를 불러올 수 없어요.\n잠시 후 다시 시도해 주세요.' });
+      return;
+    }
+    if (!rewardedAdLoaded) {
+      dialog.openAlert({ title: '광고 준비 중', description: '광고를 불러오는 중이에요.\n잠시 후 다시 눌러 주세요.' });
       return;
     }
     setTicketLoading(true);
@@ -882,13 +887,13 @@ function EventDetailPage() {
             <TouchableOpacity
               style={[
                 styles.ticketCtaBtn,
-                (ticketLoading || earnedToday || loginPending) && { opacity: 0.4 },
+                (ticketLoading || earnedToday || loginPending || (isLoggedIn && !rewardedAdLoaded)) && { opacity: 0.4 },
               ]}
               onPress={handleWatchAdForTicket}
-              disabled={ticketLoading || earnedToday || loginPending}
+              disabled={ticketLoading || earnedToday || loginPending || (isLoggedIn && !rewardedAdLoaded)}
             >
               <Text style={styles.ticketCtaBtnText}>
-                {ticketLoading || loginPending ? '...' : !isLoggedIn ? '로그인하고 티켓 받기' : earnedToday ? '오늘은 이미 받았어요' : '광고 보고 받기'}
+                {ticketLoading || loginPending ? '...' : !isLoggedIn ? '로그인하고 티켓 받기' : earnedToday ? '오늘은 이미 받았어요' : !rewardedAdLoaded ? '광고 준비 중...' : '광고 보고 받기'}
               </Text>
             </TouchableOpacity>
             <Text style={styles.ticketCtaHint}>모은 티켓은 포인트로 교환할 수 있어요</Text>

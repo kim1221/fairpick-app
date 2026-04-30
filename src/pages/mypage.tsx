@@ -381,6 +381,20 @@ const [likeEvents, setLikeEvents] = useState<EventCardData[]>([]);
               </View>
             )}
 
+            {/* 티켓 내역 */}
+            <TouchableOpacity
+              style={styles.ticketBanner}
+              onPress={() => navigation.navigate('/mypage/tickets')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.ticketBannerIcon}>🎟</Text>
+              <View style={styles.ticketBannerInfo}>
+                <Text style={styles.ticketBannerTitle}>티켓 내역</Text>
+                <Text style={styles.ticketBannerDesc}>보유 티켓 · 누적 포인트 교환 내역</Text>
+              </View>
+              <Text style={styles.ticketBannerChevron}>›</Text>
+            </TouchableOpacity>
+
             {/* 이미지 강조형 배너 광고 */}
             <MyPageAdSlot />
 
@@ -819,6 +833,42 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     fontSize: 13,
     color: a.grey500,
     lineHeight: 18,
+  },
+  ticketBanner: {
+    backgroundColor: a.background,
+    marginTop: 16,
+    marginHorizontal: 20,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  ticketBannerIcon: {
+    fontSize: 28,
+    marginRight: 14,
+  },
+  ticketBannerInfo: {
+    flex: 1,
+  },
+  ticketBannerTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: a.grey900,
+    marginBottom: 3,
+  },
+  ticketBannerDesc: {
+    fontSize: 13,
+    color: a.grey500,
+  },
+  ticketBannerChevron: {
+    fontSize: 24,
+    color: a.grey400,
   },
   loginNoticeBanner: {
     marginTop: 12,
