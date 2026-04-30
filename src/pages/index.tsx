@@ -407,6 +407,39 @@ const AdSlot = React.memo(({ adGroupId, adFormat }: { adGroupId: string; adForma
 const AD_GROUP_SECTION = 'ait.v2.live.b3363cb4c82643e9';
 // AD_GROUP_FEED: feed 광고 별도 기술 과제로 분리, 현재 릴리즈 비활성
 // const AD_GROUP_FEED = 'ait.v2.live.7e6f43f894204302';
+const AD_GROUP_BANNER = 'ait.v2.live.6526c6e693454a28';
+
+// 탭바 위 고정 문구 강조형 배너 광고
+// BottomTabBar: bottom:20, height≈68 → top from screen bottom: ≈88px
+const HomeStickyBannerAd = React.memo(() => {
+  const [status, setStatus] = useState<'loading' | 'rendered' | 'failed'>('loading');
+
+  if (status === 'failed') return null;
+
+  const isAndroid = Platform.OS === 'android';
+
+  return (
+    <View
+      collapsable={false}
+      style={{
+        position: 'absolute',
+        bottom: 88,
+        left: 0,
+        right: 0,
+        height: isAndroid ? 96 : (status === 'rendered' ? 96 : 0),
+        overflow: isAndroid ? 'visible' : 'hidden',
+      }}
+    >
+      <InlineAd
+        adGroupId={AD_GROUP_BANNER}
+        impressFallbackOnMount={true}
+        onAdRendered={() => setStatus('rendered')}
+        onAdFailedToRender={() => setStatus('failed')}
+        onNoFill={() => setStatus('failed')}
+      />
+    </View>
+  );
+});
 
 // ─────────────────────────────────────────────────────────────
 // SectionCard / TodayPickCard — 메모이제이션된 카드 래퍼
@@ -1409,7 +1442,7 @@ function HomePageInner() {
           return item.type;
         }}
         ListHeaderComponent={listHeader}
-        ListFooterComponent={<View style={{ height: 100 }} />}
+        ListFooterComponent={<View style={{ height: 200 }} />}
         showsVerticalScrollIndicator={false}
         removeClippedSubviews={false}
         windowSize={5}
@@ -1421,6 +1454,8 @@ function HomePageInner() {
         onMomentumScrollEnd={handleMomentumScrollEnd}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       />
+
+      <HomeStickyBannerAd />
 
       <BottomTabBar currentTab="home" onHomeTabPress={scrollToTop} />
 
