@@ -9,7 +9,7 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, FlatList, Image, Platform, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
+import { Animated, AppState, FlatList, Image, Platform, ScrollView, StyleSheet, View, Text, RefreshControl, Pressable } from 'react-native';
 import { Icon, AnimateSkeleton, BottomSheet, Button, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { BottomTabBar } from '../components/BottomTabBar';
@@ -1029,9 +1029,42 @@ function HomePageInner() {
     return undefined;
   }, [feedCards.length, feedLoading, feedHasMore, feedError]);
 
+  // 탭바 + 배너 슬라이드 애니메이션
+  // 탭바 높이(~68) + bottom offset(20) = 88px 내리면 탭바 off-screen, 배너가 그 자리 채움
+  const BOTTOM_SLIDE_AMOUNT = 88;
+  const bottomSlide = useRef(new Animated.Value(0)).current;
+  const bottomHidden = useRef(false);
+  const lastScrollY = useRef(0);
+
+  const showBottomUI = useCallback(() => {
+    if (!bottomHidden.current) return;
+    bottomHidden.current = false;
+    Animated.spring(bottomSlide, { toValue: 0, useNativeDriver: true, tension: 80, friction: 12 }).start();
+  }, [bottomSlide]);
+
+  const hideBottomUI = useCallback(() => {
+    if (bottomHidden.current) return;
+    bottomHidden.current = true;
+    Animated.spring(bottomSlide, { toValue: BOTTOM_SLIDE_AMOUNT, useNativeDriver: true, tension: 80, friction: 12 }).start();
+  }, [bottomSlide]);
+
+  const handleFeedScroll = useCallback((event: { nativeEvent: { contentOffset: { y: number } } }) => {
+    const currentY = event.nativeEvent.contentOffset.y;
+    const dy = currentY - lastScrollY.current;
+    lastScrollY.current = currentY;
+
+    if (currentY < 20) {
+      showBottomUI();
+      return;
+    }
+    if (dy > 8) hideBottomUI();
+    else if (dy < -8) showBottomUI();
+  }, [showBottomUI, hideBottomUI]);
+
   const scrollToTop = useCallback(() => {
     flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-  }, []);
+    showBottomUI();
+  }, [showBottomUI]);
 
   const handleMomentumScrollEnd = useCallback((e: { nativeEvent: { contentSize: { height: number }; layoutMeasurement: { height: number }; contentOffset: { y: number } } }) => {
     const { contentSize, layoutMeasurement, contentOffset } = e.nativeEvent;
@@ -1448,6 +1481,8 @@ function HomePageInner() {
         windowSize={5}
         maxToRenderPerBatch={3}
         initialNumToRender={8}
+        onScroll={handleFeedScroll}
+        scrollEventThrottle={16}
         onScrollBeginDrag={handleAiNoticeConfirm}
         onEndReached={loadMoreFeed}
         onEndReachedThreshold={2}
@@ -1455,9 +1490,13 @@ function HomePageInner() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       />
 
-      <HomeStickyBannerAd />
+      <Animated.View style={{ transform: [{ translateY: bottomSlide }] }}>
+        <HomeStickyBannerAd />
+      </Animated.View>
 
-      <BottomTabBar currentTab="home" onHomeTabPress={scrollToTop} />
+      <Animated.View style={{ transform: [{ translateY: bottomSlide }] }}>
+        <BottomTabBar currentTab="home" onHomeTabPress={scrollToTop} />
+      </Animated.View>
 
       {/* 티켓 온보딩 (첫 로그인 시 1회) */}
       <BottomSheet.Root
