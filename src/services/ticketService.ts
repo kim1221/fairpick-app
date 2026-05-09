@@ -23,6 +23,26 @@ export interface TicketConfig {
   dailyLimit: number;
 }
 
+export type RewardAdEventType =
+  | 'requested'
+  | 'show'
+  | 'impression'
+  | 'clicked'
+  | 'userEarnedReward'
+  | 'dismissed'
+  | 'failedToShow'
+  | 'error';
+
+export interface RewardAdEventLogPayload {
+  attemptId: string;
+  eventType: RewardAdEventType;
+  eventId?: string;
+  adGroupId: string;
+  placement: string;
+  eventData?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
 // 메모리 캐시 (앱 세션 내 재사용, Storage 저장 안 함)
 let _configCache: TicketConfig | null = null;
 
@@ -58,14 +78,25 @@ export async function getEarnStatus(eventId: string): Promise<{ earnedToday: boo
   return data;
 }
 
-export async function earnTickets(eventId: string): Promise<{
+export function createRewardAdAttemptId(): string {
+  return `reward_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export async function logRewardAdEvent(payload: RewardAdEventLogPayload): Promise<void> {
+  await http.post('/api/tickets/ad-attempt-events', {
+    ...payload,
+    clientCreatedAt: new Date().toISOString(),
+  });
+}
+
+export async function earnTickets(eventId: string, adAttemptId?: string): Promise<{
   earned: number;
   ticketCount: number;
   canExchange: boolean;
   dailyEarned: number;
   dailyLimit: number;
 }> {
-  const { data } = await http.post('/api/tickets/earn', { eventId });
+  const { data } = await http.post('/api/tickets/earn', { eventId, adAttemptId });
   _notifyTicketCount(data.ticketCount);
   return data;
 }

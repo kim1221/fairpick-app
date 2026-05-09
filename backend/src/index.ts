@@ -10521,6 +10521,67 @@ app.get('/admin/rewards/stats', requireAdminAuth, async (req, res) => {
       exchangeCount: exchangeMap[r.earn_date] ?? 0,
     }));
 
+    // 2-1. SDK 광고 이벤트 텔레메트리: 대시보드 노출과 리워드 지급 대조용
+    const { rows: dailyAdTelemetry } = await pool.query<{
+      date: string;
+      attempts: string;
+      requested: string;
+      shows: string;
+      impressions: string;
+      rewards: string;
+      dismissed: string;
+      failed_to_show: string;
+      errors: string;
+      rewards_without_impression: string;
+      linked_ticket_grants: string;
+      linked_tickets_granted: string;
+    }>(
+      `WITH attempt_daily AS (
+         SELECT
+           DATE(created_at AT TIME ZONE 'Asia/Seoul')::text AS date,
+           COUNT(*)::text AS attempts,
+           COUNT(requested_at)::text AS requested,
+           COUNT(show_at)::text AS shows,
+           COUNT(impression_at)::text AS impressions,
+           COUNT(reward_at)::text AS rewards,
+           COUNT(dismissed_at)::text AS dismissed,
+           COUNT(failed_to_show_at)::text AS failed_to_show,
+           COUNT(error_at)::text AS errors,
+           COUNT(*) FILTER (WHERE reward_at IS NOT NULL AND impression_at IS NULL)::text AS rewards_without_impression
+         FROM ad_reward_attempts
+         WHERE created_at >= NOW() - ($1 || ' days')::INTERVAL
+         GROUP BY 1
+       ),
+       earn_daily AS (
+         SELECT
+           DATE(created_at AT TIME ZONE 'Asia/Seoul')::text AS date,
+           COUNT(*)::text AS linked_ticket_grants,
+           COALESCE(SUM(earned), 0)::text AS linked_tickets_granted
+         FROM user_ticket_earn_log
+         WHERE created_at >= NOW() - ($1 || ' days')::INTERVAL
+           AND ad_attempt_id IS NOT NULL
+           AND earned > 0
+         GROUP BY 1
+       )
+       SELECT
+         a.date,
+         a.attempts,
+         a.requested,
+         a.shows,
+         a.impressions,
+         a.rewards,
+         a.dismissed,
+         a.failed_to_show,
+         a.errors,
+         a.rewards_without_impression,
+         COALESCE(e.linked_ticket_grants, '0') AS linked_ticket_grants,
+         COALESCE(e.linked_tickets_granted, '0') AS linked_tickets_granted
+       FROM attempt_daily a
+       LEFT JOIN earn_daily e ON e.date = a.date
+       ORDER BY a.date DESC`,
+      [days],
+    );
+
     // 3. 기간 내 유저별 총 광고 시청 수 (분포 계산용)
     const { rows: userViews } = await pool.query<{
       user_id: string;
@@ -10582,6 +10643,65 @@ app.get('/admin/rewards/stats', requireAdminAuth, async (req, res) => {
     const avgViewsPerUser =
       totalUsers > 0 ? Math.round((totalAdViews / totalUsers) * 10) / 10 : 0;
 
+    const adTelemetryDailyStats = dailyAdTelemetry.map((row) => {
+      const attempts = parseInt(row.attempts);
+      const impressions = parseInt(row.impressions);
+      const rewards = parseInt(row.rewards);
+      const linkedTicketGrants = parseInt(row.linked_ticket_grants);
+      return {
+        date: row.date,
+        attempts,
+        requested: parseInt(row.requested),
+        shows: parseInt(row.shows),
+        impressions,
+        rewards,
+        dismissed: parseInt(row.dismissed),
+        failedToShow: parseInt(row.failed_to_show),
+        errors: parseInt(row.errors),
+        rewardsWithoutImpression: parseInt(row.rewards_without_impression),
+        linkedTicketGrants,
+        linkedTicketsGranted: parseInt(row.linked_tickets_granted),
+        impressionRate:
+          attempts > 0 ? Math.round((impressions / attempts) * 1000) / 10 : 0,
+        rewardToImpressionRate:
+          impressions > 0 ? Math.round((rewards / impressions) * 1000) / 10 : 0,
+        ticketGrantToRewardRate:
+          rewards > 0 ? Math.round((linkedTicketGrants / rewards) * 1000) / 10 : 0,
+      };
+    });
+
+    const adTelemetrySummary = adTelemetryDailyStats.reduce(
+      (acc, row) => ({
+        attempts: acc.attempts + row.attempts,
+        requested: acc.requested + row.requested,
+        shows: acc.shows + row.shows,
+        impressions: acc.impressions + row.impressions,
+        rewards: acc.rewards + row.rewards,
+        dismissed: acc.dismissed + row.dismissed,
+        failedToShow: acc.failedToShow + row.failedToShow,
+        errors: acc.errors + row.errors,
+        rewardsWithoutImpression: acc.rewardsWithoutImpression + row.rewardsWithoutImpression,
+        linkedTicketGrants: acc.linkedTicketGrants + row.linkedTicketGrants,
+        linkedTicketsGranted: acc.linkedTicketsGranted + row.linkedTicketsGranted,
+      }),
+      {
+        attempts: 0,
+        requested: 0,
+        shows: 0,
+        impressions: 0,
+        rewards: 0,
+        dismissed: 0,
+        failedToShow: 0,
+        errors: 0,
+        rewardsWithoutImpression: 0,
+        linkedTicketGrants: 0,
+        linkedTicketsGranted: 0,
+      },
+    );
+
+    const pctOf = (numerator: number, denominator: number) =>
+      denominator > 0 ? Math.round((numerator / denominator) * 1000) / 10 : 0;
+
     res.json({
       period: { days, from: dailyStats[dailyStats.length - 1]?.date ?? null, to: dailyStats[0]?.date ?? null },
       summary: {
@@ -10592,6 +10712,15 @@ app.get('/admin/rewards/stats', requireAdminAuth, async (req, res) => {
         avgViewsPerUser,
         p10plus: pct(p10),
         p20plus: pct(p20),
+      },
+      adTelemetry: {
+        summary: {
+          ...adTelemetrySummary,
+          impressionRate: pctOf(adTelemetrySummary.impressions, adTelemetrySummary.attempts),
+          rewardToImpressionRate: pctOf(adTelemetrySummary.rewards, adTelemetrySummary.impressions),
+          ticketGrantToRewardRate: pctOf(adTelemetrySummary.linkedTicketGrants, adTelemetrySummary.rewards),
+        },
+        dailyStats: adTelemetryDailyStats,
       },
       dailyStats,
       viewDistribution: distribution,

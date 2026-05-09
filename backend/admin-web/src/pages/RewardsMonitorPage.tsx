@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getRewardsStats } from '../services/rewardsApi';
-import type { DailyStat, HeavyUser, ViewDistribution } from '../services/rewardsApi';
+import type { AdTelemetryDailyStat, DailyStat, HeavyUser, ViewDistribution } from '../services/rewardsApi';
 
 const PERIOD_OPTIONS = [
   { label: '7일', value: 7 },
@@ -53,6 +53,59 @@ function DailyTable({ rows }: { rows: DailyStat[] }) {
               </tr>
             );
           })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AdTelemetryTable({ rows }: { rows: AdTelemetryDailyStat[] }) {
+  if (rows.length === 0) {
+    return <div className="text-sm text-gray-400 py-4 text-center">데이터 없음</div>;
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-200">
+            <th className="text-left py-2 px-3 font-medium text-gray-600">날짜</th>
+            <th className="text-right py-2 px-3 font-medium text-gray-600">시도</th>
+            <th className="text-right py-2 px-3 font-medium text-gray-600">show</th>
+            <th className="text-right py-2 px-3 font-medium text-gray-600">impression</th>
+            <th className="text-right py-2 px-3 font-medium text-gray-600">reward</th>
+            <th className="text-right py-2 px-3 font-medium text-gray-600">티켓 연결</th>
+            <th className="text-right py-2 px-3 font-medium text-gray-600">노출률</th>
+            <th className="text-right py-2 px-3 font-medium text-gray-600">reward/impression</th>
+            <th className="text-right py-2 px-3 font-medium text-gray-600">무노출 reward</th>
+            <th className="text-right py-2 px-3 font-medium text-gray-600">실패</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.date} className="border-b border-gray-100 hover:bg-gray-50">
+              <td className="py-2 px-3 text-gray-700 font-medium">{r.date}</td>
+              <td className="py-2 px-3 text-right tabular-nums">{r.attempts.toLocaleString()}</td>
+              <td className="py-2 px-3 text-right tabular-nums">{r.shows.toLocaleString()}</td>
+              <td className="py-2 px-3 text-right tabular-nums font-medium text-gray-900">
+                {r.impressions.toLocaleString()}
+              </td>
+              <td className="py-2 px-3 text-right tabular-nums">{r.rewards.toLocaleString()}</td>
+              <td className="py-2 px-3 text-right tabular-nums">{r.linkedTicketGrants.toLocaleString()}</td>
+              <td className="py-2 px-3 text-right tabular-nums text-gray-600">{r.impressionRate}%</td>
+              <td className="py-2 px-3 text-right tabular-nums text-gray-600">{r.rewardToImpressionRate}%</td>
+              <td
+                className={`py-2 px-3 text-right tabular-nums ${
+                  r.rewardsWithoutImpression > 0 ? 'text-orange-600 font-medium' : 'text-gray-500'
+                }`}
+              >
+                {r.rewardsWithoutImpression.toLocaleString()}
+              </td>
+              <td className="py-2 px-3 text-right tabular-nums text-gray-500">
+                {(r.failedToShow + r.errors).toLocaleString()}
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -247,6 +300,41 @@ export default function RewardsMonitorPage() {
               sub="eCPM 저하 주의 구간"
             />
           </div>
+
+          {data.adTelemetry && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <KpiCard
+                  label="SDK 광고 시도"
+                  value={data.adTelemetry.summary.attempts.toLocaleString()}
+                  sub={`${days}일 합계`}
+                />
+                <KpiCard
+                  label="SDK impression"
+                  value={data.adTelemetry.summary.impressions.toLocaleString()}
+                  sub={`시도 대비 ${data.adTelemetry.summary.impressionRate}%`}
+                />
+                <KpiCard
+                  label="SDK reward"
+                  value={data.adTelemetry.summary.rewards.toLocaleString()}
+                  sub={`impression 대비 ${data.adTelemetry.summary.rewardToImpressionRate}%`}
+                />
+                <KpiCard
+                  label="무노출 reward"
+                  value={data.adTelemetry.summary.rewardsWithoutImpression.toLocaleString()}
+                  sub="0이 정상 목표"
+                />
+              </div>
+
+              <div className="card">
+                <h3 className="text-lg font-semibold text-gray-800 mb-2">SDK 이벤트 대조</h3>
+                <p className="text-sm text-gray-500 mb-4">
+                  앱인토스 대시보드의 노출 수는 이 표의 SDK impression과 날짜/OS/광고그룹 기준으로 비교하세요.
+                </p>
+                <AdTelemetryTable rows={data.adTelemetry.dailyStats} />
+              </div>
+            </>
+          )}
 
           {/* 시청 횟수 구간 분포 */}
           <div className="card">

@@ -32,7 +32,13 @@ import { useLike } from '../../src/hooks/useLike';
 import { LikesProvider } from '../../src/contexts/LikesContext';
 import { useAuth } from '../../src/hooks/useAuth';
 import http from '../../src/lib/http';
-import { earnTickets, getEarnStatus } from '../../src/services/ticketService';
+import {
+  createRewardAdAttemptId,
+  earnTickets,
+  getEarnStatus,
+  logRewardAdEvent,
+} from '../../src/services/ticketService';
+import type { RewardAdEventType } from '../../src/services/ticketService';
 
 type EventDetailParams = {
   id?: string;
@@ -427,14 +433,37 @@ function EventDetailPage() {
       dialog.openAlert({ title: '광고 준비 중', description: '광고를 불러오는 중이에요.\n잠시 후 다시 눌러 주세요.' });
       return;
     }
+    if (!event?.id) return;
+
+    const attemptId = createRewardAdAttemptId();
+    const logAdEvent = (eventType: RewardAdEventType, eventData?: Record<string, unknown>) => {
+      logRewardAdEvent({
+        attemptId,
+        eventType,
+        eventId: event.id,
+        adGroupId: REWARDED_AD_ID,
+        placement: 'event_detail_ticket_cta',
+        eventData,
+        metadata: {
+          eventTitle: event.title,
+          route: '/events/:id',
+        },
+      }).catch((error) => {
+        if (__DEV__) {
+          console.warn('[RewardAd] log failed:', eventType, error);
+        }
+      });
+    };
+
     setTicketLoading(true);
     showUnregisterRef.current?.();
     const unregister = showFullScreenAd({
       options: { adGroupId: REWARDED_AD_ID },
       onEvent: async (ev) => {
+        logAdEvent(ev.type as RewardAdEventType, 'data' in ev ? ev.data : undefined);
         if (ev.type === 'userEarnedReward') {
           try {
-            const result = await earnTickets(event!.id);
+            const result = await earnTickets(event.id, attemptId);
             showTicketToast(result.earned);
             setEarnedToday(true);
           } catch (earnErr: any) {
@@ -469,7 +498,10 @@ function EventDetailPage() {
           });
         }
       },
-      onError: () => {
+      onError: (error) => {
+        logAdEvent('error', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         resetAdState();
         dialog.openAlert({
           title: '광고 없음',

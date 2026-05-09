@@ -47,6 +47,36 @@ export interface AdminMetricsResponse {
   } | null;
 }
 
+export interface RewardAdTelemetrySummary {
+  attempts: number;
+  shows: number;
+  impressions: number;
+  rewards: number;
+  failedToShow: number;
+  errors: number;
+  rewardsWithoutImpression: number;
+  linkedTicketGrants: number;
+  impressionRate: number;
+  rewardToImpressionRate: number;
+  ticketGrantToRewardRate: number;
+}
+
+export interface RewardAdTelemetryDailyStat extends RewardAdTelemetrySummary {
+  date: string;
+}
+
+export interface RewardsStatsResponse {
+  period: {
+    days: number;
+    from: string | null;
+    to: string | null;
+  };
+  adTelemetry?: {
+    summary: RewardAdTelemetrySummary;
+    dailyStats: RewardAdTelemetryDailyStat[];
+  };
+}
+
 class AdminService {
   private getAdminKey(): string | null {
     if (typeof (globalThis as any).window !== "undefined") {
@@ -117,6 +147,22 @@ class AdminService {
 
   async getAdminMetrics(): Promise<AdminMetricsResponse> {
     const response = await axios.get<AdminMetricsResponse>(`${API_BASE_URL}/admin/metrics`);
+    return response.data;
+  }
+
+  async getRewardsStats(days = 7): Promise<RewardsStatsResponse> {
+    const adminKey = this.getAdminKey();
+    if (!adminKey) {
+      throw new Error('Admin key not found');
+    }
+
+    const response = await axios.get<RewardsStatsResponse>(`${API_BASE_URL}/admin/rewards/stats`, {
+      params: { days },
+      headers: {
+        'x-admin-key': adminKey,
+      },
+    });
+
     return response.data;
   }
 }

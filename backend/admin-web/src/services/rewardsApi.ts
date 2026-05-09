@@ -32,9 +32,34 @@ export interface RewardsSummary {
   p20plus: number;
 }
 
+export interface AdTelemetrySummary {
+  attempts: number;
+  requested: number;
+  shows: number;
+  impressions: number;
+  rewards: number;
+  dismissed: number;
+  failedToShow: number;
+  errors: number;
+  rewardsWithoutImpression: number;
+  linkedTicketGrants: number;
+  linkedTicketsGranted: number;
+  impressionRate: number;
+  rewardToImpressionRate: number;
+  ticketGrantToRewardRate: number;
+}
+
+export interface AdTelemetryDailyStat extends AdTelemetrySummary {
+  date: string;
+}
+
 export interface RewardsStats {
   period: { days: number; from: string | null; to: string | null };
   summary: RewardsSummary;
+  adTelemetry?: {
+    summary: AdTelemetrySummary;
+    dailyStats: AdTelemetryDailyStat[];
+  };
   dailyStats: DailyStat[];
   viewDistribution: ViewDistribution;
   heavyUsers: HeavyUser[];

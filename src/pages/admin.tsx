@@ -10,7 +10,11 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import adminService, { AdminFeaturedEvent, AdminMetricsResponse } from '../services/adminService';
+import adminService, {
+  AdminFeaturedEvent,
+  AdminMetricsResponse,
+  RewardsStatsResponse,
+} from '../services/adminService';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = (createRoute as any)('/admin', {
@@ -25,6 +29,8 @@ function Page() {
   const [isLoading, setIsLoading] = useState(false);
   const [lastCollection, setLastCollection] = useState<AdminMetricsResponse['lastCollection']>(null);
   const [isMetricsLoading, setIsMetricsLoading] = useState(false);
+  const [rewardStats, setRewardStats] = useState<RewardsStatsResponse | null>(null);
+  const [isRewardStatsLoading, setIsRewardStatsLoading] = useState(false);
 
   useEffect(() => {
     // Check if admin key exists in localStorage
@@ -36,6 +42,7 @@ function Page() {
           setIsAuthenticated(true);
           loadFeaturedEvents();
           loadAdminMetrics();
+          loadRewardStats();
         } else {
           adminService.clearAdminKey();
         }
@@ -58,6 +65,7 @@ function Page() {
         setIsAuthenticated(true);
         loadFeaturedEvents();
         loadAdminMetrics();
+        loadRewardStats();
       } else {
         Alert.alert('인증 실패', 'Invalid Admin Key');
       }
@@ -92,12 +100,31 @@ function Page() {
     }
   };
 
+  const loadRewardStats = async () => {
+    setIsRewardStatsLoading(true);
+    try {
+      const response = await adminService.getRewardsStats(7);
+      setRewardStats(response);
+    } catch (error) {
+      setRewardStats(null);
+    } finally {
+      setIsRewardStatsLoading(false);
+    }
+  };
+
+  const handleRefresh = () => {
+    loadFeaturedEvents();
+    loadAdminMetrics();
+    loadRewardStats();
+  };
+
   const handleLogout = () => {
     adminService.clearAdminKey();
     setIsAuthenticated(false);
     setAdminKey('');
     setEvents([]);
     setLastCollection(null);
+    setRewardStats(null);
   };
 
   if (!isAuthenticated) {
@@ -151,9 +178,14 @@ function Page() {
         </View>
       ) : (
         <ScrollView style={styles.scrollView}>
-          <TouchableOpacity style={[styles.button, styles.primaryButton, styles.refreshButton]} onPress={loadFeaturedEvents}>
+          <TouchableOpacity style={[styles.button, styles.primaryButton, styles.refreshButton]} onPress={handleRefresh}>
             <Text style={styles.buttonText}>새로고침</Text>
           </TouchableOpacity>
+
+          <RewardAdTelemetryPanel
+            stats={rewardStats}
+            isLoading={isRewardStatsLoading}
+          />
 
           {events.length === 0 ? (
             <View style={styles.emptyContainer}>
@@ -164,6 +196,102 @@ function Page() {
           )}
         </ScrollView>
       )}
+    </View>
+  );
+}
+
+function RewardAdTelemetryPanel({
+  stats,
+  isLoading,
+}: {
+  stats: RewardsStatsResponse | null;
+  isLoading: boolean;
+}) {
+  const telemetry = stats?.adTelemetry;
+  const summary = telemetry?.summary;
+  const rows = telemetry?.dailyStats ?? [];
+
+  return (
+    <View style={styles.rewardPanel}>
+      <View style={styles.rewardPanelHeader}>
+        <Text style={styles.rewardPanelTitle}>리워드 광고 SDK 대조</Text>
+        <Text style={styles.rewardPanelSubtitle}>
+          최근 {stats?.period.days ?? 7}일 · 앱인토스 대시보드는 익일 오전 4시 이후 비교
+        </Text>
+      </View>
+
+      {isLoading ? (
+        <View style={styles.rewardLoading}>
+          <ActivityIndicator color="#0064FF" />
+          <Text style={styles.rewardLoadingText}>확인 중...</Text>
+        </View>
+      ) : !summary ? (
+        <Text style={styles.rewardEmptyText}>아직 광고 이벤트 로그가 없거나 조회에 실패했습니다.</Text>
+      ) : (
+        <>
+          <View style={styles.rewardKpiGrid}>
+            <RewardKpi label="SDK 시도" value={summary.attempts} sub="버튼 클릭 기준" />
+            <RewardKpi label="SDK impression" value={summary.impressions} sub={`${summary.impressionRate}%`} />
+            <RewardKpi label="SDK reward" value={summary.rewards} sub={`${summary.rewardToImpressionRate}%`} />
+            <RewardKpi
+              label="무노출 reward"
+              value={summary.rewardsWithoutImpression}
+              sub="0이 정상"
+              danger={summary.rewardsWithoutImpression > 0}
+            />
+          </View>
+
+          <View style={styles.rewardGuideBox}>
+            <Text style={styles.rewardGuideText}>
+              앱인토스 총 광고 노출 수는 아래 SDK impression과 같은 날짜, OS, 광고그룹 기준으로 비교하세요.
+            </Text>
+          </View>
+
+          {rows.slice(0, 7).map((row) => (
+            <View key={row.date} style={styles.rewardDailyRow}>
+              <View style={styles.rewardDailyDateBox}>
+                <Text style={styles.rewardDailyDate}>{row.date}</Text>
+                <Text style={styles.rewardDailyRate}>노출률 {row.impressionRate}%</Text>
+              </View>
+              <View style={styles.rewardDailyMetrics}>
+                <Text style={styles.rewardDailyMetric}>시도 {row.attempts}</Text>
+                <Text style={styles.rewardDailyMetric}>노출 {row.impressions}</Text>
+                <Text style={styles.rewardDailyMetric}>보상 {row.rewards}</Text>
+                <Text
+                  style={[
+                    styles.rewardDailyMetric,
+                    row.rewardsWithoutImpression > 0 && styles.rewardDangerText,
+                  ]}
+                >
+                  무노출 {row.rewardsWithoutImpression}
+                </Text>
+              </View>
+            </View>
+          ))}
+        </>
+      )}
+    </View>
+  );
+}
+
+function RewardKpi({
+  label,
+  value,
+  sub,
+  danger = false,
+}: {
+  label: string;
+  value: number;
+  sub: string;
+  danger?: boolean;
+}) {
+  return (
+    <View style={[styles.rewardKpiCard, danger && styles.rewardKpiCardDanger]}>
+      <Text style={styles.rewardKpiLabel}>{label}</Text>
+      <Text style={[styles.rewardKpiValue, danger && styles.rewardDangerText]}>
+        {value.toLocaleString()}
+      </Text>
+      <Text style={styles.rewardKpiSub}>{sub}</Text>
     </View>
   );
 }
@@ -387,6 +515,125 @@ const styles = StyleSheet.create({
   },
   refreshButton: {
     marginBottom: 16,
+  },
+  rewardPanel: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  rewardPanelHeader: {
+    marginBottom: 14,
+  },
+  rewardPanelTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1A202C',
+    marginBottom: 4,
+  },
+  rewardPanelSubtitle: {
+    fontSize: 12,
+    color: '#718096',
+  },
+  rewardLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  rewardLoadingText: {
+    fontSize: 13,
+    color: '#4A5568',
+  },
+  rewardEmptyText: {
+    fontSize: 13,
+    color: '#718096',
+    paddingVertical: 12,
+  },
+  rewardKpiGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  rewardKpiCard: {
+    minWidth: 138,
+    flexGrow: 1,
+    flexBasis: '22%',
+    backgroundColor: '#F7FAFC',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 12,
+  },
+  rewardKpiCardDanger: {
+    backgroundColor: '#FFF5F5',
+    borderColor: '#FEB2B2',
+  },
+  rewardKpiLabel: {
+    fontSize: 12,
+    color: '#718096',
+    marginBottom: 4,
+  },
+  rewardKpiValue: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#1A202C',
+  },
+  rewardKpiSub: {
+    fontSize: 11,
+    color: '#718096',
+    marginTop: 2,
+  },
+  rewardGuideBox: {
+    backgroundColor: '#EBF8FF',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  rewardGuideText: {
+    fontSize: 12,
+    color: '#2B6CB0',
+    lineHeight: 18,
+  },
+  rewardDailyRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#EDF2F7',
+    paddingVertical: 10,
+    gap: 8,
+  },
+  rewardDailyDateBox: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  rewardDailyDate: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#2D3748',
+  },
+  rewardDailyRate: {
+    fontSize: 12,
+    color: '#718096',
+  },
+  rewardDailyMetrics: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  rewardDailyMetric: {
+    fontSize: 12,
+    color: '#4A5568',
+  },
+  rewardDangerText: {
+    color: '#E53E3E',
   },
   loadingContainer: {
     flex: 1,

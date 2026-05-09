@@ -33,6 +33,28 @@ const DAILY_LIMIT = 30;
 // 이상 징후 발생 시 COOLDOWN_SECONDS = 5~10으로 재도입 가능
 const EXCHANGE_EXPIRES_HOURS = 24; // pending 만료 시간
 
+const AD_EVENT_TYPES = new Set([
+  'requested',
+  'show',
+  'impression',
+  'clicked',
+  'userEarnedReward',
+  'dismissed',
+  'failedToShow',
+  'error',
+]);
+
+const AD_EVENT_TIMESTAMP_COLUMNS: Record<string, string> = {
+  requested: 'requested_at',
+  show: 'show_at',
+  impression: 'impression_at',
+  clicked: 'clicked_at',
+  userEarnedReward: 'reward_at',
+  dismissed: 'dismissed_at',
+  failedToShow: 'failed_to_show_at',
+  error: 'error_at',
+};
+
 // 1~3 랜덤 (50% / 35% / 15%)
 function randomTickets(): number {
   const r = Math.random();
@@ -44,6 +66,30 @@ function randomTickets(): number {
 // KST 오늘 날짜 (DATE 형식)
 function todayKst(): string {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function cleanOptionalString(value: unknown, maxLength = 512): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, maxLength);
+}
+
+function normalizeJsonObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function normalizeClientTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? null : new Date(time).toISOString();
+}
+
+function extractErrorMessage(eventData: Record<string, unknown>): string | null {
+  const message = eventData.message ?? eventData.error ?? eventData.reason;
+  if (typeof message === 'string') return message.slice(0, 1000);
+  return null;
 }
 
 // 티켓 레코드 조회 또는 생성
@@ -115,6 +161,138 @@ router.get('/earn-status/:eventId', requireAuth, async (req: Request, res: Respo
 });
 
 /**
+ * POST /api/tickets/ad-attempt-events
+ * SDK 광고 이벤트를 attempt 단위로 수집한다.
+ * 이 로그는 정산 가능한 impression과 실제 ticket grant를 대조하기 위한 관측용이며,
+ * 실패해도 클라이언트 보상 흐름을 막지 않는다.
+ */
+router.post('/ad-attempt-events', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const {
+    attemptId,
+    eventType,
+    eventId,
+    adGroupId,
+    placement,
+    eventData,
+    clientCreatedAt,
+    metadata,
+  } = req.body as {
+    attemptId?: unknown;
+    eventType?: unknown;
+    eventId?: unknown;
+    adGroupId?: unknown;
+    placement?: unknown;
+    eventData?: unknown;
+    clientCreatedAt?: unknown;
+    metadata?: unknown;
+  };
+
+  const normalizedAttemptId = cleanOptionalString(attemptId, 128);
+  const normalizedEventType = cleanOptionalString(eventType, 32);
+  const normalizedAdGroupId = cleanOptionalString(adGroupId, 128);
+
+  if (!normalizedAttemptId || !normalizedEventType || !AD_EVENT_TYPES.has(normalizedEventType) || !normalizedAdGroupId) {
+    return res.status(400).json({ error: 'INVALID_AD_EVENT_PAYLOAD' });
+  }
+
+  const normalizedEventId = cleanOptionalString(eventId, 128);
+  const normalizedPlacement = cleanOptionalString(placement, 64) ?? 'unknown';
+  const normalizedEventData = normalizeJsonObject(eventData);
+  const normalizedMetadata = normalizeJsonObject(metadata);
+  const normalizedClientCreatedAt = normalizeClientTimestamp(clientCreatedAt);
+  const timestampColumn = AD_EVENT_TIMESTAMP_COLUMNS[normalizedEventType];
+  const rewardData: Record<string, unknown> = normalizedEventType === 'userEarnedReward' ? normalizedEventData : {};
+  const rewardUnitType = cleanOptionalString(rewardData.unitType, 64);
+  const rewardUnitAmount = typeof rewardData.unitAmount === 'number' && Number.isFinite(rewardData.unitAmount)
+    ? Math.trunc(rewardData.unitAmount)
+    : null;
+  const errorMessage = normalizedEventType === 'error' ? extractErrorMessage(normalizedEventData) : null;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const upsertResult = await client.query(
+      `INSERT INTO ad_reward_attempts (
+         attempt_id,
+         user_id,
+         event_id,
+         ad_group_id,
+         placement,
+         client_started_at,
+         ${timestampColumn},
+         reward_unit_type,
+         reward_unit_amount,
+         error_message,
+         last_event_type,
+         metadata
+       )
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, NOW()), NOW(), $7, $8, $9, $10, $11::jsonb)
+       ON CONFLICT (attempt_id) DO UPDATE SET
+         event_id           = COALESCE(ad_reward_attempts.event_id, EXCLUDED.event_id),
+         ad_group_id        = EXCLUDED.ad_group_id,
+         placement          = COALESCE(NULLIF(EXCLUDED.placement, 'unknown'), ad_reward_attempts.placement),
+         client_started_at  = COALESCE(ad_reward_attempts.client_started_at, EXCLUDED.client_started_at),
+         ${timestampColumn} = COALESCE(ad_reward_attempts.${timestampColumn}, EXCLUDED.${timestampColumn}),
+         reward_unit_type   = COALESCE(EXCLUDED.reward_unit_type, ad_reward_attempts.reward_unit_type),
+         reward_unit_amount = COALESCE(EXCLUDED.reward_unit_amount, ad_reward_attempts.reward_unit_amount),
+         error_message      = COALESCE(EXCLUDED.error_message, ad_reward_attempts.error_message),
+         last_event_type    = EXCLUDED.last_event_type,
+         metadata           = ad_reward_attempts.metadata || EXCLUDED.metadata,
+         updated_at         = NOW()
+       WHERE ad_reward_attempts.user_id = EXCLUDED.user_id
+       RETURNING attempt_id`,
+      [
+        normalizedAttemptId,
+        userId,
+        normalizedEventId,
+        normalizedAdGroupId,
+        normalizedPlacement,
+        normalizedClientCreatedAt,
+        rewardUnitType,
+        rewardUnitAmount,
+        errorMessage,
+        normalizedEventType,
+        JSON.stringify(normalizedMetadata),
+      ]
+    );
+
+    if (upsertResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'AD_ATTEMPT_OWNED_BY_DIFFERENT_USER' });
+    }
+
+    await client.query(
+      `INSERT INTO ad_reward_attempt_events (
+         attempt_id,
+         user_id,
+         event_type,
+         event_data,
+         client_created_at
+       )
+       VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz)`,
+      [
+        normalizedAttemptId,
+        userId,
+        normalizedEventType,
+        JSON.stringify(normalizedEventData),
+        normalizedClientCreatedAt,
+      ]
+    );
+
+    await client.query('COMMIT');
+    return res.json({ ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Tickets] ad attempt event log failed:', err);
+    return res.status(500).json({ error: 'AD_EVENT_LOG_FAILED' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
  * POST /api/tickets/earn
  * 광고 시청 완료 후 티켓 조각 획득
  *
@@ -127,10 +305,11 @@ router.get('/earn-status/:eventId', requireAuth, async (req: Request, res: Respo
  */
 router.post('/earn', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
-  const { eventId } = req.body as { eventId?: string };
+  const { eventId, adAttemptId } = req.body as { eventId?: string; adAttemptId?: string };
   if (!eventId) {
     return res.status(400).json({ error: 'MISSING_EVENT_ID' });
   }
+  const normalizedAdAttemptId = cleanOptionalString(adAttemptId, 128);
   const today = todayKst();
 
   const client = await pool.connect();
@@ -139,11 +318,11 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
 
     // 1. earn_log에 gate row INSERT — unique(user_id, event_id, earn_date)로 중복 방지
     const { rows: logRows } = await client.query(
-      `INSERT INTO user_ticket_earn_log (user_id, event_id, earn_date, earned)
-       VALUES ($1, $2, $3, 0)
+      `INSERT INTO user_ticket_earn_log (user_id, event_id, earn_date, earned, ad_attempt_id)
+       VALUES ($1, $2, $3, 0, $4)
        ON CONFLICT (user_id, event_id, earn_date) DO NOTHING
        RETURNING id`,
-      [userId, eventId, today]
+      [userId, eventId, today, normalizedAdAttemptId]
     );
 
     // 2. RETURNING 없으면 오늘 이미 적립한 이벤트 → ROLLBACK + 409
@@ -200,9 +379,25 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
     );
 
     await client.query(
-      `UPDATE user_ticket_earn_log SET earned = $1 WHERE id = $2`,
-      [earned, logId]
+      `UPDATE user_ticket_earn_log
+       SET earned = $1,
+           ad_attempt_id = COALESCE(ad_attempt_id, $3)
+       WHERE id = $2`,
+      [earned, logId, normalizedAdAttemptId]
     );
+
+    if (normalizedAdAttemptId) {
+      await client.query(
+        `UPDATE ad_reward_attempts
+         SET metadata = metadata || jsonb_build_object(
+               'ticketEarned', $1,
+               'ticketEarnedAt', NOW()
+             ),
+             updated_at = NOW()
+         WHERE attempt_id = $2 AND user_id = $3`,
+        [earned, normalizedAdAttemptId, userId]
+      );
+    }
 
     await client.query('COMMIT');
 
