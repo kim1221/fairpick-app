@@ -13,6 +13,8 @@ import {
 import adminService, {
   AdminFeaturedEvent,
   AdminMetricsResponse,
+  RewardReconciliationDailyStat,
+  RewardReconciliationResponse,
   RewardsStatsResponse,
 } from '../services/adminService';
 
@@ -31,6 +33,8 @@ function Page() {
   const [isMetricsLoading, setIsMetricsLoading] = useState(false);
   const [rewardStats, setRewardStats] = useState<RewardsStatsResponse | null>(null);
   const [isRewardStatsLoading, setIsRewardStatsLoading] = useState(false);
+  const [reconciliation, setReconciliation] = useState<RewardReconciliationResponse | null>(null);
+  const [isReconciliationLoading, setIsReconciliationLoading] = useState(false);
 
   useEffect(() => {
     // Check if admin key exists in localStorage
@@ -43,6 +47,7 @@ function Page() {
           loadFeaturedEvents();
           loadAdminMetrics();
           loadRewardStats();
+          loadReconciliation();
         } else {
           adminService.clearAdminKey();
         }
@@ -66,6 +71,7 @@ function Page() {
         loadFeaturedEvents();
         loadAdminMetrics();
         loadRewardStats();
+        loadReconciliation();
       } else {
         Alert.alert('인증 실패', 'Invalid Admin Key');
       }
@@ -112,10 +118,23 @@ function Page() {
     }
   };
 
+  const loadReconciliation = async () => {
+    setIsReconciliationLoading(true);
+    try {
+      const response = await adminService.getRewardReconciliation(30);
+      setReconciliation(response);
+    } catch (error) {
+      setReconciliation(null);
+    } finally {
+      setIsReconciliationLoading(false);
+    }
+  };
+
   const handleRefresh = () => {
     loadFeaturedEvents();
     loadAdminMetrics();
     loadRewardStats();
+    loadReconciliation();
   };
 
   const handleLogout = () => {
@@ -125,6 +144,7 @@ function Page() {
     setEvents([]);
     setLastCollection(null);
     setRewardStats(null);
+    setReconciliation(null);
   };
 
   if (!isAuthenticated) {
@@ -187,6 +207,12 @@ function Page() {
             isLoading={isRewardStatsLoading}
           />
 
+          <RewardReconciliationPanel
+            reconciliation={reconciliation}
+            isLoading={isReconciliationLoading}
+            onSaved={loadReconciliation}
+          />
+
           {events.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>Featured 이벤트가 없습니다.</Text>
@@ -198,6 +224,23 @@ function Page() {
       )}
     </View>
   );
+}
+
+function parseNullableInputNumber(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed.replace(/,/g, ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatNullableWon(value: number | null | undefined): string {
+  if (value == null) return '-';
+  return `${Math.round(value).toLocaleString()}원`;
+}
+
+function formatNullableRate(value: number | null | undefined): string {
+  if (value == null) return '-';
+  return `${value}%`;
 }
 
 function RewardAdTelemetryPanel({
@@ -270,6 +313,190 @@ function RewardAdTelemetryPanel({
           ))}
         </>
       )}
+    </View>
+  );
+}
+
+function RewardReconciliationPanel({
+  reconciliation,
+  isLoading,
+  onSaved,
+}: {
+  reconciliation: RewardReconciliationResponse | null;
+  isLoading: boolean;
+  onSaved: () => void;
+}) {
+  const rows = reconciliation?.dailyStats ?? [];
+  const summary = reconciliation?.summary;
+
+  return (
+    <View style={styles.reconPanel}>
+      <View style={styles.rewardPanelHeader}>
+        <Text style={styles.rewardPanelTitle}>앱인토스 정산 대조</Text>
+        <Text style={styles.rewardPanelSubtitle}>
+          앱인토스 대시보드의 날짜별 노출/eCPM/최종정산액을 입력해 SDK 값과 비교합니다.
+        </Text>
+      </View>
+
+      {isLoading ? (
+        <View style={styles.rewardLoading}>
+          <ActivityIndicator color="#0064FF" />
+          <Text style={styles.rewardLoadingText}>정산 대조 확인 중...</Text>
+        </View>
+      ) : !summary ? (
+        <Text style={styles.rewardEmptyText}>정산 대조 데이터를 불러오지 못했습니다.</Text>
+      ) : (
+        <>
+          <View style={styles.reconSummaryGrid}>
+            <RewardKpi
+              label="대시보드/SDK"
+              value={summary.dashboardImpressions}
+              sub={`SDK ${summary.sdkImpressions.toLocaleString()} · ${formatNullableRate(summary.dashboardToSdkImpressionRate)}`}
+            />
+            <RewardKpi
+              label="예상 수익"
+              value={Math.round(summary.dashboardEstimatedRevenueKrw)}
+              sub={`보상비 ${formatNullableWon(summary.estimatedRewardCostKrw)}`}
+            />
+            <RewardKpi
+              label="최종 수익"
+              value={Math.round(summary.finalRevenueKrw)}
+              sub={`손익 ${formatNullableWon(summary.finalGrossMarginKrw)}`}
+              danger={summary.finalGrossMarginKrw < 0}
+            />
+            <RewardKpi
+              label="사후 조정"
+              value={Math.round(summary.finalAdjustmentKrw)}
+              sub="최종-예상"
+              danger={summary.finalAdjustmentKrw < 0}
+            />
+          </View>
+
+          <View style={styles.rewardGuideBox}>
+            <Text style={styles.rewardGuideText}>
+              final revenue가 비어 있으면 아직 최종 정산 전입니다. 나중에 최종 정산액이 예상 수익보다 낮게 들어오면 사후 무효/차감 가능성이 있는 구간입니다.
+            </Text>
+          </View>
+
+          {rows.slice(0, 10).map((row) => (
+            <RewardReconciliationRow key={row.date} row={row} onSaved={onSaved} />
+          ))}
+        </>
+      )}
+    </View>
+  );
+}
+
+function RewardReconciliationRow({
+  row,
+  onSaved,
+}: {
+  row: RewardReconciliationDailyStat;
+  onSaved: () => void;
+}) {
+  const [dashboardImpressions, setDashboardImpressions] = useState(row.dashboardImpressions?.toString() ?? '');
+  const [dashboardEcpmKrw, setDashboardEcpmKrw] = useState(row.dashboardEcpmKrw?.toString() ?? '');
+  const [finalRevenueKrw, setFinalRevenueKrw] = useState(row.finalRevenueKrw?.toString() ?? '');
+  const [note, setNote] = useState(row.note ?? '');
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setDashboardImpressions(row.dashboardImpressions?.toString() ?? '');
+    setDashboardEcpmKrw(row.dashboardEcpmKrw?.toString() ?? '');
+    setFinalRevenueKrw(row.finalRevenueKrw?.toString() ?? '');
+    setNote(row.note ?? '');
+  }, [row.date, row.dashboardImpressions, row.dashboardEcpmKrw, row.finalRevenueKrw, row.note]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await adminService.saveRewardReconciliation(row.date, {
+        dashboardImpressions: parseNullableInputNumber(dashboardImpressions),
+        dashboardEcpmKrw: parseNullableInputNumber(dashboardEcpmKrw),
+        finalRevenueKrw: parseNullableInputNumber(finalRevenueKrw),
+        note: note.trim() || null,
+      });
+      onSaved();
+    } catch (error) {
+      Alert.alert('저장 실패', '정산 대조 값을 저장하지 못했습니다.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <View style={styles.reconRow}>
+      <View style={styles.reconRowHeader}>
+        <View>
+          <Text style={styles.reconDate}>{row.date}</Text>
+          <Text style={styles.reconSubText}>
+            SDK 노출 {row.sdkImpressions.toLocaleString()} · 보상 {row.sdkRewards.toLocaleString()} · 티켓 {row.ticketsGranted.toLocaleString()}
+          </Text>
+        </View>
+        <View style={styles.reconRightSummary}>
+          <Text style={styles.reconSubText}>인정률 {formatNullableRate(row.dashboardToSdkImpressionRate)}</Text>
+          <Text style={[styles.reconSubText, (row.finalGrossMarginKrw ?? 0) < 0 && styles.rewardDangerText]}>
+            최종손익 {formatNullableWon(row.finalGrossMarginKrw)}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.reconInputGrid}>
+        <View style={styles.reconInputBox}>
+          <Text style={styles.reconInputLabel}>대시보드 노출</Text>
+          <TextInput
+            style={styles.reconInput}
+            value={dashboardImpressions}
+            onChangeText={setDashboardImpressions}
+            keyboardType="number-pad"
+            placeholder="예: 100"
+          />
+        </View>
+        <View style={styles.reconInputBox}>
+          <Text style={styles.reconInputLabel}>eCPM(원)</Text>
+          <TextInput
+            style={styles.reconInput}
+            value={dashboardEcpmKrw}
+            onChangeText={setDashboardEcpmKrw}
+            keyboardType="decimal-pad"
+            placeholder="예: 3000"
+          />
+        </View>
+        <View style={styles.reconInputBox}>
+          <Text style={styles.reconInputLabel}>최종 정산액</Text>
+          <TextInput
+            style={styles.reconInput}
+            value={finalRevenueKrw}
+            onChangeText={setFinalRevenueKrw}
+            keyboardType="decimal-pad"
+            placeholder="확정 후 입력"
+          />
+        </View>
+      </View>
+
+      <Text style={styles.reconCalcText}>
+        예상수익 {formatNullableWon(row.dashboardEstimatedRevenueKrw)} · 보상비 {formatNullableWon(row.estimatedRewardCostKrw)} · 사후조정 {formatNullableWon(row.invalidAdjustmentKrw)}
+      </Text>
+
+      <View style={styles.reconNoteRow}>
+        <TextInput
+          style={styles.reconNoteInput}
+          value={note}
+          onChangeText={setNote}
+          placeholder="메모"
+        />
+        <TouchableOpacity
+          style={[styles.button, styles.primaryButton, styles.reconSaveButton, isSaving && styles.disabledButton]}
+          onPress={handleSave}
+          disabled={isSaving}
+        >
+          {isSaving ? (
+            <ActivityIndicator color="white" size="small" />
+          ) : (
+            <Text style={styles.buttonText}>저장</Text>
+          )}
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -529,6 +756,19 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  reconPanel: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#CBD5E0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
   rewardPanelHeader: {
     marginBottom: 14,
   },
@@ -634,6 +874,87 @@ const styles = StyleSheet.create({
   },
   rewardDangerText: {
     color: '#E53E3E',
+  },
+  reconSummaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  reconRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#EDF2F7',
+    paddingTop: 14,
+    paddingBottom: 12,
+  },
+  reconRowHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 10,
+  },
+  reconDate: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1A202C',
+  },
+  reconSubText: {
+    fontSize: 12,
+    color: '#718096',
+    marginTop: 2,
+  },
+  reconRightSummary: {
+    alignItems: 'flex-end',
+  },
+  reconInputGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  reconInputBox: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 128,
+  },
+  reconInputLabel: {
+    fontSize: 12,
+    color: '#4A5568',
+    marginBottom: 4,
+    fontWeight: '600',
+  },
+  reconInput: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    padding: 8,
+    fontSize: 13,
+    backgroundColor: 'white',
+  },
+  reconCalcText: {
+    fontSize: 12,
+    color: '#4A5568',
+    marginTop: 8,
+    lineHeight: 18,
+  },
+  reconNoteRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  reconNoteInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    padding: 8,
+    fontSize: 13,
+    backgroundColor: 'white',
+  },
+  reconSaveButton: {
+    minWidth: 72,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
   },
   loadingContainer: {
     flex: 1,

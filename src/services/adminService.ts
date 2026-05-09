@@ -77,6 +77,61 @@ export interface RewardsStatsResponse {
   };
 }
 
+export interface RewardReconciliationDailyStat {
+  date: string;
+  sdkAttempts: number;
+  sdkShows: number;
+  sdkImpressions: number;
+  sdkRewards: number;
+  sdkRewardsWithoutImpression: number;
+  ticketGrants: number;
+  ticketsGranted: number;
+  estimatedRewardCostKrw: number;
+  dashboardImpressions: number | null;
+  dashboardEcpmKrw: number | null;
+  dashboardEstimatedRevenueKrw: number | null;
+  finalRevenueKrw: number | null;
+  invalidAdjustmentKrw: number | null;
+  dashboardToSdkImpressionRate: number | null;
+  estimatedGrossMarginKrw: number | null;
+  finalGrossMarginKrw: number | null;
+  note: string | null;
+  updatedAt: string | null;
+}
+
+export interface RewardReconciliationResponse {
+  period: {
+    days: number;
+    adGroupId: string;
+    os: 'all' | 'ios' | 'android' | 'unknown';
+  };
+  summary: {
+    sdkImpressions: number;
+    sdkRewards: number;
+    ticketsGranted: number;
+    estimatedRewardCostKrw: number;
+    dashboardImpressions: number;
+    dashboardEstimatedRevenueKrw: number;
+    finalRevenueKrw: number;
+    dashboardToSdkImpressionRate: number | null;
+    estimatedGrossMarginKrw: number;
+    finalGrossMarginKrw: number;
+    finalAdjustmentKrw: number;
+  };
+  dailyStats: RewardReconciliationDailyStat[];
+}
+
+export interface SaveRewardReconciliationParams {
+  adGroupId?: string;
+  os?: 'all' | 'ios' | 'android' | 'unknown';
+  dashboardImpressions?: number | null;
+  dashboardEcpmKrw?: number | null;
+  dashboardEstimatedRevenueKrw?: number | null;
+  finalRevenueKrw?: number | null;
+  invalidAdjustmentKrw?: number | null;
+  note?: string | null;
+}
+
 class AdminService {
   private getAdminKey(): string | null {
     if (typeof (globalThis as any).window !== "undefined") {
@@ -162,6 +217,48 @@ class AdminService {
         'x-admin-key': adminKey,
       },
     });
+
+    return response.data;
+  }
+
+  async getRewardReconciliation(days = 30): Promise<RewardReconciliationResponse> {
+    const adminKey = this.getAdminKey();
+    if (!adminKey) {
+      throw new Error('Admin key not found');
+    }
+
+    const response = await axios.get<RewardReconciliationResponse>(
+      `${API_BASE_URL}/admin/rewards/reconciliation`,
+      {
+        params: { days },
+        headers: {
+          'x-admin-key': adminKey,
+        },
+      }
+    );
+
+    return response.data;
+  }
+
+  async saveRewardReconciliation(
+    date: string,
+    params: SaveRewardReconciliationParams
+  ): Promise<{ ok: boolean }> {
+    const adminKey = this.getAdminKey();
+    if (!adminKey) {
+      throw new Error('Admin key not found');
+    }
+
+    const response = await axios.put<{ ok: boolean }>(
+      `${API_BASE_URL}/admin/rewards/reconciliation/${date}`,
+      params,
+      {
+        headers: {
+          'x-admin-key': adminKey,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
 
     return response.data;
   }

@@ -447,6 +447,7 @@ function EventDetailPage() {
         metadata: {
           eventTitle: event.title,
           route: '/events/:id',
+          platform: Platform.OS,
         },
       }).catch((error) => {
         if (__DEV__) {

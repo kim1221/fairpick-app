@@ -10462,6 +10462,23 @@ app.put('/admin/cost/manual/:key', requireAdminAuth, async (req, res) => {
 // Rewards Monitor — 리워드 광고 운영 대시보드
 // ============================================================
 
+const DEFAULT_REWARDED_AD_GROUP_ID = 'ait.v2.live.b50cf7d900884c5b';
+
+function parseAdminNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseAdminDate(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
+function parseRewardOs(value: unknown): 'all' | 'ios' | 'android' | 'unknown' {
+  return value === 'ios' || value === 'android' || value === 'unknown' ? value : 'all';
+}
+
 /**
  * GET /admin/rewards/stats?days=14
  * 일자별 광고 시청 수, 티켓 지급량, 교환 현황, 유저 분포 집계
@@ -10734,6 +10751,263 @@ app.get('/admin/rewards/stats', requireAdminAuth, async (req, res) => {
   } catch (error) {
     console.error('[Admin] GET /admin/rewards/stats failed:', error);
     res.status(500).json({ message: 'Failed to load rewards stats' });
+  }
+});
+
+/**
+ * GET /admin/rewards/reconciliation?days=30&adGroupId=...&os=all
+ * SDK impression / 티켓 지급 / 앱인토스 대시보드·정산 입력값 대조
+ */
+app.get('/admin/rewards/reconciliation', requireAdminAuth, async (req, res) => {
+  const days = Math.min(parseInt(String(req.query.days ?? '30'), 10) || 30, 180);
+  const adGroupId = String(req.query.adGroupId ?? DEFAULT_REWARDED_AD_GROUP_ID);
+  const os = parseRewardOs(req.query.os);
+
+  try {
+    const { rows } = await pool.query<{
+      report_date: string;
+      sdk_attempts: string;
+      sdk_shows: string;
+      sdk_impressions: string;
+      sdk_rewards: string;
+      sdk_rewards_without_impression: string;
+      ticket_grants: string;
+      tickets_granted: string;
+      dashboard_impressions: string | null;
+      dashboard_ecpm_krw: string | null;
+      dashboard_estimated_revenue_krw: string | null;
+      final_revenue_krw: string | null;
+      invalid_adjustment_krw: string | null;
+      note: string | null;
+      updated_at: string | null;
+    }>(
+      `WITH dates AS (
+         SELECT generate_series(
+           ((NOW() AT TIME ZONE 'Asia/Seoul')::date - ($1::int - 1)),
+           (NOW() AT TIME ZONE 'Asia/Seoul')::date,
+           INTERVAL '1 day'
+         )::date AS report_date
+       ),
+       sdk AS (
+         SELECT
+           DATE(created_at AT TIME ZONE 'Asia/Seoul') AS report_date,
+           COUNT(*)::text AS sdk_attempts,
+           COUNT(show_at)::text AS sdk_shows,
+           COUNT(impression_at)::text AS sdk_impressions,
+           COUNT(reward_at)::text AS sdk_rewards,
+           COUNT(*) FILTER (WHERE reward_at IS NOT NULL AND impression_at IS NULL)::text AS sdk_rewards_without_impression
+         FROM ad_reward_attempts
+         WHERE created_at >= NOW() - ($1 || ' days')::INTERVAL
+           AND ad_group_id = $2
+           AND ($3 = 'all' OR COALESCE(metadata->>'platform', 'unknown') = $3)
+         GROUP BY 1
+       ),
+       earn AS (
+         SELECT
+           DATE(e.created_at AT TIME ZONE 'Asia/Seoul') AS report_date,
+           COUNT(*)::text AS ticket_grants,
+           COALESCE(SUM(e.earned), 0)::text AS tickets_granted
+         FROM user_ticket_earn_log e
+         JOIN ad_reward_attempts a ON a.attempt_id = e.ad_attempt_id
+         WHERE e.created_at >= NOW() - ($1 || ' days')::INTERVAL
+           AND e.earned > 0
+           AND a.ad_group_id = $2
+           AND ($3 = 'all' OR COALESCE(a.metadata->>'platform', 'unknown') = $3)
+         GROUP BY 1
+       )
+       SELECT
+         d.report_date::text,
+         COALESCE(s.sdk_attempts, '0') AS sdk_attempts,
+         COALESCE(s.sdk_shows, '0') AS sdk_shows,
+         COALESCE(s.sdk_impressions, '0') AS sdk_impressions,
+         COALESCE(s.sdk_rewards, '0') AS sdk_rewards,
+         COALESCE(s.sdk_rewards_without_impression, '0') AS sdk_rewards_without_impression,
+         COALESCE(e.ticket_grants, '0') AS ticket_grants,
+         COALESCE(e.tickets_granted, '0') AS tickets_granted,
+         r.dashboard_impressions::text,
+         r.dashboard_ecpm_krw::text,
+         r.dashboard_estimated_revenue_krw::text,
+         r.final_revenue_krw::text,
+         r.invalid_adjustment_krw::text,
+         r.note,
+         r.updated_at::text
+       FROM dates d
+       LEFT JOIN sdk s ON s.report_date = d.report_date
+       LEFT JOIN earn e ON e.report_date = d.report_date
+       LEFT JOIN ad_reward_settlement_daily r
+         ON r.report_date = d.report_date
+        AND r.ad_group_id = $2
+        AND r.os = $3
+       ORDER BY d.report_date DESC`,
+      [days, adGroupId, os],
+    );
+
+    const toNumber = (value: string | null): number | null =>
+      value === null ? null : Number(value);
+
+    const dailyStats = rows.map((row) => {
+      const sdkImpressions = Number(row.sdk_impressions);
+      const sdkRewards = Number(row.sdk_rewards);
+      const ticketsGranted = Number(row.tickets_granted);
+      const dashboardImpressions = toNumber(row.dashboard_impressions);
+      const dashboardEcpmKrw = toNumber(row.dashboard_ecpm_krw);
+      const dashboardEstimatedRevenueKrw =
+        toNumber(row.dashboard_estimated_revenue_krw) ??
+        (dashboardImpressions != null && dashboardEcpmKrw != null
+          ? Math.round((dashboardImpressions * dashboardEcpmKrw) / 10) / 100
+          : null);
+      const finalRevenueKrw = toNumber(row.final_revenue_krw);
+      const invalidAdjustmentKrw =
+        toNumber(row.invalid_adjustment_krw) ??
+        (dashboardEstimatedRevenueKrw != null && finalRevenueKrw != null
+          ? Math.round((finalRevenueKrw - dashboardEstimatedRevenueKrw) * 100) / 100
+          : null);
+      const estimatedRewardCostKrw = Math.round((ticketsGranted / 10) * 100) / 100;
+
+      return {
+        date: row.report_date,
+        sdkAttempts: Number(row.sdk_attempts),
+        sdkShows: Number(row.sdk_shows),
+        sdkImpressions,
+        sdkRewards,
+        sdkRewardsWithoutImpression: Number(row.sdk_rewards_without_impression),
+        ticketGrants: Number(row.ticket_grants),
+        ticketsGranted,
+        estimatedRewardCostKrw,
+        dashboardImpressions,
+        dashboardEcpmKrw,
+        dashboardEstimatedRevenueKrw,
+        finalRevenueKrw,
+        invalidAdjustmentKrw,
+        note: row.note,
+        updatedAt: row.updated_at,
+        dashboardToSdkImpressionRate:
+          sdkImpressions > 0 && dashboardImpressions != null
+            ? Math.round((dashboardImpressions / sdkImpressions) * 1000) / 10
+            : null,
+        estimatedGrossMarginKrw:
+          dashboardEstimatedRevenueKrw != null
+            ? Math.round((dashboardEstimatedRevenueKrw - estimatedRewardCostKrw) * 100) / 100
+            : null,
+        finalGrossMarginKrw:
+          finalRevenueKrw != null
+            ? Math.round((finalRevenueKrw - estimatedRewardCostKrw) * 100) / 100
+            : null,
+      };
+    });
+
+    const summary = dailyStats.reduce(
+      (acc, row) => ({
+        sdkImpressions: acc.sdkImpressions + row.sdkImpressions,
+        sdkRewards: acc.sdkRewards + row.sdkRewards,
+        ticketsGranted: acc.ticketsGranted + row.ticketsGranted,
+        estimatedRewardCostKrw: acc.estimatedRewardCostKrw + row.estimatedRewardCostKrw,
+        dashboardImpressions: acc.dashboardImpressions + (row.dashboardImpressions ?? 0),
+        dashboardEstimatedRevenueKrw: acc.dashboardEstimatedRevenueKrw + (row.dashboardEstimatedRevenueKrw ?? 0),
+        finalRevenueKrw: acc.finalRevenueKrw + (row.finalRevenueKrw ?? 0),
+      }),
+      {
+        sdkImpressions: 0,
+        sdkRewards: 0,
+        ticketsGranted: 0,
+        estimatedRewardCostKrw: 0,
+        dashboardImpressions: 0,
+        dashboardEstimatedRevenueKrw: 0,
+        finalRevenueKrw: 0,
+      },
+    );
+
+    res.json({
+      period: { days, adGroupId, os },
+      summary: {
+        ...summary,
+        dashboardToSdkImpressionRate:
+          summary.sdkImpressions > 0
+            ? Math.round((summary.dashboardImpressions / summary.sdkImpressions) * 1000) / 10
+            : null,
+        estimatedGrossMarginKrw:
+          Math.round((summary.dashboardEstimatedRevenueKrw - summary.estimatedRewardCostKrw) * 100) / 100,
+        finalGrossMarginKrw:
+          Math.round((summary.finalRevenueKrw - summary.estimatedRewardCostKrw) * 100) / 100,
+        finalAdjustmentKrw:
+          Math.round((summary.finalRevenueKrw - summary.dashboardEstimatedRevenueKrw) * 100) / 100,
+      },
+      dailyStats,
+    });
+  } catch (error) {
+    console.error('[Admin] GET /admin/rewards/reconciliation failed:', error);
+    res.status(500).json({ message: 'Failed to load reward reconciliation' });
+  }
+});
+
+/**
+ * PUT /admin/rewards/reconciliation/:date
+ * 앱인토스 대시보드/정산 값을 날짜별로 수동 입력한다.
+ */
+app.put('/admin/rewards/reconciliation/:date', requireAdminAuth, async (req, res) => {
+  const reportDate = parseAdminDate(req.params.date);
+  if (!reportDate) {
+    return res.status(400).json({ message: 'date must be YYYY-MM-DD' });
+  }
+
+  const adGroupId = String(req.body.adGroupId ?? DEFAULT_REWARDED_AD_GROUP_ID);
+  const os = parseRewardOs(req.body.os);
+  const dashboardImpressions = parseAdminNumber(req.body.dashboardImpressions);
+  const dashboardEcpmKrw = parseAdminNumber(req.body.dashboardEcpmKrw);
+  const dashboardEstimatedRevenueKrw =
+    parseAdminNumber(req.body.dashboardEstimatedRevenueKrw) ??
+    (dashboardImpressions != null && dashboardEcpmKrw != null
+      ? Math.round((dashboardImpressions * dashboardEcpmKrw) / 10) / 100
+      : null);
+  const finalRevenueKrw = parseAdminNumber(req.body.finalRevenueKrw);
+  const invalidAdjustmentKrw =
+    parseAdminNumber(req.body.invalidAdjustmentKrw) ??
+    (dashboardEstimatedRevenueKrw != null && finalRevenueKrw != null
+      ? Math.round((finalRevenueKrw - dashboardEstimatedRevenueKrw) * 100) / 100
+      : null);
+  const note = typeof req.body.note === 'string' ? req.body.note.trim().slice(0, 1000) : null;
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO ad_reward_settlement_daily (
+         report_date,
+         ad_group_id,
+         os,
+         dashboard_impressions,
+         dashboard_ecpm_krw,
+         dashboard_estimated_revenue_krw,
+         final_revenue_krw,
+         invalid_adjustment_krw,
+         note,
+         updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+       ON CONFLICT (report_date, ad_group_id, os) DO UPDATE SET
+         dashboard_impressions = EXCLUDED.dashboard_impressions,
+         dashboard_ecpm_krw = EXCLUDED.dashboard_ecpm_krw,
+         dashboard_estimated_revenue_krw = EXCLUDED.dashboard_estimated_revenue_krw,
+         final_revenue_krw = EXCLUDED.final_revenue_krw,
+         invalid_adjustment_krw = EXCLUDED.invalid_adjustment_krw,
+         note = EXCLUDED.note,
+         updated_at = NOW()
+       RETURNING report_date::text, ad_group_id, os`,
+      [
+        reportDate,
+        adGroupId,
+        os,
+        dashboardImpressions,
+        dashboardEcpmKrw,
+        dashboardEstimatedRevenueKrw,
+        finalRevenueKrw,
+        invalidAdjustmentKrw,
+        note,
+      ],
+    );
+
+    res.json({ ok: true, item: rows[0] });
+  } catch (error) {
+    console.error('[Admin] PUT /admin/rewards/reconciliation failed:', error);
+    res.status(500).json({ message: 'Failed to save reward reconciliation' });
   }
 });
 
