@@ -390,7 +390,7 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
       await client.query(
         `UPDATE ad_reward_attempts
          SET metadata = metadata || jsonb_build_object(
-               'ticketEarned', $1,
+               'ticketEarned', $1::integer,
                'ticketEarnedAt', NOW()
              ),
              updated_at = NOW()
