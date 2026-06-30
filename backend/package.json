@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "node --test tests/unit/routes/*.test.js",
     "dev": "NODE_ENV=development PORT=5001 ts-node -r dotenv/config src/index.ts",
     "start": "NODE_ENV=production node -r dotenv/config dist/index.js",
     "start:scheduler": "NODE_ENV=production ts-node --transpile-only -r dotenv/config src/scheduler-entry.ts",

@@ -35,6 +35,9 @@ import userSyncRouter from './routes/userSync';
 import homeFeedRouter from './routes/homeFeed';
 import ticketsRouter from './routes/tickets';
 import attendanceRouter from './routes/attendance';
+import cardsRouter from './routes/cards';
+import visitsRouter from './routes/visits';
+import passportRouter from './routes/passport';
 import * as recommender from './lib/recommender';
 import { calculateConsensusLight, calculateStructuralScore } from './lib/hotScoreCalculator';
 import { calculateDataCompleteness, DataCompletenessScore } from './lib/dataQuality';
@@ -421,6 +424,9 @@ app.use('/api/home/feed', homeFeedRouter);
 // 티켓 조각 API
 app.use('/api/tickets', ticketsRouter);
 app.use('/api/attendance', attendanceRouter);
+app.use('/api/cards', cardsRouter);
+app.use('/api/visits', visitsRouter);
+app.use('/api/passport', passportRouter);
 
 // ============================================================
 // Phase 3: 룰 기반 추천 시스템 API
