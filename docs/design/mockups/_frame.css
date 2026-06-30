@@ -1,0 +1,90 @@
+/* 컬처카드 · 갤러리티켓 공통 토큰/프레임 (목업 전용) */
+:root{
+  --ink:#16161A; --ink2:#1F1F24; --ink-line:#2C2C33;
+  --paper:#F5F1E8; --paper-hi:#FBF8F1; --paper-edge:#E7E0D2;
+  --text:#1A1A1E; --muted:#6B6760; --muted-2:#908B81;
+  --on-ink:#F2EEE5; --on-ink-mut:#9A968E;
+  --blue:#3182F6; --blue-d:#1B64DA;
+  --bronze:#B8924A; --bronze-d:#947231;
+  --exhibit:#3182F6; --perform:#A8324A; --popup:#D08A2C; --festival:#3E8E5A;
+  --radius:22px; --radius-sm:14px;
+  --serif:'Gowun Batang','Nanum Myeongjo',serif;
+  --sans:'Pretendard',-apple-system,'Apple SD Gothic Neo',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased}
+body{background:#0E0E11;display:flex;align-items:center;justify-content:center;
+  min-height:100vh;font-family:var(--sans);padding:24px}
+.phone{width:390px;height:844px;background:var(--ink);border-radius:46px;
+  position:relative;overflow:hidden;
+  box-shadow:0 30px 80px rgba(0,0,0,.5),inset 0 0 0 1px #2a2a30;
+  background-image:radial-gradient(120% 80% at 50% -10%, #232329 0%, var(--ink) 55%)}
+.statusbar{height:54px;display:flex;align-items:flex-end;justify-content:space-between;
+  padding:0 26px 8px;color:var(--on-ink);font-size:14px;font-weight:600;letter-spacing:.2px}
+.statusbar .dots{display:flex;gap:5px;align-items:center;opacity:.85}
+.navbar{display:flex;align-items:center;justify-content:space-between;
+  padding:6px 22px 14px}
+.brand{display:flex;align-items:center;gap:8px}
+.brand .mark{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--bronze),var(--bronze-d));
+  display:flex;align-items:center;justify-content:center;color:#1A1A1E;font-weight:800;font-size:12px}
+.brand .name{color:var(--on-ink);font-weight:700;font-size:17px;letter-spacing:-.2px}
+.ticket-chip{display:flex;align-items:center;gap:6px;background:#26262C;
+  border:1px solid var(--ink-line);color:var(--on-ink);font-weight:700;font-size:14px;
+  padding:7px 13px;border-radius:999px}
+.ticket-chip b{color:var(--bronze)}
+.content{position:absolute;top:96px;left:0;right:0;bottom:0;overflow:hidden;padding:0 20px}
+.eyebrow{color:var(--on-ink-mut);font-size:12.5px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase}
+.h-title{font-family:var(--serif);color:var(--on-ink);font-size:26px;font-weight:700;
+  letter-spacing:-.3px;line-height:1.25;margin-top:6px}
+.h-sub{color:var(--on-ink-mut);font-size:14px;margin-top:8px;line-height:1.5}
+
+/* 입장권 카드(시그니처) */
+.ticket{background:var(--paper);border-radius:var(--radius);position:relative;
+  box-shadow:0 18px 40px rgba(0,0,0,.45);overflow:hidden}
+.ticket::before{content:"";position:absolute;inset:0;border-radius:var(--radius);
+  box-shadow:inset 0 0 0 1px var(--paper-edge);pointer-events:none}
+.perf{position:relative;height:0;border-top:2px dashed #cfc6b2;margin:0 18px}
+.perf::before,.perf::after{content:"";position:absolute;top:-11px;width:20px;height:20px;
+  background:var(--ink);border-radius:50%}
+.perf::before{left:-28px}.perf::after{right:-28px}
+.stamp{width:46px;height:46px;border-radius:50%;border:1.5px solid var(--bronze);
+  color:var(--bronze-d);display:flex;align-items:center;justify-content:center;
+  font-size:18px;background:rgba(184,146,74,.07)}
+.admit{font-size:10.5px;letter-spacing:2.5px;font-weight:800;color:var(--bronze-d)}
+.cat{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;
+  letter-spacing:.4px;padding:4px 10px;border-radius:999px}
+.cat.ex{background:rgba(49,130,246,.12);color:#1f63c8}
+.cat.pf{background:rgba(168,50,74,.12);color:var(--perform)}
+.cat.pp{background:rgba(208,138,44,.14);color:#9c6512}
+.thumb{height:150px;border-radius:14px;position:relative;overflow:hidden}
+.thumb .gloss{position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,.18),transparent 60%)}
+.title-ser{font-family:var(--serif);color:var(--text);font-weight:700;letter-spacing:-.3px}
+.meta{color:var(--muted);font-size:13px;display:flex;align-items:center;gap:6px}
+.dot{width:3px;height:3px;border-radius:50%;background:#c3bba8}
+.dday{font-size:11.5px;font-weight:800;padding:3px 8px;border-radius:7px}
+.dday.soon{background:#FBE7E7;color:#C0392B}
+.dday.norm{background:#EAE4D6;color:#7c7460}
+
+/* 버튼 (TDS형) */
+.btn{height:52px;border-radius:14px;border:0;font-family:var(--sans);font-size:16px;
+  font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;width:100%;cursor:default}
+.btn.primary{background:var(--blue);color:#fff;box-shadow:0 8px 20px rgba(49,130,246,.35)}
+.btn.dark{background:#26262C;color:var(--on-ink);border:1px solid var(--ink-line)}
+.btn.paper{background:#1A1A1E;color:var(--paper)}
+.btn.ghost{background:transparent;color:var(--blue);font-weight:700}
+.btn:disabled,.btn.disabled{background:#E7E0D2;color:#A39C8B;box-shadow:none}
+.btn-sm{height:40px;border-radius:11px;font-size:14px;flex:1}
+
+/* 플로팅 탭바 (TDS형 3탭) */
+.tabbar{position:absolute;left:50%;transform:translateX(-50%);bottom:26px;
+  width:330px;height:64px;background:rgba(30,30,36,.92);backdrop-filter:blur(14px);
+  border:1px solid #34343c;border-radius:22px;display:flex;align-items:center;
+  justify-content:space-around;box-shadow:0 16px 40px rgba(0,0,0,.5)}
+.tab{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8d8a92;
+  font-size:11px;font-weight:700;flex:1}
+.tab .ic{width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:20px}
+.tab.active{color:var(--on-ink)}
+.tab.active .ic{color:var(--bronze)}
+.home-ind{position:absolute;bottom:9px;left:50%;transform:translateX(-50%);
+  width:128px;height:5px;border-radius:3px;background:rgba(255,255,255,.22)}
+.scrim{position:absolute;left:0;right:0;bottom:0;height:130px;
+  background:linear-gradient(transparent,var(--ink) 70%);pointer-events:none}

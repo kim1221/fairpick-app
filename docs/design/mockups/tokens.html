@@ -1,0 +1,79 @@
+<!-- @dsCard group="컬처카드 · 갤러리티켓" -->
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=420">
+<title>컬처카드 — 디자인 토큰</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Nanum+Myeongjo:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#16161A;--paper:#F5F1E8;--paper-edge:#E7E0D2;--text:#1A1A1E;--muted:#6B6760;
+--on-ink:#F2EEE5;--on-ink-mut:#9A968E;--blue:#3182F6;--bronze:#B8924A;--bronze-d:#947231;
+--serif:'Gowun Batang','Nanum Myeongjo',serif;--sans:'Pretendard',-apple-system,system-ui,sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0E0E11;font-family:var(--sans);padding:26px;display:flex;justify-content:center}
+.panel{width:420px;background:var(--ink);border-radius:26px;padding:26px;color:var(--on-ink);
+box-shadow:0 30px 80px rgba(0,0,0,.5),inset 0 0 0 1px #2a2a30}
+.kicker{font-size:12px;font-weight:800;letter-spacing:2px;color:var(--bronze)}
+h1{font-family:var(--serif);font-size:28px;font-weight:800;margin-top:6px;letter-spacing:-.4px}
+.sub{color:var(--on-ink-mut);font-size:13px;margin-top:8px;line-height:1.5}
+.lab{font-size:11px;font-weight:800;letter-spacing:1.4px;color:var(--on-ink-mut);margin:26px 0 12px}
+.sw{display:flex;gap:10px}
+.c{flex:1;border-radius:12px;height:64px;display:flex;flex-direction:column;justify-content:flex-end;padding:8px;font-size:10.5px;font-weight:700}
+.c .h{font-size:9px;font-weight:600;opacity:.7}
+.cats{display:flex;gap:8px;margin-top:10px}
+.ct{flex:1;border-radius:10px;padding:9px 0;text-align:center;font-size:12px;font-weight:800;color:#fff}
+.type{background:var(--paper);border-radius:16px;padding:18px;color:var(--text);margin-top:6px;position:relative;box-shadow:inset 0 0 0 1px var(--paper-edge)}
+.type .ser{font-family:var(--serif);font-size:24px;font-weight:700;letter-spacing:-.3px}
+.type .ser small{display:block;font-family:var(--sans);font-size:11px;color:var(--muted);font-weight:700;margin-bottom:4px;letter-spacing:1px}
+.type .san{font-size:14px;color:#3a3730;margin-top:14px;line-height:1.6}
+.type .san small{display:block;font-size:11px;color:var(--muted);font-weight:700;margin-bottom:4px;letter-spacing:1px}
+.tk{margin-top:6px;background:var(--paper);border-radius:16px;overflow:hidden;position:relative;box-shadow:inset 0 0 0 1px var(--paper-edge)}
+.tk .row{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;color:var(--text)}
+.tk .seal{width:42px;height:42px;border-radius:50%;border:1.5px solid var(--bronze);color:var(--bronze-d);display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-weight:800;font-size:18px}
+.tk .ttl{font-family:var(--serif);font-weight:700;font-size:15px}
+.tk .ttl small{display:block;font-family:var(--sans);font-size:11px;color:var(--muted);font-weight:600;margin-top:3px}
+.tk .perf{position:relative;height:0;border-top:2px dashed #cfc6b2;margin:0 16px}
+.tk .perf::before,.tk .perf::after{content:"";position:absolute;top:-11px;width:20px;height:20px;background:var(--ink);border-radius:50%}
+.tk .perf::before{left:-26px}.tk .perf::after{right:-26px}
+.tk .stub{padding:11px 18px;display:flex;justify-content:space-between;align-items:center}
+.tk .admit{font-size:10px;letter-spacing:2.5px;font-weight:800;color:var(--bronze-d)}
+.tk .earn{font-size:12px;font-weight:800;color:var(--text)}
+.foot{color:var(--on-ink-mut);font-size:11.5px;margin-top:20px;line-height:1.6}
+</style></head>
+<body>
+<div class="panel">
+  <div class="kicker">GALLERY TICKET</div>
+  <h1>컬처카드 디자인 토큰</h1>
+  <div class="sub">미술관 입장권 무드 · TDS 크롬 + 입장권 카드 시그니처. 차콜 위에 떠 있는 종이 한 장.</div>
+
+  <div class="lab">CORE PALETTE</div>
+  <div class="sw">
+    <div class="c" style="background:#16161A;color:#F2EEE5"><span class="h">INK</span>#16161A</div>
+    <div class="c" style="background:#F5F1E8;color:#1A1A1E"><span class="h">PAPER</span>#F5F1E8</div>
+    <div class="c" style="background:#3182F6;color:#fff"><span class="h">TOSS BLUE</span>#3182F6</div>
+    <div class="c" style="background:#B8924A;color:#fff"><span class="h">BRONZE</span>#B8924A</div>
+  </div>
+
+  <div class="lab">CATEGORY</div>
+  <div class="cats">
+    <div class="ct" style="background:#3182F6">전시</div>
+    <div class="ct" style="background:#A8324A">공연</div>
+    <div class="ct" style="background:#D08A2C">팝업</div>
+    <div class="ct" style="background:#3E8E5A">축제</div>
+  </div>
+
+  <div class="lab">TYPE</div>
+  <div class="type">
+    <div class="ser"><small>SERIF · 히어로/전시명</small>빛의 정원: 모네에서 클림트까지</div>
+    <div class="san"><small>SANS · UI/본문 · 해요체</small>광고를 보고 카드를 열면, 가까운 문화가 펼쳐져요.</div>
+  </div>
+
+  <div class="lab">SIGNATURE · 입장권 카드</div>
+  <div class="tk">
+    <div class="row"><div class="ttl">오늘의 카드<small>광고를 보면 카드가 열려요</small></div><div class="seal">C</div></div>
+    <div class="perf"></div>
+    <div class="stub"><div class="admit">ADMIT ONE</div><div class="earn">적립 +2 티켓</div></div>
+  </div>
+
+  <div class="foot">크롬(탭바·버튼·시트)은 TDS 형태 유지 · 개성은 카드 히어로/뽑기 연출에 집중 · 해요체 · 다크패턴 없음</div>
+</div>
+</body></html>

@@ -1,0 +1,103 @@
+<!-- @dsCard group="컬처카드 · 갤러리티켓" -->
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=390">
+<title>컬처카드 — 홈</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Nanum+Myeongjo:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#16161A;--ink-line:#2C2C33;--paper:#F5F1E8;--paper-edge:#E7E0D2;
+--text:#1A1A1E;--muted:#6B6760;--on-ink:#F2EEE5;--on-ink-mut:#9A968E;
+--blue:#3182F6;--bronze:#B8924A;--bronze-d:#947231;
+--serif:'Gowun Batang','Nanum Myeongjo',serif;
+--sans:'Pretendard',-apple-system,'Apple SD Gothic Neo',system-ui,sans-serif}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased}
+body{background:#0E0E11;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:var(--sans);padding:24px}
+.phone{width:390px;height:844px;background:var(--ink);border-radius:46px;position:relative;overflow:hidden;
+box-shadow:0 30px 80px rgba(0,0,0,.5),inset 0 0 0 1px #2a2a30;
+background-image:radial-gradient(120% 80% at 50% -10%,#232329 0%,var(--ink) 55%)}
+.statusbar{height:54px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 8px;color:var(--on-ink);font-size:14px;font-weight:600}
+.navbar{display:flex;align-items:center;justify-content:space-between;padding:6px 22px 12px}
+.brand{display:flex;align-items:center;gap:8px}
+.mark{width:24px;height:24px;border-radius:7px;background:linear-gradient(135deg,var(--bronze),var(--bronze-d));display:flex;align-items:center;justify-content:center;color:#1A1A1E;font-weight:800;font-size:13px}
+.name{color:var(--on-ink);font-weight:700;font-size:17px;letter-spacing:-.2px}
+.chip{display:flex;align-items:center;gap:6px;background:#26262C;border:1px solid var(--ink-line);color:var(--on-ink);font-weight:700;font-size:14px;padding:7px 13px;border-radius:999px}
+.chip b{color:var(--bronze)}
+.content{padding:8px 22px 0}
+.eyebrow{color:var(--on-ink-mut);font-size:12px;font-weight:700;letter-spacing:1.6px}
+.h-title{font-family:var(--serif);color:var(--on-ink);font-size:27px;font-weight:700;letter-spacing:-.3px;line-height:1.2;margin-top:7px}
+.h-sub{color:var(--on-ink-mut);font-size:13.5px;margin-top:9px;line-height:1.5}
+.stack{position:relative;margin:26px 6px 0;height:330px}
+.peek{position:absolute;left:50%;top:14px;width:80%;height:300px;border-radius:20px;background:#E7E0D2;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.peek.a{transform:translateX(-50%) rotate(-5deg)}
+.peek.b{transform:translateX(-50%) rotate(4deg);background:#EDE7DA}
+.ticket{position:absolute;left:50%;top:0;transform:translateX(-50%);width:88%;height:316px;background:var(--paper);border-radius:22px;box-shadow:0 22px 50px rgba(0,0,0,.5);overflow:hidden}
+.ticket::before{content:"";position:absolute;inset:0;border-radius:22px;box-shadow:inset 0 0 0 1px var(--paper-edge);pointer-events:none}
+.tk-top{padding:22px 22px 0;display:flex;justify-content:space-between;align-items:center}
+.tk-label{font-size:12px;font-weight:800;letter-spacing:1px;color:var(--bronze-d)}
+.tk-count{font-size:12px;font-weight:700;color:var(--muted)}
+.seal{margin:26px auto 0;width:96px;height:96px;border-radius:50%;border:2px solid var(--bronze);color:var(--bronze-d);
+display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:40px;font-weight:800;background:rgba(184,146,74,.06);position:relative}
+.seal::after{content:"";position:absolute;inset:7px;border-radius:50%;border:1px dashed rgba(184,146,74,.45)}
+.tk-msg{text-align:center;color:var(--text);font-family:var(--serif);font-size:17px;margin-top:18px;letter-spacing:-.2px}
+.tk-msg span{display:block;color:var(--muted);font-family:var(--sans);font-size:12.5px;margin-top:6px}
+.perf{position:relative;height:0;border-top:2px dashed #cfc6b2;margin:20px 20px 0}
+.perf::before,.perf::after{content:"";position:absolute;top:-12px;width:22px;height:22px;background:var(--ink);border-radius:50%}
+.perf::before{left:-31px}.perf::after{right:-31px}
+.tk-cta{padding:16px 18px 18px}
+.btn{height:50px;border-radius:14px;border:0;font-family:var(--sans);font-size:15.5px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;width:100%}
+.btn.primary{background:var(--blue);color:#fff;box-shadow:0 8px 18px rgba(49,130,246,.3)}
+.dots{display:flex;gap:8px;justify-content:center;align-items:center;margin-top:18px}
+.d{width:9px;height:9px;border-radius:50%;background:#3a3a42}
+.d.on{background:var(--bronze)}
+.dots span{color:var(--on-ink-mut);font-size:12.5px;margin-left:6px}
+.more{display:flex;align-items:center;justify-content:space-between;margin:22px 4px 0;padding:14px 16px;border:1px solid var(--ink-line);border-radius:16px;background:#1d1d22}
+.more .l{color:var(--on-ink);font-weight:700;font-size:14px}
+.more .l small{display:block;color:var(--on-ink-mut);font-weight:600;font-size:11.5px;margin-top:3px}
+.more .go{color:var(--blue);font-weight:700;font-size:13.5px}
+.tabbar{position:absolute;left:50%;transform:translateX(-50%);bottom:26px;width:332px;height:64px;background:rgba(30,30,36,.92);border:1px solid #34343c;border-radius:22px;display:flex;align-items:center;justify-content:space-around;box-shadow:0 16px 40px rgba(0,0,0,.5)}
+.tab{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8d8a92;font-size:11px;font-weight:700;flex:1}
+.tab .ic{font-size:20px}.tab.active{color:var(--on-ink)}.tab.active .ic{color:var(--bronze)}
+.home-ind{position:absolute;bottom:9px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:rgba(255,255,255,.22)}
+.scrim{position:absolute;left:0;right:0;bottom:0;height:120px;background:linear-gradient(transparent,var(--ink) 72%);pointer-events:none}
+</style></head>
+<body>
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span>● ● ● &nbsp; ▮▮</span></div>
+  <div class="navbar">
+    <div class="brand"><div class="mark">C</div><div class="name">컬처카드</div></div>
+    <div class="chip">🎟 <b>7</b></div>
+  </div>
+  <div class="content">
+    <div class="eyebrow">TODAY'S CULTURE</div>
+    <div class="h-title">오늘의 문화 카드</div>
+    <div class="h-sub">광고를 보고 카드를 열면, 가까운 문화가 펼쳐져요.</div>
+
+    <div class="stack">
+      <div class="peek a"></div>
+      <div class="peek b"></div>
+      <div class="ticket">
+        <div class="tk-top"><div class="tk-label">오늘의 카드</div><div class="tk-count">1 / 3</div></div>
+        <div class="seal">C</div>
+        <div class="tk-msg">오늘 만날 문화가 봉인돼 있어요<span>광고를 보면 카드가 열리고 티켓이 쌓여요</span></div>
+        <div class="perf"></div>
+        <div class="tk-cta"><button class="btn primary">광고 보고 열기</button></div>
+      </div>
+    </div>
+
+    <div class="dots"><div class="d on"></div><div class="d"></div><div class="d"></div><span>1장 열었어요</span></div>
+
+    <div class="more">
+      <div class="l">더 뽑기<small>오늘 12 / 30 티켓</small></div>
+      <div class="go">광고 보고 더 열기 ›</div>
+    </div>
+  </div>
+
+  <div class="scrim"></div>
+  <div class="tabbar">
+    <div class="tab active"><div class="ic">◳</div>홈</div>
+    <div class="tab"><div class="ic">♡</div>저장</div>
+    <div class="tab"><div class="ic">✦</div>포인트</div>
+  </div>
+  <div class="home-ind"></div>
+</div>
+</body></html>

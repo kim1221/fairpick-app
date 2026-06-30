@@ -1,0 +1,98 @@
+<!-- @dsCard group="컬처카드 · 갤러리티켓" -->
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=390">
+<title>컬처카드 — 저장</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Nanum+Myeongjo:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#16161A;--ink-line:#2C2C33;--paper:#F5F1E8;--paper-edge:#E7E0D2;
+--text:#1A1A1E;--muted:#6B6760;--on-ink:#F2EEE5;--on-ink-mut:#9A968E;
+--blue:#3182F6;--bronze:#B8924A;--bronze-d:#947231;
+--serif:'Gowun Batang','Nanum Myeongjo',serif;
+--sans:'Pretendard',-apple-system,'Apple SD Gothic Neo',system-ui,sans-serif}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased}
+body{background:#0E0E11;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:var(--sans);padding:24px}
+.phone{width:390px;height:844px;background:var(--ink);border-radius:46px;position:relative;overflow:hidden;
+box-shadow:0 30px 80px rgba(0,0,0,.5),inset 0 0 0 1px #2a2a30;
+background-image:radial-gradient(120% 80% at 50% -10%,#232329 0%,var(--ink) 55%)}
+.statusbar{height:54px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 8px;color:var(--on-ink);font-size:14px;font-weight:600}
+.navbar{padding:6px 22px 8px}
+.navbar .t{font-family:var(--serif);color:var(--on-ink);font-size:24px;font-weight:700;letter-spacing:-.3px}
+.navbar .s{color:var(--on-ink-mut);font-size:13px;margin-top:4px}
+.list{padding:14px 18px 0;display:flex;flex-direction:column;gap:13px}
+.row{background:var(--paper);border-radius:18px;position:relative;overflow:hidden;display:flex;box-shadow:0 12px 26px rgba(0,0,0,.34)}
+.row::before{content:"";position:absolute;inset:0;border-radius:18px;box-shadow:inset 0 0 0 1px var(--paper-edge);pointer-events:none}
+.row .th{width:96px;flex:none;position:relative}
+.th.ex{background:radial-gradient(120% 90% at 30% 10%,#2b4a8f,#16223f)}
+.th.pf{background:radial-gradient(120% 90% at 30% 10%,#7a2740,#2a1018)}
+.th.pp{background:radial-gradient(120% 90% at 30% 10%,#b9772a,#5a3410)}
+.th .g{position:absolute;inset:0;background:linear-gradient(150deg,rgba(255,255,255,.2),transparent 55%)}
+.notch{position:absolute;top:50%;transform:translateY(-50%);width:16px;height:16px;border-radius:50%;background:var(--ink)}
+.notch.l{left:88px}.notch.r{right:-8px}
+.perfv{position:absolute;left:96px;top:10px;bottom:10px;border-left:2px dashed #cfc6b2}
+.in{padding:13px 15px 13px 18px;flex:1;min-width:0}
+.cat{font-size:11px;font-weight:800;letter-spacing:.3px}
+.cat.ex{color:#1f63c8}.cat.pf{color:#A8324A}.cat.pp{color:#9c6512}
+.tt{font-family:var(--serif);color:var(--text);font-weight:700;font-size:16px;letter-spacing:-.3px;margin-top:5px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mt{color:var(--muted);font-size:12.5px;margin-top:7px;display:flex;align-items:center;gap:6px}
+.dot{width:3px;height:3px;border-radius:50%;background:#c3bba8}
+.bottom{display:flex;align-items:center;justify-content:space-between;margin-top:11px}
+.dday{font-size:11px;font-weight:800;padding:3px 8px;border-radius:7px}
+.dday.soon{background:#FBE7E7;color:#C0392B}
+.dday.norm{background:#EAE4D6;color:#7c7460}
+.find{color:var(--blue);font-weight:700;font-size:12.5px}
+.tabbar{position:absolute;left:50%;transform:translateX(-50%);bottom:26px;width:332px;height:64px;background:rgba(30,30,36,.92);border:1px solid #34343c;border-radius:22px;display:flex;align-items:center;justify-content:space-around;box-shadow:0 16px 40px rgba(0,0,0,.5)}
+.tab{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8d8a92;font-size:11px;font-weight:700;flex:1}
+.tab .ic{font-size:20px}.tab.active{color:var(--on-ink)}.tab.active .ic{color:var(--bronze)}
+.home-ind{position:absolute;bottom:9px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:rgba(255,255,255,.22)}
+.scrim{position:absolute;left:0;right:0;bottom:0;height:120px;background:linear-gradient(transparent,var(--ink) 72%);pointer-events:none}
+</style></head>
+<body>
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span>● ● ● &nbsp; ▮▮</span></div>
+  <div class="navbar"><div class="t">저장</div><div class="s">가보고 싶은 문화 3곳을 담아뒀어요</div></div>
+
+  <div class="list">
+    <div class="row">
+      <div class="th ex"><div class="g"></div></div><div class="perfv"></div>
+      <span class="notch l"></span><span class="notch r"></span>
+      <div class="in">
+        <div class="cat ex">● 전시</div>
+        <div class="tt">빛의 정원: 모네에서 클림트까지</div>
+        <div class="mt">디뮤지엄 · 한남<span class="dot"></span>도보 12분</div>
+        <div class="bottom"><span class="dday soon">D-3 마감임박</span><span class="find">길찾기 ›</span></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="th pf"><div class="g"></div></div><div class="perfv"></div>
+      <span class="notch l"></span><span class="notch r"></span>
+      <div class="in">
+        <div class="cat pf">● 공연</div>
+        <div class="tt">연극 〈우리 읍내〉</div>
+        <div class="mt">예술의전당 · 서초<span class="dot"></span>7/12 19:30</div>
+        <div class="bottom"><span class="dday norm">D-14</span><span class="find">길찾기 ›</span></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="th pp"><div class="g"></div></div><div class="perfv"></div>
+      <span class="notch l"></span><span class="notch r"></span>
+      <div class="in">
+        <div class="cat pp">● 팝업</div>
+        <div class="tt">성수 로컬 디자인 마켓</div>
+        <div class="mt">성수동 · 연무장길<span class="dot"></span>주말 한정</div>
+        <div class="bottom"><span class="dday norm">이번 주말</span><span class="find">길찾기 ›</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scrim"></div>
+  <div class="tabbar">
+    <div class="tab"><div class="ic">◳</div>홈</div>
+    <div class="tab active"><div class="ic">♥</div>저장</div>
+    <div class="tab"><div class="ic">✦</div>포인트</div>
+  </div>
+  <div class="home-ind"></div>
+</div>
+</body></html>

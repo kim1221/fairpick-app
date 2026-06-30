@@ -1,0 +1,93 @@
+<!-- @dsCard group="컬처카드 · 갤러리티켓" -->
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=390">
+<title>컬처카드 — 포인트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Nanum+Myeongjo:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#16161A;--ink-line:#2C2C33;--paper:#F5F1E8;--paper-edge:#E7E0D2;--paper-hi:#FBF8F1;
+--text:#1A1A1E;--muted:#6B6760;--on-ink:#F2EEE5;--on-ink-mut:#9A968E;
+--blue:#3182F6;--bronze:#B8924A;--bronze-d:#947231;
+--serif:'Gowun Batang','Nanum Myeongjo',serif;
+--sans:'Pretendard',-apple-system,'Apple SD Gothic Neo',system-ui,sans-serif}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased}
+body{background:#0E0E11;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:var(--sans);padding:24px}
+.phone{width:390px;height:844px;background:var(--ink);border-radius:46px;position:relative;overflow:hidden;
+box-shadow:0 30px 80px rgba(0,0,0,.5),inset 0 0 0 1px #2a2a30;
+background-image:radial-gradient(120% 80% at 50% -10%,#232329 0%,var(--ink) 55%)}
+.statusbar{height:54px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 8px;color:var(--on-ink);font-size:14px;font-weight:600}
+.navbar{padding:6px 22px 8px}
+.navbar .t{font-family:var(--serif);color:var(--on-ink);font-size:24px;font-weight:700;letter-spacing:-.3px}
+.content{padding:12px 20px 0}
+.card{background:linear-gradient(180deg,var(--paper-hi),var(--paper));border-radius:22px;position:relative;overflow:hidden;box-shadow:0 20px 46px rgba(0,0,0,.46);padding:22px 22px 20px}
+.card::before{content:"";position:absolute;inset:0;border-radius:22px;box-shadow:inset 0 0 0 1px var(--paper-edge);pointer-events:none}
+.lab{font-size:12px;font-weight:800;letter-spacing:1px;color:var(--bronze-d)}
+.bal{display:flex;align-items:baseline;gap:8px;margin-top:8px}
+.bal .n{font-family:var(--serif);font-size:46px;font-weight:800;color:var(--text);line-height:1}
+.bal .u{font-size:16px;font-weight:700;color:var(--muted)}
+.pips{display:flex;gap:5px;margin-top:18px}
+.pip{flex:1;height:10px;border-radius:3px;background:#E2DAC8}
+.pip.on{background:linear-gradient(180deg,var(--bronze),var(--bronze-d))}
+.help{margin-top:14px;color:#54504a;font-size:13px;line-height:1.5}
+.help b{color:var(--text)}
+.perf{position:relative;height:0;border-top:2px dashed #cfc6b2;margin:18px -22px 0}
+.perf::before,.perf::after{content:"";position:absolute;top:-12px;width:22px;height:22px;background:var(--ink);border-radius:50%}
+.perf::before{left:-11px}.perf::after{right:-11px}
+.btn{height:52px;border-radius:14px;border:0;font-family:var(--sans);font-size:16px;font-weight:700;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:18px}
+.btn.primary{background:var(--blue);color:#fff;box-shadow:0 8px 18px rgba(49,130,246,.3)}
+.btn.locked{background:#E7E0D2;color:#A39C8B;box-shadow:none}
+.exinfo{text-align:center;color:var(--muted);font-size:12px;margin-top:11px}
+.exinfo b{color:var(--bronze-d)}
+.sec{color:var(--on-ink);font-weight:700;font-size:15px;margin:24px 4px 12px}
+.hist{display:flex;flex-direction:column;gap:2px}
+.hrow{display:flex;align-items:center;gap:13px;padding:13px 6px;border-bottom:1px solid #232329}
+.hrow .ic{width:38px;height:38px;border-radius:11px;background:#22222a;display:flex;align-items:center;justify-content:center;font-size:17px}
+.hrow .m{flex:1}
+.hrow .m .l{color:var(--on-ink);font-weight:600;font-size:14px}
+.hrow .m .d{color:var(--on-ink-mut);font-size:12px;margin-top:3px}
+.amt{font-weight:800;font-size:15px}
+.amt.plus{color:var(--bronze)}.amt.minus{color:#9A968E}
+.tabbar{position:absolute;left:50%;transform:translateX(-50%);bottom:26px;width:332px;height:64px;background:rgba(30,30,36,.92);border:1px solid #34343c;border-radius:22px;display:flex;align-items:center;justify-content:space-around;box-shadow:0 16px 40px rgba(0,0,0,.5)}
+.tab{display:flex;flex-direction:column;align-items:center;gap:4px;color:#8d8a92;font-size:11px;font-weight:700;flex:1}
+.tab .ic{font-size:20px}.tab.active{color:var(--on-ink)}.tab.active .ic{color:var(--bronze)}
+.home-ind{position:absolute;bottom:9px;left:50%;transform:translateX(-50%);width:128px;height:5px;border-radius:3px;background:rgba(255,255,255,.22)}
+.scrim{position:absolute;left:0;right:0;bottom:0;height:120px;background:linear-gradient(transparent,var(--ink) 72%);pointer-events:none}
+</style></head>
+<body>
+<div class="phone">
+  <div class="statusbar"><span>9:41</span><span>● ● ● &nbsp; ▮▮</span></div>
+  <div class="navbar"><div class="t">포인트</div></div>
+
+  <div class="content">
+    <div class="card">
+      <div class="lab">모은 티켓</div>
+      <div class="bal"><span class="n">7</span><span class="u">/ 10 티켓</span></div>
+      <div class="pips">
+        <span class="pip on"></span><span class="pip on"></span><span class="pip on"></span>
+        <span class="pip on"></span><span class="pip on"></span><span class="pip on"></span>
+        <span class="pip on"></span><span class="pip"></span><span class="pip"></span><span class="pip"></span>
+      </div>
+      <div class="help"><b>3장</b>만 더 모으면 토스포인트로 바꿀 수 있어요.</div>
+      <div class="perf"></div>
+      <button class="btn locked">3장 더 모으기</button>
+      <div class="exinfo">10티켓 = <b>토스포인트 교환</b> · 하루 30티켓까지 모아요</div>
+    </div>
+
+    <div class="sec">최근 내역</div>
+    <div class="hist">
+      <div class="hrow"><div class="ic">🎟</div><div class="m"><div class="l">광고 보고 카드 열기</div><div class="d">오늘</div></div><div class="amt plus">+2</div></div>
+      <div class="hrow"><div class="ic">✓</div><div class="m"><div class="l">출석 체크</div><div class="d">오늘</div></div><div class="amt plus">+1</div></div>
+      <div class="hrow"><div class="ic">🎟</div><div class="m"><div class="l">광고 보고 카드 열기</div><div class="d">어제</div></div><div class="amt plus">+3</div></div>
+      <div class="hrow"><div class="ic">💙</div><div class="m"><div class="l">토스포인트 교환</div><div class="d">6월 28일</div></div><div class="amt minus">−10</div></div>
+    </div>
+  </div>
+
+  <div class="scrim"></div>
+  <div class="tabbar">
+    <div class="tab"><div class="ic">◳</div>홈</div>
+    <div class="tab"><div class="ic">♡</div>저장</div>
+    <div class="tab active"><div class="ic">✦</div>포인트</div>
+  </div>
+  <div class="home-ind"></div>
+</div>
+</body></html>
