@@ -2,7 +2,7 @@
   "name": "fairpick-app",
   "private": true,
   "scripts": {
-    "dev": "granite dev",
+    "dev": "granite dev --port 8082",
     "prebuild": "find . -name '.DS_Store' -not -path '*/node_modules/*' -delete",
     "build": "ait build",
     "test": "jest --passWithNoTests",
