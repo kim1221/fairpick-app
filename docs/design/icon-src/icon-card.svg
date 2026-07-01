@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600px" height="600px" viewBox="0 0 600 600" role="img" aria-label="컬처카드 카드 스택 앱 아이콘">
+  <defs>
+    <radialGradient id="inkGlow" cx="50%" cy="34%" r="72%">
+      <stop offset="0%" stop-color="#24242A"/>
+      <stop offset="62%" stop-color="#16161A"/>
+      <stop offset="100%" stop-color="#101014"/>
+    </radialGradient>
+    <radialGradient id="sealBronze" cx="36%" cy="30%" r="72%">
+      <stop offset="0%" stop-color="#D2B36E"/>
+      <stop offset="42%" stop-color="#B8924A"/>
+      <stop offset="100%" stop-color="#9C7635"/>
+    </radialGradient>
+    <filter id="cardShadow" x="-22%" y="-22%" width="144%" height="144%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.30"/>
+    </filter>
+  </defs>
+  <rect width="600" height="600" fill="url(#inkGlow)"/>
+  <g filter="url(#cardShadow)">
+    <g transform="rotate(-15 300 315)">
+      <rect x="176" y="184" width="248" height="310" rx="32" fill="#E8DDC7"/>
+      <rect x="192" y="204" width="216" height="270" rx="22" fill="none" stroke="#B8924A" stroke-width="5" opacity="0.50"/>
+      <line x1="216" y1="276" x2="384" y2="276" stroke="#9C7635" stroke-width="4" stroke-linecap="round" stroke-dasharray="3 12" opacity="0.42"/>
+    </g>
+    <g transform="rotate(10 300 315)">
+      <rect x="180" y="178" width="248" height="310" rx="32" fill="#F5F1E8"/>
+      <rect x="196" y="198" width="216" height="270" rx="22" fill="none" stroke="#3182F6" stroke-width="5" opacity="0.50"/>
+      <line x1="220" y1="350" x2="388" y2="350" stroke="#3182F6" stroke-width="4" stroke-linecap="round" stroke-dasharray="4 13" opacity="0.36"/>
+    </g>
+    <g>
+      <rect x="176" y="158" width="248" height="310" rx="34" fill="#F5F1E8"/>
+      <rect x="194" y="178" width="212" height="270" rx="23" fill="none" stroke="#B8924A" stroke-width="6" opacity="0.72"/>
+      <line x1="218" y1="238" x2="382" y2="238" stroke="#9C7635" stroke-width="5" stroke-linecap="round" stroke-dasharray="3 14" opacity="0.42"/>
+      <circle cx="300" cy="326" r="62" fill="url(#sealBronze)" stroke="#9C7635" stroke-width="5"/>
+      <circle cx="300" cy="326" r="45" fill="none" stroke="#F5F1E8" stroke-width="3" stroke-linecap="round" stroke-dasharray="2 10" opacity="0.70"/>
+      <text x="300" y="330" fill="#F5F1E8" font-family="'Noto Serif KR', serif" font-size="62" font-weight="700" text-anchor="middle" dominant-baseline="middle">C</text>
+    </g>
+  </g>
+</svg>

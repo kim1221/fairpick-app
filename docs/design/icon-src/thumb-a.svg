@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080px" height="1080px" viewBox="0 0 1080 1080" role="img" aria-label="컬처카드 갤러리 티켓 썸네일">
+  <defs>
+    <radialGradient id="inkGlow" cx="50%" cy="34%" r="76%">
+      <stop offset="0%" stop-color="#24242A"/>
+      <stop offset="58%" stop-color="#16161A"/>
+      <stop offset="100%" stop-color="#101014"/>
+    </radialGradient>
+    <filter id="ticketShadow" x="-18%" y="-18%" width="136%" height="136%">
+      <feDropShadow dx="0" dy="28" stdDeviation="30" flood-color="#000000" flood-opacity="0.34"/>
+    </filter>
+    <mask id="ticketMask">
+      <rect x="220" y="212" width="640" height="404" rx="54" fill="white"/>
+      <circle cx="220" cy="414" r="64" fill="black"/>
+      <circle cx="860" cy="414" r="64" fill="black"/>
+    </mask>
+  </defs>
+  <rect width="1080" height="1080" fill="url(#inkGlow)"/>
+  <g transform="rotate(-6 540 414)" filter="url(#ticketShadow)">
+    <g mask="url(#ticketMask)">
+      <rect x="220" y="212" width="640" height="404" rx="54" fill="#F5F1E8"/>
+      <rect x="244" y="238" width="592" height="352" rx="40" fill="none" stroke="#B8924A" stroke-width="9" opacity="0.84"/>
+      <line x1="288" y1="414" x2="792" y2="414" stroke="#9C7635" stroke-width="8" stroke-linecap="round" stroke-dasharray="8 25"/>
+    </g>
+    <text x="540" y="343" fill="#16161A" font-family="'Noto Serif KR', serif" font-size="150" font-weight="700" text-anchor="middle" dominant-baseline="middle">文化</text>
+    <text x="540" y="516" fill="#B8924A" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="42" font-weight="800" letter-spacing="12" text-anchor="middle">ADMIT ONE</text>
+  </g>
+  <text x="540" y="786" fill="#F5F1E8" font-family="'Noto Serif KR', serif" font-size="118" font-weight="700" text-anchor="middle">컬처카드</text>
+  <text x="540" y="870" fill="#B8924A" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="34" font-weight="600" letter-spacing="0" text-anchor="middle">광고 보고 오늘의 문화를 열어보세요</text>
+</svg>
