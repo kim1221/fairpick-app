@@ -318,7 +318,7 @@ const EventCardBase: React.FC<EventCardProps> = ({ event, onPress, variant = 'de
             onLoad={() => setImageLoaded(true)}
           />
           {!imageLoaded && (
-            <AnimateSkeleton style={StyleSheet.absoluteFill} />
+            <AnimateSkeleton {...({ style: StyleSheet.absoluteFill } as any)} />
           )}
         </>
       ) : null}

@@ -14,7 +14,6 @@ import {
   StoredEventItemV2,
 } from '../utils/storage';
 import eventService from '../services/eventService';
-import http from '../lib/http';
 import { isStoredItemActive, getTodayMidnight } from '../utils/eventStatus';
 import { EventCardData } from '../data/events';
 import { EventImage } from '../components/EventImage';
@@ -195,7 +194,7 @@ const [likeEvents, setLikeEvents] = useState<EventCardData[]>([]);
           })
         );
         const likes = previewItems
-          .map((item, i) => {
+          .map((_item, i) => {
             const result = results[i]!;
             if (result.status === 'fulfilled' && result.value != null) return result.value;
             // API 실패 + snapshot 없음
