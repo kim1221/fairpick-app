@@ -5,14 +5,14 @@ import { Icon } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 
 interface BottomTabBarProps {
-  currentTab: 'home' | 'explore' | 'mypage';
+  currentTab: 'home' | 'saved' | 'points' | 'explore' | 'mypage';
   onHomeTabPress?: () => void; // 홈 탭 진입 시 최상단 스크롤 (다른 탭에서 복귀 포함)
 }
 
 const TAB_ICONS = {
   home: 'icon-home-mono',
-  explore: 'icon-search-bold-mono',
-  mypage: 'icon-user-mono',
+  saved: 'icon-bookmark-mono',
+  points: 'icon-star-mono',
 } as const;
 
 type Adaptive = ReturnType<typeof useAdaptive>;
@@ -57,16 +57,16 @@ export const BottomTabBar: React.FC<BottomTabBarProps> = ({ currentTab, onHomeTa
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   const tabs = [
-    { key: 'home' as const, label: '추천', route: '/' as const },
-    { key: 'explore' as const, label: '발견', route: '/explore' as const },
-    { key: 'mypage' as const, label: 'MY', route: '/mypage' as const },
+    { key: 'home' as const, label: '홈', route: '/' as const },
+    { key: 'saved' as const, label: '저장', route: '/saved' as const },
+    { key: 'points' as const, label: '내 문화', route: '/points' as const },
   ];
 
   const handleTabPress = (tab: typeof tabs[number]) => {
     // 홈 탭: 어디서 진입하든 최상단으로 (다른 탭 복귀 + 현재 탭 재클릭 모두)
     if (tab.key === 'home') onHomeTabPress?.();
     if (tab.key === currentTab) return;
-    navigation.navigate(tab.route);
+    navigation.navigate(tab.route as never);
   };
 
   return (

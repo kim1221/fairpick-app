@@ -17,6 +17,19 @@ export interface TicketInfo {
   ticketsPerExchange: number;
 }
 
+export type TicketHistoryItem = {
+  type: 'ad' | 'attendance' | 'bonus' | 'exchange' | 'visit' | 'stamp' | string;
+  label: string;
+  amount: number;
+  occurredAt: string;
+};
+
+export type TicketHistoryResponse = {
+  ticketCount: number;
+  totalExchanged: number;
+  history: TicketHistoryItem[];
+};
+
 export interface TicketConfig {
   promotionCode: string;
   ticketsPerExchange: number;
@@ -70,6 +83,11 @@ export async function getTicketConfig(): Promise<TicketConfig> {
 
 export async function getTickets(): Promise<TicketInfo> {
   const { data } = await http.get<TicketInfo>('/api/tickets');
+  return data;
+}
+
+export async function getTicketHistory(): Promise<TicketHistoryResponse> {
+  const { data } = await http.get<TicketHistoryResponse>('/api/tickets/history');
   return data;
 }
 
