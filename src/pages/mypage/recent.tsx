@@ -517,10 +517,10 @@ function RecentPage() {
             <Text style={styles.emptySubText}>축제를 둘러보고 기록을 남겨보세요!</Text>
             <TouchableOpacity
               style={styles.emptyCta}
-              onPress={() => navigation.navigate('/explore')}
+              onPress={() => navigation.navigate('/')}
               activeOpacity={0.8}
             >
-              <Text style={styles.emptyCtaText}>이벤트 둘러보기</Text>
+              <Text style={styles.emptyCtaText}>오늘의 카드 보기</Text>
             </TouchableOpacity>
           </View>
         ) : (

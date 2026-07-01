@@ -5,7 +5,7 @@ import { Icon } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 
 interface BottomTabBarProps {
-  currentTab: 'home' | 'saved' | 'points' | 'explore' | 'mypage';
+  currentTab: 'home' | 'saved' | 'points' | 'mypage';
   onHomeTabPress?: () => void; // 홈 탭 진입 시 최상단 스크롤 (다른 탭에서 복귀 포함)
 }
 

@@ -10,6 +10,7 @@ const { config } = require('../../../src/config');
 const cardsRouter = require('../../../src/routes/cards').default;
 const visitsRouter = require('../../../src/routes/visits').default;
 const passportRouter = require('../../../src/routes/passport').default;
+const ticketsRouter = require('../../../src/routes/tickets').default;
 
 const userId = '00000000-0000-4000-8000-000000000001';
 
@@ -288,4 +289,46 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
     { eventId: 'event-1', title: '전시 하나', category: '전시', visitedAt: '2026-06-30T03:00:00.000Z' },
   ]);
   assert.equal(seenParams.length, 1);
+});
+
+test('GET /api/tickets/history includes visit stamp bonuses from user_visit_log', async () => {
+  pool.query = async (sql) => {
+    const text = String(sql);
+    if (text.includes('INSERT INTO user_tickets')) {
+      return { rows: [{ ticket_count: 12, total_earned: 22, total_exchanged: 1 }], rowCount: 1 };
+    }
+    if (text.includes('FROM user_ticket_earn_log') && text.includes('ORDER BY occurred_at DESC')) {
+      assert.match(text, /FROM user_visit_log/);
+      assert.match(text, /'visit' AS type/);
+      assert.match(text, /'가봤어요 도장' AS label/);
+      assert.match(text, /bonus_tickets AS amount/);
+      assert.match(text, /visited_at AS occurred_at/);
+      return {
+        rows: [
+          {
+            type: 'visit',
+            label: '가봤어요 도장',
+            amount: 3,
+            occurred_at: new Date('2026-07-01T03:00:00.000Z'),
+          },
+        ],
+        rowCount: 1,
+      };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(ticketsRouter), 'GET', '/history');
+
+  assert.equal(status, 200);
+  assert.equal(body.ticketCount, 12);
+  assert.equal(body.totalExchanged, 1);
+  assert.deepEqual(body.history, [
+    {
+      type: 'visit',
+      label: '가봤어요 도장',
+      amount: 3,
+      occurredAt: new Date('2026-07-01T03:00:00.000Z'),
+    },
+  ]);
 });

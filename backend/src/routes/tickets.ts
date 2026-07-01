@@ -621,6 +621,12 @@ router.get('/history', requireAuth, async (req: Request, res: Response) => {
 
      UNION ALL
 
+     SELECT 'visit' AS type, '가봤어요 도장' AS label, bonus_tickets AS amount, visited_at AS occurred_at
+     FROM user_visit_log
+     WHERE user_id = $1 AND bonus_tickets > 0 AND visited_at >= NOW() - INTERVAL '3 months'
+
+     UNION ALL
+
      SELECT 'exchange', '포인트 교환', -${TICKETS_PER_EXCHANGE}, confirmed_at
      FROM user_ticket_exchanges
      WHERE user_id = $1 AND status = 'completed' AND confirmed_at >= NOW() - INTERVAL '3 months'
