@@ -289,9 +289,12 @@ export function CultureCardStack({
   const message = activeCard?.opened
     ? '오늘의 문화가 열렸어요'
     : '오늘 만날 문화가 봉인돼 있어요';
+  const activeWalkLabel = typeof activeCard?.walkMinutes === 'number' && activeCard.walkMinutes > 0
+    ? `도보 ${activeCard.walkMinutes}분 거리의 문화가 준비돼 있어요`
+    : null;
   const subMessage = activeCard?.opened
     ? '아래에서 추천 행사와 적립 티켓을 확인해 주세요'
-    : '광고를 보면 카드가 열리고 티켓이 쌓여요';
+    : activeWalkLabel ?? '광고를 보면 카드가 열리고 티켓이 쌓여요';
 
   return (
     <View style={styles.section}>

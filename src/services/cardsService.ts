@@ -31,7 +31,14 @@ export type CardsTodayResponse = {
   dailyLimit: number; // 30
 };
 
-export async function getTodayCards(): Promise<CardsTodayResponse> {
-  const { data } = await http.get<CardsTodayResponse>('/api/cards/today');
+export type CardLocation = {
+  lat: number;
+  lng: number;
+};
+
+export async function getTodayCards(coords?: CardLocation): Promise<CardsTodayResponse> {
+  const { data } = await http.get<CardsTodayResponse>('/api/cards/today', {
+    params: coords ? { lat: coords.lat, lng: coords.lng } : undefined,
+  });
   return data;
 }

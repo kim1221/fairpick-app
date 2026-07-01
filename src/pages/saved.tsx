@@ -21,6 +21,7 @@ import http from '../lib/http';
 import eventService from '../services/eventService';
 import { markVisited } from '../services/visitService';
 import type { GetLikesResponse } from '../types/serverSync';
+import { getCurrentCoordsOrNull } from '../utils/currentLocation';
 import { getLikesV2, subscribeStorageChange, type StoredEventItemV2 } from '../utils/storage';
 import { openNaverMap } from '../utils/mapLinks';
 
@@ -291,10 +292,11 @@ function SavedPage() {
 
     addId(setMarkingIds, item.id);
     try {
-      const result = await markVisited(item.id);
-      addId(setVisitedIds, item.id);
+      const coords = await getCurrentCoordsOrNull();
+      const result = await markVisited(item.id, coords ?? undefined);
 
       if (result.alreadyVisited) {
+        addId(setVisitedIds, item.id);
         showToast({
           title: '이미 가봤어요 도장이 있어요',
           description: '중복 보너스 없이 도장 기록만 확인했어요.',
@@ -302,11 +304,61 @@ function SavedPage() {
         return;
       }
 
+      if (!result.verified) {
+        if (result.reason === 'TOO_FAR') {
+          showToast({
+            title: '행사 근처에서 눌러야 도장을 받을 수 있어요',
+            description: typeof result.distanceM === 'number'
+              ? `지금은 행사장에서 약 ${Math.round(result.distanceM)}m 떨어져 있어요.`
+              : '행사장 근처에서 다시 시도해 주세요.',
+          });
+          return;
+        }
+
+        if (result.reason === 'NO_LOCATION') {
+          showToast({
+            title: '위치 권한을 허용하고 다시 시도해 주세요',
+            description: '현재 위치를 확인해야 도장을 받을 수 있어요.',
+          });
+          return;
+        }
+
+        if (result.reason === 'EVENT_NO_COORDS') {
+          showToast({
+            title: '행사 위치를 확인하지 못했어요',
+            description: '도장을 찍을 수 있도록 위치 정보를 확인하고 있어요.',
+          });
+          return;
+        }
+
+        if (result.reason === 'OUT_OF_PERIOD') {
+          showToast({
+            title: '행사 기간에만 도장을 받을 수 있어요',
+            description: '일정을 확인한 뒤 다시 시도해 주세요.',
+          });
+          return;
+        }
+
+        showToast({
+          title: '도장을 찍지 못했어요',
+          description: '잠시 후 다시 시도해 주세요.',
+        });
+        return;
+      }
+
+      addId(setVisitedIds, item.id);
       setStampSignals((prev) => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }));
-      showToast({
-        title: `+${result.bonusTickets} 티켓을 받았어요`,
-        description: `문화 여권 도장 ${result.stampCount}개째예요.`,
-      });
+      if (result.bonusTickets > 0) {
+        showToast({
+          title: `+${result.bonusTickets} 티켓을 받았어요`,
+          description: `문화 여권 도장 ${result.stampCount}개째예요.`,
+        });
+      } else {
+        showToast({
+          title: '도장을 찍었어요',
+          description: `문화 여권 도장 ${result.stampCount}개째예요.`,
+        });
+      }
     } catch (error) {
       showToast({
         title: '도장을 찍지 못했어요',

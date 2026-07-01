@@ -40,6 +40,7 @@ import {
   type RewardAdEventType,
 } from '../services/ticketService';
 import userEventService from '../services/userEventService';
+import { getCurrentCoordsOrNull } from '../utils/currentLocation';
 import { getLikesV2, toggleLike } from '../utils/storage';
 
 export const Route = createRoute('/', {
@@ -261,7 +262,8 @@ function HomePageInner() {
   }, [startRewardedAdLoad]);
 
   const refreshCards = useCallback(async (nextStatus: HomeStatus = 'ready') => {
-    const data = await getTodayCards();
+    const coords = await getCurrentCoordsOrNull();
+    const data = await getTodayCards(coords ?? undefined);
     if (!mountedRef.current) return;
     setCardsData(data);
     if (hasReachedDailyLimit(data)) {
