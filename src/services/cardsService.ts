@@ -29,6 +29,7 @@ export type CardsTodayResponse = {
   ticketCount: number;
   dailyEarned: number;
   dailyLimit: number; // 30
+  userRegion: string | null; // 내 위치 동네명(역지오코딩), 좌표 없거나 실패 시 null
 };
 
 export type CardLocation = {

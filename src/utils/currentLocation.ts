@@ -7,8 +7,10 @@ export type CurrentCoords = {
 
 export async function getCurrentCoordsOrNull(): Promise<CurrentCoords | null> {
   try {
+    // PermissionStatus = 'notDetermined' | 'denied' | 'allowed'
+    // notDetermined이면 getCurrentLocation 호출이 OS 권한 요청을 트리거하므로 그대로 진행해요.
     const permission = await getCurrentLocation.getPermission();
-    if (permission === 'denied' || permission === 'notDetermined') {
+    if (permission === 'denied') {
       return null;
     }
 

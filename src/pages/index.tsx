@@ -50,9 +50,15 @@ export const Route = createRoute('/', {
 const REWARDED_AD_ID = 'ait.v2.live.b50cf7d900884c5b';
 const AD_LOAD_TIMEOUT_MS = 15_000;
 const AD_SHOW_WATCHDOG_MS = 60_000;
-const INK = '#16161A';
-const INK_LINE = '#2C2C33';
-const BRONZE = '#B8924A';
+// 워엄 다크 배경 + 마닐라 워엄톤 크롬 (컬처카드 태그 방향)
+const INK = '#100D09';
+const INK_BOTTOM = '#0A0805';
+const SURFACE = '#1A140D';
+const LINE = '#4A3F2C';
+const GOLD = '#D9C7A0';
+const TEXT = '#EDE6D6';
+const MUTED = '#9A8F77';
+const MUTED_2 = '#7A6E58';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
 type HomeStatus = 'loading' | 'ready' | 'ad_loading' | 'ad_failed' | 'earn_failed' | 'daily_limit' | 'revealed' | 'empty';
@@ -87,21 +93,21 @@ function createStyles(a: Adaptive) {
       gap: 8,
     },
     mark: {
-      width: 24,
-      height: 24,
-      borderRadius: 7,
-      backgroundColor: BRONZE,
+      width: 25,
+      height: 25,
+      borderRadius: 6,
+      backgroundColor: GOLD,
       alignItems: 'center',
       justifyContent: 'center',
     },
     markText: {
-      color: '#1A1A1E',
+      color: '#2C2A22',
       fontSize: 13,
       lineHeight: 18,
       fontWeight: '900',
     },
     name: {
-      color: '#F2EEE5',
+      color: TEXT,
       fontSize: 17,
       lineHeight: 23,
       fontWeight: '800',
@@ -112,42 +118,51 @@ function createStyles(a: Adaptive) {
       borderRadius: 999,
       paddingHorizontal: 13,
       borderWidth: 1,
-      borderColor: INK_LINE,
-      backgroundColor: '#26262C',
+      borderColor: LINE,
+      backgroundColor: 'transparent',
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       gap: 6,
     },
-    ticketChipText: {
-      color: '#F2EEE5',
+    ticketChipNumber: {
+      color: TEXT,
       fontSize: 14,
       lineHeight: 19,
-      fontWeight: '900',
+      fontWeight: '800',
     },
-    ticketChipNumber: {
-      color: BRONZE,
+    ticketChipLabel: {
+      color: MUTED_2,
+      fontSize: 11,
+      lineHeight: 15,
+      fontWeight: '700',
+    },
+    ticketChipChevron: {
+      color: MUTED_2,
+      fontSize: 12,
+      lineHeight: 16,
+      fontWeight: '700',
     },
     loadingBox: {
       marginHorizontal: 22,
       marginTop: 18,
       borderRadius: 16,
       borderWidth: 1,
-      borderColor: INK_LINE,
-      backgroundColor: '#1D1D22',
+      borderColor: LINE,
+      backgroundColor: SURFACE,
       padding: 22,
       alignItems: 'center',
       gap: 12,
     },
     loadingTitle: {
-      color: '#F2EEE5',
+      color: TEXT,
       fontSize: 18,
       lineHeight: 24,
       fontWeight: '800',
       textAlign: 'center',
     },
     loadingDesc: {
-      color: '#9A968E',
+      color: MUTED,
       fontSize: 14,
       lineHeight: 21,
       fontWeight: '600',
@@ -158,19 +173,19 @@ function createStyles(a: Adaptive) {
       marginTop: 16,
       borderRadius: 16,
       borderWidth: 1,
-      borderColor: INK_LINE,
-      backgroundColor: '#1D1D22',
+      borderColor: LINE,
+      backgroundColor: SURFACE,
       padding: 16,
       gap: 12,
     },
     loginTitle: {
-      color: '#F2EEE5',
+      color: TEXT,
       fontSize: 16,
       lineHeight: 23,
       fontWeight: '800',
     },
     loginDesc: {
-      color: '#9A968E',
+      color: MUTED,
       fontSize: 13,
       lineHeight: 20,
       fontWeight: '600',
@@ -311,6 +326,8 @@ function HomePageInner() {
   const ticketCount = cardsData?.ticketCount ?? 0;
   const dailyEarned = cardsData?.dailyEarned ?? 0;
   const dailyLimit = cardsData?.dailyLimit ?? 30;
+  const bonusMode = progress.opened >= 3 && !dailyLimitReached && !!activeCard;
+  const openedTodayCards = useMemo(() => todayCards.filter((card) => card.opened), [todayCards]);
 
   const handleRefresh = useCallback(async () => {
     if (!isLoggedIn) return;
@@ -556,7 +573,9 @@ function HomePageInner() {
     ? '로그인하고 열기'
     : dailyLimitReached
       ? '오늘 티켓 완료'
-      : '광고 보고 열기';
+      : bonusMode
+        ? '광고 보고 보너스 열기'
+        : '광고 보고 열기';
   const stackDisabled = (
     authLoading
     || loginPending
@@ -570,9 +589,9 @@ function HomePageInner() {
       <ScrollView
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={BRONZE} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={GOLD} />}
       >
-        <ScrollViewInertialBackground topColor={INK} bottomColor={INK} />
+        <ScrollViewInertialBackground topColor={INK} bottomColor={INK_BOTTOM} />
         <View style={[styles.header, { paddingTop: top + 14 }]}>
           <View style={styles.nav}>
             <View style={styles.brand}>
@@ -582,10 +601,10 @@ function HomePageInner() {
               <Text style={styles.name}>컬처카드</Text>
             </View>
             <Pressable style={styles.ticketChip} onPress={() => navigation.navigate('/points' as never)}>
-              <Icon name="icon-star-mono" size={15} color={BRONZE} />
-              <Text style={styles.ticketChipText}>
-                <Text style={styles.ticketChipNumber}>{ticketCount}</Text>
-              </Text>
+              <Icon name="icon-ticket-mono" size={15} color={GOLD} />
+              <Text style={styles.ticketChipNumber}>{ticketCount}</Text>
+              <Text style={styles.ticketChipLabel}>티켓</Text>
+              <Text style={styles.ticketChipChevron}>›</Text>
             </Pressable>
           </View>
         </View>
@@ -609,11 +628,14 @@ function HomePageInner() {
               disabled={stackDisabled}
               actionLabel={actionLabel}
               onOpen={handleOpenCard}
+              bonusMode={bonusMode}
+              openedCards={openedTodayCards}
+              userRegion={cardsData?.userRegion ?? null}
             />
 
             {status === 'loading' ? (
               <View style={styles.loadingBox}>
-                <ActivityIndicator color={BRONZE} />
+                <ActivityIndicator color={GOLD} />
                 <Text style={styles.loadingTitle}>카드를 준비하고 있어요</Text>
                 <Text style={styles.loadingDesc}>오늘 열어볼 문화 이벤트를 고르는 중이에요.</Text>
               </View>
@@ -621,7 +643,7 @@ function HomePageInner() {
 
             {status === 'ad_loading' ? (
               <View style={styles.loadingBox}>
-                <ActivityIndicator color={BRONZE} />
+                <ActivityIndicator color={GOLD} />
                 <Text style={styles.loadingTitle}>광고 확인 중</Text>
                 <Text style={styles.loadingDesc}>광고가 끝나면 서버에서 티켓을 적립해요.</Text>
               </View>

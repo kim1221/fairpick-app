@@ -43,4 +43,11 @@ dist/
 **/dist/
 node_modules/
 **/node_modules/
-.DS_Store\n# ===== mTLS 인증서 (절대 커밋 금지) =====\nbackend/certs/
+.DS_Store
+
+# ===== mTLS 인증서 (절대 커밋 금지) =====
+backend/certs/
+**/certs/
+*.pem
+*.key
+*.p12

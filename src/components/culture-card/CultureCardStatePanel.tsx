@@ -1,8 +1,5 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useAdaptive } from '@toss/tds-react-native/private';
-
-type Adaptive = ReturnType<typeof useAdaptive>;
 
 interface CultureCardStatePanelProps {
   label: string;
@@ -13,15 +10,23 @@ interface CultureCardStatePanelProps {
   onAction?: () => void;
 }
 
-function createStyles(a: Adaptive) {
+// 워엄 다크 · 마닐라 토큰(컬처카드 태그 방향)
+const MANILA = '#D9C7A0';
+const INK = '#2C2A22';
+const WARM_TEXT = '#EDE6D6';
+const WARM_SUB = '#9A8F77';
+const WARM_SURFACE = '#1A140D';
+const WARM_LINE = '#4A3F2C';
+
+function createStyles() {
   return StyleSheet.create({
     wrap: {
       marginHorizontal: 22,
       marginTop: 18,
-      backgroundColor: '#1D1D22',
+      backgroundColor: WARM_SURFACE,
       borderRadius: 16,
       borderWidth: 1,
-      borderColor: '#2C2C33',
+      borderColor: WARM_LINE,
       padding: 22,
       alignItems: 'center',
       gap: 12,
@@ -39,23 +44,21 @@ function createStyles(a: Adaptive) {
       width: 76,
       height: 76,
       borderRadius: 22,
-      backgroundColor: a.grey100,
       alignItems: 'center',
       justifyContent: 'center',
     },
     iconText: {
       fontSize: 30,
       fontWeight: '900',
-      color: a.grey500,
     },
     title: {
-      color: '#F2EEE5',
+      color: WARM_TEXT,
       fontSize: 19,
       fontWeight: '800',
       textAlign: 'center',
     },
     description: {
-      color: '#9A968E',
+      color: WARM_SUB,
       fontSize: 14,
       lineHeight: 20,
       fontWeight: '500',
@@ -66,31 +69,31 @@ function createStyles(a: Adaptive) {
       width: '100%',
       height: 50,
       borderRadius: 14,
-      backgroundColor: '#3182F6',
+      backgroundColor: MANILA,
       alignItems: 'center',
       justifyContent: 'center',
     },
     secondaryButton: {
-      backgroundColor: '#26262C',
+      backgroundColor: 'transparent',
       borderWidth: 1,
-      borderColor: '#34343C',
+      borderColor: WARM_LINE,
     },
     buttonText: {
-      color: '#FFFFFF',
+      color: INK,
       fontSize: 15,
       fontWeight: '800',
     },
     secondaryButtonText: {
-      color: '#F2EEE5',
+      color: WARM_TEXT,
     },
   });
 }
 
 const toneColors = {
-  neutral: { backgroundColor: '#F2F4F6', color: '#8B95A1', mark: '-' },
-  danger: { backgroundColor: '#FDECEE', color: '#F04452', mark: '!' },
-  success: { backgroundColor: 'rgba(184,146,74,0.16)', color: '#B8924A', mark: '+' },
-  blue: { backgroundColor: '#EAF2FE', color: '#3182F6', mark: 'T' },
+  neutral: { backgroundColor: 'rgba(217,199,160,0.14)', color: '#C9B688', mark: '-' },
+  danger: { backgroundColor: 'rgba(168,51,31,0.18)', color: '#C9614B', mark: '!' },
+  success: { backgroundColor: 'rgba(217,199,160,0.18)', color: MANILA, mark: '+' },
+  blue: { backgroundColor: 'rgba(217,199,160,0.18)', color: MANILA, mark: 'T' },
 } as const;
 
 export function CultureCardStatePanel({
@@ -101,8 +104,7 @@ export function CultureCardStatePanel({
   tone = 'neutral',
   onAction,
 }: CultureCardStatePanelProps) {
-  const adaptive = useAdaptive();
-  const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
+  const styles = React.useMemo(() => createStyles(), []);
   const colors = toneColors[tone];
   const isPrimary = tone === 'danger' || tone === 'blue' || tone === 'success';
 

@@ -237,3 +237,46 @@ export function extractRegion(address: string): string | null {
   );
   return match ? match[1] : null;
 }
+
+// ─────────────────────────────────────────────────────────────
+// 역지오코딩: 좌표 → 동네명 (Kakao coord2regioncode)
+// 홈에서 "내 위치: 성수동" 표시용. ~100m 그리드 캐시 + 1h TTL로 과호출 방지.
+// ─────────────────────────────────────────────────────────────
+interface ReverseGeocodeDoc {
+  region_type?: string; // 'H'(행정동) | 'B'(법정동)
+  region_1depth_name?: string; // 시/도
+  region_2depth_name?: string; // 구/군
+  region_3depth_name?: string; // 동
+}
+
+const reverseRegionCache = new Map<string, { region: string | null; at: number }>();
+const REVERSE_REGION_TTL_MS = 60 * 60 * 1000;
+
+export async function reverseGeocodeRegion(lat: number, lng: number): Promise<string | null> {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (!config.kakaoRestApiKey) return null;
+
+  const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+  const cached = reverseRegionCache.get(key);
+  if (cached && Date.now() - cached.at < REVERSE_REGION_TTL_MS) return cached.region;
+
+  try {
+    const res = await axios.get('https://dapi.kakao.com/v2/local/geo/coord2regioncode.json', {
+      headers: { Authorization: `KakaoAK ${config.kakaoRestApiKey}` },
+      params: { x: lng, y: lat },
+      timeout: 3000,
+    });
+    const docs: ReverseGeocodeDoc[] = res.data?.documents ?? [];
+    // 행정동(H) 우선, 없으면 첫 문서
+    const pick = docs.find((d) => d.region_type === 'H') ?? docs[0];
+    // 행정동의 숫자/가 정리(성수2가3동 → 성수동)해서 친근한 동네명으로
+    const rawDong = pick?.region_3depth_name ?? null;
+    const cleanDong = rawDong ? rawDong.replace(/\d+가?/g, '').trim() || rawDong : null;
+    const region = cleanDong || pick?.region_2depth_name || pick?.region_1depth_name || null;
+    reverseRegionCache.set(key, { region, at: Date.now() });
+    return region;
+  } catch (err) {
+    console.error('[Geocode] reverse failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}

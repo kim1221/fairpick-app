@@ -30,6 +30,7 @@ function response(overrides: Partial<CardsTodayResponse> = {}): CardsTodayRespon
     ticketCount: 7,
     dailyEarned: 12,
     dailyLimit: 30,
+    userRegion: null,
     ...overrides,
   };
 }

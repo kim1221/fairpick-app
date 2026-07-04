@@ -3,7 +3,7 @@ import { Storage } from '@apps-in-toss/framework';
 /**
  * Session ID 관리 유틸리티
  *
- * @apps-in-toss/framework Storage 사용 (AsyncStorage 대신)
+ * @apps-in-toss/framework 의 Storage 사용 (RN 비영속 저장 API 대신 · white-out 방지)
  *
  * 단계 2: inactivity timeout 기반 세션
  *   - 30분 비활동 후 재진입 시 새 session_id 발급

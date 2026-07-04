@@ -98,5 +98,6 @@ export function markCardOpened(data: CardsTodayResponse, eventId: string, ticket
     ticketCount: ticketResult.ticketCount,
     dailyEarned: ticketResult.dailyEarned,
     dailyLimit: ticketResult.dailyLimit,
+    userRegion: data.userRegion,
   };
 }

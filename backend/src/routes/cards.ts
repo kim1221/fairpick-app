@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import { pool } from '../db';
 import { requireAuth } from '../middleware/requireAuth';
 import { calculateBoundingBox, getHaversineDistanceSQL } from '../utils/geo';
+import { reverseGeocodeRegion } from '../lib/geocode';
 
 const router = express.Router();
 
@@ -233,6 +234,10 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const today = todayKst();
   const location = parseLocationQuery(req);
+  // 좌표 → 동네명(내 위치 표시용). 쿼리와 병렬, 실패해도 무시.
+  const userRegionPromise: Promise<string | null> = location
+    ? reverseGeocodeRegion(location.lat, location.lng).catch(() => null)
+    : Promise.resolve(null);
 
   try {
     const [ticketResult, openedResult] = await Promise.all([
@@ -271,6 +276,7 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
     const todayIds = new Set(todayCards.map((card) => card.eventId));
     const morePool = cards.filter((card) => !todayIds.has(card.eventId));
     const dailyEarnedDate = ticketRow.daily_earned_date ? String(ticketRow.daily_earned_date).slice(0, 10) : null;
+    const userRegion = await userRegionPromise;
 
     return res.json({
       today: todayCards,
@@ -278,6 +284,7 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
       ticketCount: ticketRow.ticket_count ?? 0,
       dailyEarned: dailyEarnedDate === today ? (ticketRow.daily_earned ?? 0) : 0,
       dailyLimit: DAILY_LIMIT,
+      userRegion,
     });
   } catch (err) {
     console.error('[Cards] today error:', err);
