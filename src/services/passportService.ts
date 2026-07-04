@@ -12,6 +12,9 @@ export type PassportStamp = {
   eventId: string;
   title: string;
   category: string;
+  region: string | null;
+  venue: string | null;
+  imageUrl: string | null;
   visitedAt: string;
 };
 
@@ -21,7 +24,7 @@ export type PassportResponse = {
   visitedCount: number; // user_visit_log distinct
   monthDiscovered: number; // 이번달(KST) 발견 수
   tasteCategories: string[]; // 상위 2~3 카테고리
-  stamps: PassportStamp[]; // 최근 방문(도장 그리드용, 최대 12)
+  stamps: PassportStamp[]; // 다녀온 문화(도장 그리드용, 최대 60, visitedAt 내림차순)
 };
 
 export async function getPassport(): Promise<PassportResponse> {

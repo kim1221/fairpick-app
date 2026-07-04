@@ -192,266 +192,72 @@ test('GET /api/cards/today expands nearby radius, excludes opened events, divers
   assert.equal(body.morePool.some((card) => card.eventId === 'event-opened'), false);
 });
 
-test('POST /api/visits grants a first-visit bonus in one transaction', async () => {
-  const eventLat = 37.5665;
-  const eventLng = 126.9780;
+test('POST /api/visits records a self-report stamp without location or reward', async () => {
   const queries = [];
-  const client = {
-    query: async (sql, params) => {
-      const text = String(sql);
-      queries.push(text);
-      if (text === 'BEGIN' || text === 'COMMIT') return { rows: [], rowCount: null };
-      if (text.includes('INSERT INTO user_tickets')) return { rows: [], rowCount: 1 };
-      if (text.includes('FROM user_tickets') && text.includes('FOR UPDATE')) return { rows: [{ ticket_count: 2 }], rowCount: 1 };
-      if (text.includes('FROM user_visit_log') && text.includes('LIMIT 1')) return { rows: [], rowCount: 0 };
-      if (text.includes('FROM canonical_events')) {
-        assert.equal(params[0], 'event-visit-1');
-        return {
-          rows: [{
-            id: 'event-visit-1',
-            lat: eventLat,
-            lng: eventLng,
-            start_at: isoDaysFromNow(-1),
-            end_at: isoDaysFromNow(1),
-          }],
-          rowCount: 1,
-        };
-      }
-      if (text.includes('INSERT INTO user_visit_log')) return { rows: [{ id: 'visit-1' }], rowCount: 1 };
-      if (text.includes('COUNT(*)') && text.includes('bonus_tickets > 0')) return { rows: [{ count: '0' }], rowCount: 1 };
-      if (text.includes('UPDATE user_tickets')) return { rows: [{ ticket_count: 5 }], rowCount: 1 };
-      if (text.includes('UPDATE user_visit_log')) {
-        assert.equal(params[0], 3);
-        assert.equal(params[2], eventLat);
-        assert.equal(params[3], eventLng);
-        return { rows: [], rowCount: 1 };
-      }
-      if (text.includes('COUNT(DISTINCT event_id)')) return { rows: [{ count: '1' }], rowCount: 1 };
-      throw new Error(`Unexpected query: ${text}`);
-    },
-    release() {},
+  pool.query = async (sql, params) => {
+    const text = String(sql);
+    queries.push(text);
+    if (text.includes('INSERT INTO user_visit_log')) {
+      assert.equal(params[0], userId);
+      assert.equal(params[1], 'event-visit-1');
+      return { rows: [{ id: 'visit-1' }], rowCount: 1 };
+    }
+    if (text.includes('COUNT(DISTINCT event_id)') && text.includes('FROM user_visit_log')) {
+      return { rows: [{ count: '5' }], rowCount: 1 };
+    }
+    throw new Error(`Unexpected query: ${text}`);
   };
-  pool.connect = async () => client;
 
-  const { status, body } = await request(makeApp(visitsRouter), 'POST', '/', {
-    eventId: 'event-visit-1',
-    lat: eventLat,
-    lng: eventLng,
-  });
+  const { status, body } = await request(makeApp(visitsRouter), 'POST', '/', { eventId: 'event-visit-1' });
 
   assert.equal(status, 200);
   assert.equal(body.ok, true);
   assert.equal(body.alreadyVisited, false);
-  assert.equal(body.verified, true);
-  assert.equal(body.bonusTickets, 3);
-  assert.equal(body.ticketCount, 5);
-  assert.equal(body.stampCount, 1);
-  assert.equal(body.distanceM <= 1, true);
-  assert.equal(queries[0], 'BEGIN');
-  assert.equal(queries.at(-1), 'COMMIT');
-  assert.ok(queries.some((sql) => /FOR UPDATE/i.test(sql)));
+  assert.equal(body.stampCount, 5);
+  // 자기신고: 위치/보상/트랜잭션/티켓업데이트 없음
+  assert.equal(body.bonusTickets, undefined);
+  assert.equal(body.verified, undefined);
+  assert.equal(queries.some((sql) => /FOR UPDATE|UPDATE user_tickets|FROM canonical_events/i.test(sql)), false);
 });
 
-test('POST /api/visits fails closed without device coordinates', async () => {
-  const queries = [];
-  const client = {
-    query: async (sql) => {
-      const text = String(sql);
-      queries.push(text);
-      if (text === 'BEGIN' || text === 'COMMIT') return { rows: [], rowCount: null };
-      if (text.includes('INSERT INTO user_tickets')) return { rows: [], rowCount: 1 };
-      if (text.includes('FROM user_tickets') && text.includes('FOR UPDATE')) return { rows: [{ ticket_count: 2 }], rowCount: 1 };
-      if (text.includes('FROM user_visit_log') && text.includes('LIMIT 1')) return { rows: [], rowCount: 0 };
-      if (text.includes('COUNT(DISTINCT event_id)')) return { rows: [{ count: '0' }], rowCount: 1 };
-      throw new Error(`Unexpected query: ${text}`);
-    },
-    release() {},
+test('POST /api/visits is idempotent for an already stamped event', async () => {
+  pool.query = async (sql) => {
+    const text = String(sql);
+    if (text.includes('INSERT INTO user_visit_log')) return { rows: [], rowCount: 0 };
+    if (text.includes('COUNT(DISTINCT event_id)') && text.includes('FROM user_visit_log')) return { rows: [{ count: '5' }], rowCount: 1 };
+    throw new Error(`Unexpected query: ${text}`);
   };
-  pool.connect = async () => client;
 
   const { status, body } = await request(makeApp(visitsRouter), 'POST', '/', { eventId: 'event-visit-1' });
 
   assert.equal(status, 200);
-  assert.equal(body.verified, false);
-  assert.equal(body.reason, 'NO_LOCATION');
-  assert.equal(body.alreadyVisited, false);
-  assert.equal(body.bonusTickets, 0);
-  assert.equal(body.ticketCount, 2);
-  assert.equal(body.stampCount, 0);
-  assert.equal(queries.some((sql) => sql.includes('INSERT INTO user_visit_log')), false);
-  assert.equal(queries.some((sql) => sql.includes('UPDATE user_tickets')), false);
+  assert.equal(body.ok, true);
+  assert.equal(body.alreadyVisited, true);
+  assert.equal(body.stampCount, 5);
 });
 
-test('POST /api/visits fails closed when device is too far from event', async () => {
-  const eventLat = 37.5665;
-  const eventLng = 126.9780;
-  const client = {
-    query: async (sql, params) => {
-      const text = String(sql);
-      if (text === 'BEGIN' || text === 'COMMIT') return { rows: [], rowCount: null };
-      if (text.includes('INSERT INTO user_tickets')) return { rows: [], rowCount: 1 };
-      if (text.includes('FROM user_tickets') && text.includes('FOR UPDATE')) return { rows: [{ ticket_count: 2 }], rowCount: 1 };
-      if (text.includes('FROM user_visit_log') && text.includes('LIMIT 1')) return { rows: [], rowCount: 0 };
-      if (text.includes('FROM canonical_events')) {
-        assert.equal(params[0], 'event-far');
-        return {
-          rows: [{
-            id: 'event-far',
-            lat: eventLat,
-            lng: eventLng,
-            start_at: isoDaysFromNow(-1),
-            end_at: isoDaysFromNow(1),
-          }],
-          rowCount: 1,
-        };
-      }
-      if (text.includes('COUNT(DISTINCT event_id)')) return { rows: [{ count: '0' }], rowCount: 1 };
-      if (text.includes('INSERT INTO user_visit_log')) throw new Error('far visits must not stamp');
-      if (text.includes('UPDATE user_tickets')) throw new Error('far visits must not grant tickets');
-      throw new Error(`Unexpected query: ${text}`);
-    },
-    release() {},
-  };
-  pool.connect = async () => client;
+test('POST /api/visits requires an eventId', async () => {
+  pool.query = async () => { throw new Error('must not query without eventId'); };
 
-  const { status, body } = await request(makeApp(visitsRouter), 'POST', '/', {
-    eventId: 'event-far',
-    lat: eventLat,
-    lng: closeLng(eventLat, eventLng, 1200),
-  });
+  const { status, body } = await request(makeApp(visitsRouter), 'POST', '/', {});
+
+  assert.equal(status, 400);
+  assert.equal(body.error, 'MISSING_EVENT_ID');
+});
+
+test('GET /api/visits/ids returns the visited event id set', async () => {
+  pool.query = async (sql) => {
+    const text = String(sql);
+    if (text.includes('SELECT DISTINCT event_id') && text.includes('FROM user_visit_log')) {
+      return { rows: [{ event_id: 'a' }, { event_id: 'b' }], rowCount: 2 };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(visitsRouter), 'GET', '/ids');
 
   assert.equal(status, 200);
-  assert.equal(body.verified, false);
-  assert.equal(body.reason, 'TOO_FAR');
-  assert.equal(body.alreadyVisited, false);
-  assert.equal(body.bonusTickets, 0);
-  assert.equal(body.distanceM > 400, true);
-});
-
-test('POST /api/visits is idempotent for an already visited event', async () => {
-  const client = {
-    query: async (sql) => {
-      const text = String(sql);
-      if (text === 'BEGIN' || text === 'COMMIT') return { rows: [], rowCount: null };
-      if (text.includes('INSERT INTO user_tickets')) return { rows: [], rowCount: 1 };
-      if (text.includes('FROM user_tickets') && text.includes('FOR UPDATE')) return { rows: [{ ticket_count: 8 }], rowCount: 1 };
-      if (text.includes('FROM user_visit_log') && text.includes('LIMIT 1')) return { rows: [{ id: 'visit-existing' }], rowCount: 1 };
-      if (text.includes('INSERT INTO user_visit_log')) throw new Error('already visited events must not insert a new stamp');
-      if (text.includes('COUNT(DISTINCT event_id)')) return { rows: [{ count: '3' }], rowCount: 1 };
-      throw new Error(`Unexpected query: ${text}`);
-    },
-    release() {},
-  };
-  pool.connect = async () => client;
-
-  const { status, body } = await request(makeApp(visitsRouter), 'POST', '/', { eventId: 'event-visit-1' });
-
-  assert.equal(status, 200);
-  assert.deepEqual(body, {
-    ok: true,
-    alreadyVisited: true,
-    verified: true,
-    bonusTickets: 0,
-    ticketCount: 8,
-    stampCount: 3,
-  });
-});
-
-test('POST /api/visits stamps but does not grant after ten daily visit bonuses', async () => {
-  const eventLat = 37.5665;
-  const eventLng = 126.9780;
-  const client = {
-    query: async (sql, params) => {
-      const text = String(sql);
-      if (text === 'BEGIN' || text === 'COMMIT') return { rows: [], rowCount: null };
-      if (text.includes('INSERT INTO user_tickets')) return { rows: [], rowCount: 1 };
-      if (text.includes('FROM user_tickets') && text.includes('FOR UPDATE')) return { rows: [{ ticket_count: 11 }], rowCount: 1 };
-      if (text.includes('FROM user_visit_log') && text.includes('LIMIT 1')) return { rows: [], rowCount: 0 };
-      if (text.includes('FROM canonical_events')) {
-        return {
-          rows: [{
-            id: 'event-visit-11',
-            lat: eventLat,
-            lng: eventLng,
-            start_at: isoDaysFromNow(-1),
-            end_at: isoDaysFromNow(1),
-          }],
-          rowCount: 1,
-        };
-      }
-      if (text.includes('INSERT INTO user_visit_log')) return { rows: [{ id: 'visit-11' }], rowCount: 1 };
-      if (text.includes('COUNT(*)') && text.includes('bonus_tickets > 0')) return { rows: [{ count: '10' }], rowCount: 1 };
-      if (text.includes('UPDATE user_tickets')) throw new Error('user_tickets must not be incremented after daily visit cap');
-      if (text.includes('UPDATE user_visit_log')) {
-        assert.equal(params[0], 0);
-        return { rows: [], rowCount: 1 };
-      }
-      if (text.includes('COUNT(DISTINCT event_id)')) return { rows: [{ count: '11' }], rowCount: 1 };
-      throw new Error(`Unexpected query: ${text}`);
-    },
-    release() {},
-  };
-  pool.connect = async () => client;
-
-  const { status, body } = await request(makeApp(visitsRouter), 'POST', '/', {
-    eventId: 'event-visit-11',
-    lat: eventLat,
-    lng: eventLng,
-  });
-
-  assert.equal(status, 200);
-  assert.equal(body.alreadyVisited, false);
-  assert.equal(body.verified, true);
-  assert.equal(body.bonusTickets, 0);
-  assert.equal(body.ticketCount, 11);
-  assert.equal(body.stampCount, 11);
-});
-
-test('POST /api/visits handles concurrent duplicate attempts with one bonus result and one idempotent result', async () => {
-  const eventLat = 37.5665;
-  const eventLng = 126.9780;
-  let insertCount = 0;
-  const client = {
-    query: async (sql) => {
-      const text = String(sql);
-      if (text === 'BEGIN' || text === 'COMMIT') return { rows: [], rowCount: null };
-      if (text.includes('INSERT INTO user_tickets')) return { rows: [], rowCount: 1 };
-      if (text.includes('FROM user_tickets') && text.includes('FOR UPDATE')) return { rows: [{ ticket_count: insertCount === 0 ? 4 : 7 }], rowCount: 1 };
-      if (text.includes('FROM user_visit_log') && text.includes('LIMIT 1')) return { rows: [], rowCount: 0 };
-      if (text.includes('FROM canonical_events')) {
-        return {
-          rows: [{
-            id: 'event-race',
-            lat: eventLat,
-            lng: eventLng,
-            start_at: isoDaysFromNow(-1),
-            end_at: isoDaysFromNow(1),
-          }],
-          rowCount: 1,
-        };
-      }
-      if (text.includes('INSERT INTO user_visit_log')) {
-        insertCount += 1;
-        return insertCount === 1 ? { rows: [{ id: 'visit-race' }], rowCount: 1 } : { rows: [], rowCount: 0 };
-      }
-      if (text.includes('COUNT(*)') && text.includes('bonus_tickets > 0')) return { rows: [{ count: '0' }], rowCount: 1 };
-      if (text.includes('UPDATE user_tickets')) return { rows: [{ ticket_count: 7 }], rowCount: 1 };
-      if (text.includes('UPDATE user_visit_log')) return { rows: [], rowCount: 1 };
-      if (text.includes('COUNT(DISTINCT event_id)')) return { rows: [{ count: '4' }], rowCount: 1 };
-      throw new Error(`Unexpected query: ${text}`);
-    },
-    release() {},
-  };
-  pool.connect = async () => client;
-  const app = makeApp(visitsRouter);
-
-  const [first, second] = await Promise.all([
-    request(app, 'POST', '/', { eventId: 'event-race', lat: eventLat, lng: eventLng }),
-    request(app, 'POST', '/', { eventId: 'event-race', lat: eventLat, lng: eventLng }),
-  ]);
-
-  assert.deepEqual([first.body.bonusTickets, second.body.bonusTickets].sort(), [0, 3]);
-  assert.deepEqual([first.body.alreadyVisited, second.body.alreadyVisited].sort(), [false, true]);
+  assert.deepEqual(body.eventIds, ['a', 'b']);
 });
 
 test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp summary', async () => {
@@ -475,8 +281,8 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
     if (text.includes('FROM user_visit_log') && text.includes('JOIN canonical_events')) {
       return {
         rows: [
-          { event_id: 'event-2', title: '공연 둘', category: '공연', visited_at: '2026-07-01T03:00:00.000Z' },
-          { event_id: 'event-1', title: '전시 하나', category: '전시', visited_at: '2026-06-30T03:00:00.000Z' },
+          { event_id: 'event-2', title: '공연 둘', category: '공연', region: '용산구', venue: '노들섬', image_url: 'http://img/2.jpg', visited_at: '2026-07-01T03:00:00.000Z' },
+          { event_id: 'event-1', title: '전시 하나', category: '전시', region: '성동구', venue: '성수 코사이어티', image_url: null, visited_at: '2026-06-30T03:00:00.000Z' },
         ],
       };
     }
@@ -492,8 +298,8 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
   assert.equal(body.monthDiscovered, 3);
   assert.deepEqual(body.tasteCategories, ['전시', '팝업', '기타']);
   assert.deepEqual(body.stamps, [
-    { eventId: 'event-2', title: '공연 둘', category: '공연', visitedAt: '2026-07-01T03:00:00.000Z' },
-    { eventId: 'event-1', title: '전시 하나', category: '전시', visitedAt: '2026-06-30T03:00:00.000Z' },
+    { eventId: 'event-2', title: '공연 둘', category: '공연', region: '용산구', venue: '노들섬', imageUrl: 'http://img/2.jpg', visitedAt: '2026-07-01T03:00:00.000Z' },
+    { eventId: 'event-1', title: '전시 하나', category: '전시', region: '성동구', venue: '성수 코사이어티', imageUrl: null, visitedAt: '2026-06-30T03:00:00.000Z' },
   ]);
   assert.equal(seenParams.length, 1);
 });

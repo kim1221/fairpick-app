@@ -18,6 +18,9 @@ const SOON_BG = '#FBE7E7';
 const SOON_TEXT = '#C0392B';
 const NORMAL_BG = '#EAE4D6';
 const NORMAL_TEXT = '#7C7460';
+// 골드 솔리드 CTA(시안 --gold)
+const GOLD = '#CBA15E';
+const GOLD_INK = '#1E1608';
 const STAMP = '#A8324A';
 
 export type VisitButtonState = 'idle' | 'loading' | 'visited';
@@ -99,9 +102,9 @@ export function SavedTicketRow({
   }, [stampOpacity, stampScale, stampSignal, visitState]);
 
   const visitLabel = useMemo(() => {
-    if (visitState === 'loading') return '찍는 중';
-    if (visitState === 'visited') return '도장 완료';
-    return '가봤어요';
+    if (visitState === 'loading') return '기록 중';
+    if (visitState === 'visited') return '다녀옴 ✓';
+    return '◉ 다녀왔어요';
   }, [visitState]);
 
   const isDeleted = item.lastKnownStatus === 'deleted';
@@ -136,16 +139,18 @@ export function SavedTicketRow({
           <View style={styles.actions}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`${item.title} 가봤어요`}
+              accessibilityLabel={
+                visitState === 'visited' ? `${item.title} 다녀옴 취소` : `${item.title} 다녀왔어요`
+              }
               disabled={visitState === 'loading' || isDeleted}
               onPress={() => onVisit(item)}
               style={[
                 styles.visitButton,
-                visitState === 'visited' ? styles.visitButtonDone : null,
+                visitState === 'visited' ? styles.visitButtonDone : styles.visitButtonIdle,
                 visitState === 'loading' || isDeleted ? styles.actionDisabled : null,
               ]}
             >
-              <Text style={[styles.visitButtonText, visitState === 'visited' ? styles.visitButtonDoneText : null]}>
+              <Text style={[styles.visitButtonText, visitState === 'visited' ? styles.visitButtonDoneText : styles.visitButtonIdleText]}>
                 {visitLabel}
               </Text>
             </Pressable>
@@ -172,7 +177,7 @@ export function SavedTicketRow({
           },
         ]}
       >
-        <Text style={styles.stampText}>가봤어요</Text>
+        <Text style={styles.stampText}>다녀옴</Text>
       </Animated.View>
     </Pressable>
   );
@@ -332,23 +337,27 @@ const styles = StyleSheet.create({
   visitButton: {
     minHeight: 28,
     borderRadius: 999,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 5,
-    backgroundColor: 'rgba(184,146,74,0.16)',
     borderWidth: 1,
-    borderColor: 'rgba(156,118,53,0.24)',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  visitButtonIdle: {
+    backgroundColor: GOLD,
+    borderColor: GOLD,
+  },
   visitButtonDone: {
-    backgroundColor: 'rgba(168,50,74,0.12)',
-    borderColor: 'rgba(168,50,74,0.24)',
+    backgroundColor: 'rgba(168,50,74,0.10)',
+    borderColor: 'rgba(168,50,74,0.30)',
   },
   visitButtonText: {
-    color: '#8A6B2F',
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '900',
+  },
+  visitButtonIdleText: {
+    color: GOLD_INK,
   },
   visitButtonDoneText: {
     color: STAMP,

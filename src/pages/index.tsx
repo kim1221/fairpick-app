@@ -113,17 +113,16 @@ function createStyles(a: Adaptive) {
       fontWeight: '800',
     },
     ticketChip: {
-      minWidth: 62,
       height: 36,
       borderRadius: 999,
-      paddingHorizontal: 13,
+      paddingHorizontal: 12,
       borderWidth: 1,
-      borderColor: LINE,
-      backgroundColor: 'transparent',
+      borderColor: 'rgba(203,161,94,0.45)',
+      backgroundColor: 'rgba(203,161,94,0.14)',
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 6,
+      gap: 5,
     },
     ticketChipNumber: {
       color: TEXT,
@@ -137,11 +136,23 @@ function createStyles(a: Adaptive) {
       lineHeight: 15,
       fontWeight: '700',
     },
+    ticketChipDivider: {
+      width: 1,
+      height: 13,
+      backgroundColor: 'rgba(203,161,94,0.4)',
+      marginHorizontal: 2,
+    },
+    ticketChipCta: {
+      color: GOLD,
+      fontSize: 12.5,
+      lineHeight: 16,
+      fontWeight: '800',
+    },
     ticketChipChevron: {
-      color: MUTED_2,
+      color: GOLD,
       fontSize: 12,
       lineHeight: 16,
-      fontWeight: '700',
+      fontWeight: '800',
     },
     loadingBox: {
       marginHorizontal: 22,
@@ -604,6 +615,8 @@ function HomePageInner() {
               <Icon name="icon-ticket-mono" size={15} color={GOLD} />
               <Text style={styles.ticketChipNumber}>{ticketCount}</Text>
               <Text style={styles.ticketChipLabel}>티켓</Text>
+              <View style={styles.ticketChipDivider} />
+              <Text style={styles.ticketChipCta}>교환</Text>
               <Text style={styles.ticketChipChevron}>›</Text>
             </Pressable>
           </View>

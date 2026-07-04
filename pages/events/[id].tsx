@@ -39,6 +39,7 @@ import {
   logRewardAdEvent,
 } from '../../src/services/ticketService';
 import type { RewardAdEventType } from '../../src/services/ticketService';
+import { getVisitedIds, markVisited, unmarkVisited } from '../../src/services/visitService';
 
 type EventDetailParams = {
   id?: string;
@@ -260,6 +261,10 @@ function EventDetailPage() {
   const showUnregisterRef = React.useRef<(() => void) | null>(null);
   const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  // 다녀왔어요(자기신고) — 위치 인증·보상 없음
+  const [visited, setVisited] = useState(false);
+  const [visitPending, setVisitPending] = useState(false);
+  const [visitNoticeShown, setVisitNoticeShown] = useState(false);
   // event 로드 후 snapshot 추출 → useLike에 전달 (찜 시 로컬 snapshot 저장)
   const eventSnapshot = React.useMemo(() => event ? {
     title: event.title,
@@ -518,6 +523,57 @@ function EventDetailPage() {
     if (!isLoggedIn || !event?.id) return;
     getEarnStatus(event.id).then((s) => setEarnedToday(s.earnedToday)).catch(() => {});
   }, [isLoggedIn, event?.id]);
+
+  // 다녀왔어요 초기 상태(도장 여부)
+  useEffect(() => {
+    if (!isLoggedIn || !event?.id) return;
+    const eventId = event.id;
+    let mounted = true;
+    getVisitedIds()
+      .then((ids) => {
+        if (mounted) setVisited(ids.has(eventId));
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [isLoggedIn, event?.id]);
+
+  // 다녀왔어요 토글(낙관적, 위치 없음, 보상 없음)
+  const handleToggleVisited = React.useCallback(async () => {
+    if (!event?.id || visitPending) return;
+
+    if (!isLoggedIn) {
+      if (loginPending) return;
+      setLoginPending(true);
+      login().catch(() => {}).finally(() => setLoginPending(false));
+      return;
+    }
+
+    const eventId = event.id;
+    const wasVisited = visited;
+    setVisitPending(true);
+    setVisited(!wasVisited); // 낙관적 토글
+
+    try {
+      if (wasVisited) {
+        await unmarkVisited(eventId);
+      } else {
+        await markVisited(eventId);
+        if (!visitNoticeShown) {
+          setVisitNoticeShown(true);
+        }
+      }
+    } catch {
+      setVisited(wasVisited); // 롤백
+      await dialog.openAlert({
+        title: wasVisited ? '도장을 취소하지 못했어요' : '도장을 남기지 못했어요',
+        description: '잠시 후 다시 시도해 주세요.',
+      });
+    } finally {
+      setVisitPending(false);
+    }
+  }, [event?.id, visited, visitPending, isLoggedIn, loginPending, login, visitNoticeShown, dialog]);
 
   // dwell 시간 측정: 이벤트 데이터가 로드된 시점부터 페이지 이탈까지
   // 5초 미만은 노이즈로 간주하여 기록하지 않음
@@ -908,6 +964,32 @@ function EventDetailPage() {
               />
             </View>
           )}
+
+          {/* 다녀왔어요 자기신고 (위치 인증·보상 없음) */}
+          <View style={styles.visitSection}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={visited ? '다녀옴 취소' : '다녀왔어요'}
+              onPress={handleToggleVisited}
+              disabled={visitPending || loginPending}
+              style={[
+                styles.visitBtn,
+                visited ? styles.visitBtnDone : styles.visitBtnIdle,
+                (visitPending || loginPending) && { opacity: 0.5 },
+              ]}
+            >
+              <Text style={[styles.visitBtnText, visited ? styles.visitBtnDoneText : styles.visitBtnIdleText]}>
+                {!isLoggedIn
+                  ? '로그인하고 다녀왔어요'
+                  : visited
+                    ? '다녀옴 ✓'
+                    : '◉ 다녀왔어요'}
+              </Text>
+            </Pressable>
+            <Text style={styles.visitNote}>
+              ‘다녀왔어요’를 누르면 문화 여권에 도장이 찍혀요. 위치 인증 없이, 추억으로 남겨두는 거예요. (보상 아님)
+            </Text>
+          </View>
 
           {/* 광고 보고 티켓 받기 CTA */}
           <View style={styles.ticketCtaSection}>
@@ -1610,6 +1692,42 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     fontWeight: '600',
+  },
+  visitSection: {
+    marginHorizontal: 20,
+    marginTop: 20,
+    gap: 12,
+  },
+  visitBtn: {
+    minHeight: 50,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  visitBtnIdle: {
+    backgroundColor: '#CBA15E',
+    borderColor: '#CBA15E',
+  },
+  visitBtnDone: {
+    backgroundColor: 'rgba(168,50,74,0.08)',
+    borderColor: 'rgba(168,50,74,0.30)',
+  },
+  visitBtnText: {
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  visitBtnIdleText: {
+    color: '#1E1608',
+  },
+  visitBtnDoneText: {
+    color: '#A8324A',
+  },
+  visitNote: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: a.grey600,
   },
   ticketCtaSection: {
     marginHorizontal: 20,

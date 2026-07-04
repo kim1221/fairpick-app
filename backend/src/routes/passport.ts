@@ -78,14 +78,15 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
          LIMIT 3`,
         [userId]
       ),
-      pool.query<{ event_id: string; title: string; category: string | null; visited_at: string | Date }>(
-        `SELECT vl.event_id, ce.title, ce.main_category AS category, vl.visited_at
+      pool.query<{ event_id: string; title: string; category: string | null; region: string | null; venue: string | null; image_url: string | null; visited_at: string | Date }>(
+        `SELECT vl.event_id, ce.title, ce.main_category AS category,
+                ce.region, ce.venue, ce.image_url, vl.visited_at
          FROM user_visit_log vl
          JOIN canonical_events ce ON ce.id::text = vl.event_id
          WHERE vl.user_id = $1
            AND ce.is_deleted = false
          ORDER BY vl.visited_at DESC
-         LIMIT 12`,
+         LIMIT 60`,
         [userId]
       ),
     ]);
@@ -100,6 +101,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         eventId: row.event_id,
         title: row.title,
         category: normalizeCategory(row.category),
+        region: row.region,
+        venue: row.venue,
+        imageUrl: row.image_url,
         visitedAt: isoString(row.visited_at),
       })),
     });

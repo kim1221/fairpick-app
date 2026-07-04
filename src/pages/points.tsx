@@ -4,9 +4,11 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Loader, useDialog } from '@toss/tds-react-native';
 import { BottomTabBar } from '../components/BottomTabBar';
-import { PassportHero } from '../components/passport/PassportHero';
+import { PassportCover } from '../components/passport/PassportCover';
+import { StampGrid } from '../components/passport/StampGrid';
 import { TicketBalanceVoucher } from '../components/passport/TicketBalanceVoucher';
 import { TicketHistoryList } from '../components/passport/TicketHistoryList';
+import { TAG_TOKENS } from '../components/culture-card/tagKit';
 import { getPassport, type PassportResponse } from '../services/passportService';
 import {
   exchangeTickets,
@@ -21,16 +23,25 @@ export const Route = createRoute('/points', {
   component: PointsPage,
 });
 
-const INK = '#16161A';
-const ON_INK = '#F2EEE5';
-const ON_INK_MUTED = '#9A968E';
+const BG = TAG_TOKENS.bg;
+const ON_BG = TAG_TOKENS.headText;
+const ON_BG_MUTED = TAG_TOKENS.navSub;
 const ERROR_BG = '#2A2222';
+
+// stamps(내림차순)에서 가장 오래된 방문 월 → "2026.3부터" 라벨
+function deriveSinceLabel(stamps: PassportResponse['stamps']): string | null {
+  const oldest = stamps[stamps.length - 1];
+  if (!oldest) return null;
+  const date = new Date(oldest.visitedAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getFullYear()}.${date.getMonth() + 1}부터`;
+}
 
 function createStyles() {
   return StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: INK,
+      backgroundColor: BG,
     },
     scroll: {
       flex: 1,
@@ -39,6 +50,38 @@ function createStyles() {
       paddingHorizontal: 20,
       paddingBottom: 132,
     },
+    navTitle: {
+      color: ON_BG,
+      fontSize: 24,
+      lineHeight: 31,
+      fontWeight: '800',
+      fontFamily: 'Noto Serif KR',
+      marginBottom: 14,
+    },
+    sectionLabel: {
+      marginTop: 20,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    sectionLabelText: {
+      color: ON_BG_MUTED,
+      fontSize: 12,
+      fontWeight: '700',
+      letterSpacing: 2,
+    },
+    sectionLabelCount: {
+      color: ON_BG_MUTED,
+      fontSize: 11.5,
+      fontWeight: '700',
+    },
+    exchangeLabel: {
+      marginTop: 26,
+      color: ON_BG_MUTED,
+      fontSize: 12,
+      fontWeight: '700',
+      letterSpacing: 2,
+    },
     loadingBox: {
       minHeight: 240,
       alignItems: 'center',
@@ -46,7 +89,7 @@ function createStyles() {
     },
     loadingText: {
       marginTop: 12,
-      color: ON_INK_MUTED,
+      color: ON_BG_MUTED,
       fontSize: 14,
       fontWeight: '700',
     },
@@ -60,13 +103,13 @@ function createStyles() {
       paddingVertical: 13,
     },
     errorTitle: {
-      color: ON_INK,
+      color: ON_BG,
       fontSize: 14,
       fontWeight: '900',
     },
     errorDescription: {
       marginTop: 4,
-      color: ON_INK_MUTED,
+      color: ON_BG_MUTED,
       fontSize: 12,
       lineHeight: 18,
       fontWeight: '600',
@@ -76,6 +119,7 @@ function createStyles() {
 
 function PointsPage() {
   const { top } = useSafeAreaInsets();
+  const navigation = Route.useNavigation();
   const styles = useMemo(createStyles, []);
   const dialog = useDialog();
 
@@ -117,6 +161,10 @@ function PointsPage() {
       setRefreshing(false);
     }
   }, [load]);
+
+  const handleStampPress = useCallback((eventId: string) => {
+    navigation.navigate('/events/:id', { id: eventId });
+  }, [navigation]);
 
   const handleExchange = useCallback(async () => {
     const currentTicketCount = tickets?.ticketCount ?? ticketHistory?.ticketCount ?? 0;
@@ -167,6 +215,10 @@ function PointsPage() {
   const historyItems = ticketHistory?.history ?? [];
   const showInitialLoading = loading && !passport && !tickets && !ticketHistory;
 
+  const stamps = passport?.stamps ?? [];
+  const visitedCount = passport?.visitedCount ?? 0;
+  const sinceLabel = useMemo(() => deriveSinceLabel(stamps), [stamps]);
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -177,15 +229,17 @@ function PointsPage() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={refresh}
-            tintColor={ON_INK_MUTED}
+            tintColor={ON_BG_MUTED}
           />
         }
       >
-        <ScrollViewInertialBackground topColor={INK} bottomColor={INK} />
+        <ScrollViewInertialBackground topColor={BG} bottomColor={BG} />
+
+        <Text style={styles.navTitle}>내 문화</Text>
 
         {showInitialLoading ? (
           <View style={styles.loadingBox}>
-            <Loader size="small" customStrokeColor={ON_INK_MUTED} />
+            <Loader size="small" customStrokeColor={ON_BG_MUTED} />
             <Text style={styles.loadingText}>내 문화 정보를 불러오고 있어요</Text>
           </View>
         ) : (
@@ -197,7 +251,15 @@ function PointsPage() {
               </View>
             ) : null}
 
-            <PassportHero passport={passport} />
+            <PassportCover visitedCount={visitedCount} sinceLabel={sinceLabel} />
+
+            <View style={styles.sectionLabel}>
+              <Text style={styles.sectionLabelText}>STAMPS · 다녀온 문화</Text>
+              <Text style={styles.sectionLabelCount}>{visitedCount}개</Text>
+            </View>
+            <StampGrid stamps={stamps} onPressStamp={handleStampPress} />
+
+            <Text style={styles.exchangeLabel}>티켓 교환</Text>
             <TicketBalanceVoucher
               ticketCount={ticketCount}
               ticketsPerExchange={ticketsPerExchange}

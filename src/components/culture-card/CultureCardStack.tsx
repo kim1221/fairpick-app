@@ -58,12 +58,10 @@ function todayStampText(): string {
 }
 
 function buildLocationHook(card: Card | null): string | null {
-  const region = card?.region?.trim();
+  // "내 위치"는 헤더 근처 칩(userRegion)이 담당 → 여기선 헷갈리던 "○○ 근처" 대신 실거리만.
   const walk = typeof card?.walkMinutes === 'number' && card.walkMinutes > 0 ? card.walkMinutes : null;
-  if (!region && !walk) return null;
-  const parts = [region ? `오늘은 ${region} 근처 문화예요` : '오늘의 문화예요'];
-  if (walk) parts.push(`도보 ${walk}분`);
-  return parts.join(' · ');
+  if (!walk) return null;
+  return `도보 ${walk}분 거리에 오늘의 문화가 있어요`;
 }
 
 function createStyles() {
@@ -338,7 +336,7 @@ function SealedTag() {
       <Rule />
       <FieldRow label="ISSUED · 발행" value="컬처카드 · SEOUL" />
       <Text style={styles.sealMsg}>
-        광고를 보면 오늘의 카드가 열려요.{'\n'}가까운 전시·공연 한 장이 담겨 있어요.
+        광고를 보면 오늘의 카드가 열려요.{'\n'}가까운 문화 한 장이 담겨 있어요.
       </Text>
       <View style={styles.sealBottom}>
         <View style={styles.stampWrap}>

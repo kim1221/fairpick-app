@@ -19,9 +19,8 @@ import type { EventCardData } from '../data/events';
 import { useAuth } from '../hooks/useAuth';
 import http from '../lib/http';
 import eventService from '../services/eventService';
-import { markVisited } from '../services/visitService';
+import { getVisitedIds, markVisited, unmarkVisited } from '../services/visitService';
 import type { GetLikesResponse } from '../types/serverSync';
-import { getCurrentCoordsOrNull } from '../utils/currentLocation';
 import { getLikesV2, subscribeStorageChange, type StoredEventItemV2 } from '../utils/storage';
 import { openNaverMap } from '../utils/mapLinks';
 
@@ -153,6 +152,8 @@ function SavedPage() {
 
   const toastOpacity = useRef(new Animated.Value(0));
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 세션 내 첫 도장 안내(위치 인증 없이 추억으로 남긴다는 안내)를 1회만 노출
+  const firstStampNoticeShownRef = useRef(false);
 
   const showToast = useCallback((message: SavedVisitToastMessage) => {
     if (toastTimerRef.current) {
@@ -219,6 +220,20 @@ function SavedPage() {
     loadSavedEvents().catch(() => {});
   }, [authLoading, loadSavedEvents]);
 
+  // 다녀왔어요 버튼 초기 상태(도장 찍힌 이벤트 id 집합)
+  useEffect(() => {
+    if (authLoading || !isLoggedIn) return;
+    let mounted = true;
+    getVisitedIds()
+      .then((ids) => {
+        if (mounted) setVisitedIds(ids);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [authLoading, isLoggedIn]);
+
   useEffect(() => {
     const unsubscribe = subscribeStorageChange((event) => {
       if (event.type === 'likes') {
@@ -272,98 +287,49 @@ function SavedPage() {
   }, [showToast]);
 
   const handleVisit = useCallback(async (item: SavedTicketItem) => {
-    if (visitedIds.has(item.id)) {
-      showToast({
-        title: '이미 도장을 찍었어요',
-        description: '보너스 티켓은 행사마다 한 번만 받을 수 있어요.',
-      });
-      return;
-    }
-
     if (markingIds.has(item.id)) return;
 
     if (!isLoggedIn) {
       await dialog.openAlert({
-        title: '로그인하면 도장을 찍을 수 있어요',
-        description: '다녀온 문화 기록과 티켓 보너스를 안전하게 보관해요.',
+        title: '로그인하면 도장을 남길 수 있어요',
+        description: '다녀온 문화 기록을 문화 여권에 안전하게 보관해요.',
       });
       return;
     }
 
+    const wasVisited = visitedIds.has(item.id);
     addId(setMarkingIds, item.id);
+
+    if (wasVisited) {
+      // 낙관적 취소
+      removeId(setVisitedIds, item.id);
+      try {
+        await unmarkVisited(item.id);
+      } catch (error) {
+        addId(setVisitedIds, item.id); // 롤백
+        showToast({ title: '도장을 취소하지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
+        if (__DEV__) console.error('[SavedPage][unmarkVisited]', error);
+      } finally {
+        removeId(setMarkingIds, item.id);
+      }
+      return;
+    }
+
+    // 낙관적 도장 + 첫 도장 안내
+    addId(setVisitedIds, item.id);
+    setStampSignals((prev) => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }));
     try {
-      const coords = await getCurrentCoordsOrNull();
-      const result = await markVisited(item.id, coords ?? undefined);
-
-      if (result.alreadyVisited) {
-        addId(setVisitedIds, item.id);
+      await markVisited(item.id);
+      if (!firstStampNoticeShownRef.current) {
+        firstStampNoticeShownRef.current = true;
         showToast({
-          title: '이미 가봤어요 도장이 있어요',
-          description: '중복 보너스 없이 도장 기록만 확인했어요.',
-        });
-        return;
-      }
-
-      if (!result.verified) {
-        if (result.reason === 'TOO_FAR') {
-          showToast({
-            title: '행사 근처에서 눌러야 도장을 받을 수 있어요',
-            description: typeof result.distanceM === 'number'
-              ? `지금은 행사장에서 약 ${Math.round(result.distanceM)}m 떨어져 있어요.`
-              : '행사장 근처에서 다시 시도해 주세요.',
-          });
-          return;
-        }
-
-        if (result.reason === 'NO_LOCATION') {
-          showToast({
-            title: '위치 권한을 허용하고 다시 시도해 주세요',
-            description: '현재 위치를 확인해야 도장을 받을 수 있어요.',
-          });
-          return;
-        }
-
-        if (result.reason === 'EVENT_NO_COORDS') {
-          showToast({
-            title: '행사 위치를 확인하지 못했어요',
-            description: '도장을 찍을 수 있도록 위치 정보를 확인하고 있어요.',
-          });
-          return;
-        }
-
-        if (result.reason === 'OUT_OF_PERIOD') {
-          showToast({
-            title: '행사 기간에만 도장을 받을 수 있어요',
-            description: '일정을 확인한 뒤 다시 시도해 주세요.',
-          });
-          return;
-        }
-
-        showToast({
-          title: '도장을 찍지 못했어요',
-          description: '잠시 후 다시 시도해 주세요.',
-        });
-        return;
-      }
-
-      addId(setVisitedIds, item.id);
-      setStampSignals((prev) => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }));
-      if (result.bonusTickets > 0) {
-        showToast({
-          title: `+${result.bonusTickets} 티켓을 받았어요`,
-          description: `문화 여권 도장 ${result.stampCount}개째예요.`,
-        });
-      } else {
-        showToast({
-          title: '도장을 찍었어요',
-          description: `문화 여권 도장 ${result.stampCount}개째예요.`,
+          title: '문화 여권에 도장을 남겼어요',
+          description: '위치 인증 없이 추억으로 남겨요 (보상 아님)',
         });
       }
     } catch (error) {
-      showToast({
-        title: '도장을 찍지 못했어요',
-        description: '잠시 후 다시 시도해 주세요.',
-      });
+      removeId(setVisitedIds, item.id); // 롤백
+      showToast({ title: '도장을 남기지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
       if (__DEV__) console.error('[SavedPage][markVisited]', error);
     } finally {
       removeId(setMarkingIds, item.id);
@@ -371,8 +337,10 @@ function SavedPage() {
   }, [dialog, isLoggedIn, markingIds, showToast, visitedIds]);
 
   const getVisitState = useCallback((id: string): VisitButtonState => {
-    if (markingIds.has(id)) return 'loading';
+    // 낙관적 토글: visitedIds가 즉시 반영되므로 visited/idle을 우선 표시(깜빡임 방지).
+    // 중복 탭은 handleVisit 내부의 markingIds 가드로 막는다.
     if (visitedIds.has(id)) return 'visited';
+    if (markingIds.has(id)) return 'loading';
     return 'idle';
   }, [markingIds, visitedIds]);
 

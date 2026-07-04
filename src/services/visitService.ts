@@ -1,33 +1,47 @@
 /**
- * 가봤어요 / 도장 서비스
- * 저장한 행사를 실제로 방문하고 체크인 → 여권 도장 + 보너스 티켓 (서버 권위·멱등)
+ * 다녀왔어요(자기신고) 서비스
+ * 저장/상세에서 "다녀왔어요"를 누르면 문화 여권에 도장을 남긴다.
+ * 위치 인증·보상 없음(추억 기록 전용).
  *
- * 잠긴 API 계약: POST /api/visits (requireAuth) body { eventId: string, lat?: number, lng?: number }
- * - docs/superpowers/plans/2026-07-01-culturecard-implementation.md
+ * 잠긴 API 계약:
+ * - POST   /api/visits          body { eventId } → { ok, alreadyVisited, stampCount }
+ * - DELETE /api/visits/:eventId  → { ok, stampCount }
+ * - GET    /api/visits/ids       → { eventIds }
  */
 
 import http from '../lib/http';
 
-export type VisitResponse = {
+type MarkVisitedResponse = {
   ok: true;
-  alreadyVisited: boolean; // 재호출 시 true, 보너스 중복지급 없음
-  verified: boolean; // GPS/기간 검증 성공 여부
-  reason?: 'TOO_FAR' | 'NO_LOCATION' | 'EVENT_NO_COORDS' | 'OUT_OF_PERIOD';
-  distanceM?: number;
-  bonusTickets: number; // 신규 방문 시 +3, 재방문 시 0
-  ticketCount: number;
-  stampCount: number; // 누적 도장 수
+  alreadyVisited: boolean;
+  stampCount: number;
 };
 
-export type VisitLocation = {
-  lat: number;
-  lng: number;
+type UnmarkVisitedResponse = {
+  ok: true;
+  stampCount: number;
 };
 
-export async function markVisited(eventId: string, coords?: VisitLocation): Promise<VisitResponse> {
-  const { data } = await http.post<VisitResponse>('/api/visits', {
-    eventId,
-    ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
-  });
-  return data;
+type VisitedIdsResponse = {
+  eventIds: string[];
+};
+
+/** 다녀왔어요 도장 찍기(위치 안 보냄, 보상 없음). */
+export async function markVisited(
+  eventId: string,
+): Promise<{ alreadyVisited: boolean; stampCount: number }> {
+  const { data } = await http.post<MarkVisitedResponse>('/api/visits', { eventId });
+  return { alreadyVisited: data.alreadyVisited, stampCount: data.stampCount };
+}
+
+/** 도장 취소. */
+export async function unmarkVisited(eventId: string): Promise<{ stampCount: number }> {
+  const { data } = await http.delete<UnmarkVisitedResponse>(`/api/visits/${encodeURIComponent(eventId)}`);
+  return { stampCount: data.stampCount };
+}
+
+/** 다녀온 이벤트 id 집합(버튼 상태용). */
+export async function getVisitedIds(): Promise<Set<string>> {
+  const { data } = await http.get<VisitedIdsResponse>('/api/visits/ids');
+  return new Set(data.eventIds ?? []);
 }
