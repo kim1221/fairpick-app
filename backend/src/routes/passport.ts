@@ -35,6 +35,17 @@ function isoString(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : value;
 }
 
+function isoStringOrNull(value: string | Date | null): string | null {
+  if (!value) return null;
+  return isoString(value);
+}
+
+function numberOrNull(value: string | number | null): number | null {
+  if (value == null) return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const monthStart = currentKstMonthStart();
@@ -46,6 +57,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       monthDiscoveredResult,
       tasteResult,
       stampResult,
+      visitedIdsResult,
+      discoveredCardsResult,
     ] = await Promise.all([
       pool.query<{ count: string | number }>(
         `SELECT COUNT(DISTINCT event_id)::int AS count
@@ -89,6 +102,51 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
          LIMIT 60`,
         [userId]
       ),
+      pool.query<{ event_id: string }>(
+        `SELECT DISTINCT event_id
+         FROM user_visit_log
+         WHERE user_id = $1`,
+        [userId]
+      ),
+      pool.query<{
+        event_id: string;
+        title: string;
+        display_title: string | null;
+        category: string | null;
+        region: string | null;
+        venue: string | null;
+        image_url: string | null;
+        start_at: string | Date | null;
+        end_at: string | Date | null;
+        lat: string | number | null;
+        lng: string | number | null;
+        discovered_at: string | Date;
+      }>(
+        `SELECT *
+         FROM (
+           SELECT DISTINCT ON (el.event_id)
+                  el.event_id,
+                  ce.title,
+                  ce.display_title,
+                  ce.main_category AS category,
+                  ce.region,
+                  ce.venue,
+                  ce.image_url,
+                  ce.start_at,
+                  ce.end_at,
+                  ce.lat,
+                  ce.lng,
+                  el.created_at AS discovered_at
+           FROM user_ticket_earn_log el
+           JOIN canonical_events ce ON ce.id::text = el.event_id
+           WHERE el.user_id = $1
+             AND ce.is_deleted = false
+           ORDER BY el.event_id, el.created_at DESC
+         ) discovered
+         ORDER BY discovered_at DESC
+         LIMIT 50`,
+        [userId]
+      ),
     ]);
 
     return res.json({
@@ -105,6 +163,20 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         venue: row.venue,
         imageUrl: row.image_url,
         visitedAt: isoString(row.visited_at),
+      })),
+      visitedEventIds: visitedIdsResult.rows.map((row) => String(row.event_id)),
+      discoveredCards: discoveredCardsResult.rows.map((row) => ({
+        eventId: row.event_id,
+        title: row.display_title?.trim() || row.title,
+        category: normalizeCategory(row.category),
+        region: row.region,
+        venue: row.venue,
+        imageUrl: row.image_url,
+        startAt: isoStringOrNull(row.start_at),
+        endAt: isoStringOrNull(row.end_at),
+        lat: numberOrNull(row.lat),
+        lng: numberOrNull(row.lng),
+        discoveredAt: isoString(row.discovered_at),
       })),
     });
   } catch (err) {

@@ -93,7 +93,7 @@ test('GET /api/cards/today returns three unopened cards, morePool, and ticket to
     }
     if (text.includes('FROM canonical_events')) {
       canonicalSql.push(text);
-      assert.deepEqual(params.slice(-1), [12]);
+      assert.deepEqual(params.slice(-1), [36]);
       return {
         rows: [
           { id: 'event-1', title: '전시 하나', main_category: '전시', venue: 'A관', region: '서울', start_at: isoDaysFromNow(-2), end_at: isoDaysFromNow(2), image_url: 'https://img/1.jpg', overview: '첫 줄 소개\n둘째 줄', buzz_score: 50 },
@@ -139,6 +139,9 @@ test('GET /api/cards/today expands nearby radius, excludes opened events, divers
     }
     if (text.includes('FROM canonical_events')) {
       canonicalCalls.push({ text, params });
+      if (!text.includes('distance_m')) {
+        return { rows: [] };
+      }
       assert.match(text, /distance_m/i);
       assert.match(text, /lat IS NOT NULL/i);
       assert.match(text, /lng IS NOT NULL/i);
@@ -184,12 +187,89 @@ test('GET /api/cards/today expands nearby radius, excludes opened events, divers
   const { status, body } = await request(makeApp(cardsRouter), 'GET', `/today?lat=${lat}&lng=${lng}`);
 
   assert.equal(status, 200);
-  assert.equal(canonicalCalls.length, 3);
+  assert.ok(canonicalCalls.length >= 3);
   assert.deepEqual(body.today.map((card) => card.eventId), ['event-near-exhibition', 'event-performance', 'event-popup']);
   assert.deepEqual(body.today.map((card) => card.category), ['전시', '공연', '팝업']);
   assert.deepEqual(body.today.map((card) => card.walkMinutes), [2, 5, 10]);
   assert.equal(body.today.some((card) => card.eventId === 'event-opened'), false);
   assert.equal(body.morePool.some((card) => card.eventId === 'event-opened'), false);
+});
+
+test('GET /api/cards/today keeps partial nearby candidates and fills the rest from fallback', async () => {
+  const lat = 37.5665;
+  const lng = 126.9780;
+  const canonicalCalls = [];
+  pool.query = async (sql, params = []) => {
+    const text = String(sql);
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 3, daily_earned: 2, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('FROM user_ticket_earn_log')) {
+      return { rows: [] };
+    }
+    if (text.includes('FROM canonical_events')) {
+      canonicalCalls.push({ text, params });
+
+      if (text.includes('distance_m')) {
+        if (params.includes(50_000)) {
+          return {
+            rows: [
+              { id: 'near-1', title: '가까운 전시', main_category: '전시', venue: 'A관', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '가까운 후보', distance_m: 300, buzz_score: 10 },
+              { id: 'near-2', title: '가까운 공연', main_category: '공연', venue: 'B홀', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '가까운 후보', distance_m: 600, buzz_score: 10 },
+            ],
+          };
+        }
+        return { rows: [] };
+      }
+
+      return {
+        rows: [
+          { id: 'fallback-1', title: '전국 팝업', main_category: '팝업', venue: 'C존', region: '부산', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '보충 후보', buzz_score: 90 },
+          { id: 'fallback-2', title: '전국 축제', main_category: '축제', venue: 'D광장', region: '대구', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '보충 후보', buzz_score: 80 },
+        ],
+      };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(cardsRouter), 'GET', `/today?lat=${lat}&lng=${lng}`);
+
+  assert.equal(status, 200);
+  assert.ok(canonicalCalls.some((call) => call.text.includes('distance_m')));
+  assert.ok(canonicalCalls.some((call) => !call.text.includes('distance_m')));
+  assert.deepEqual(body.today.map((card) => card.eventId), ['near-1', 'near-2', 'fallback-1']);
+});
+
+test('GET /api/cards/today applies a recent-open cooldown, not just today opened ids', async () => {
+  let earnLogSql = '';
+  pool.query = async (sql, params = []) => {
+    const text = String(sql);
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 5, daily_earned: 1, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('FROM user_ticket_earn_log')) {
+      earnLogSql = text;
+      assert.equal(params[0], userId);
+      return { rows: [{ event_id: 'recent-1', dedupe_key: 'same-show' }] };
+    }
+    if (text.includes('FROM canonical_events')) {
+      assert.match(text, /COALESCE\(content_key,\s*canonical_key,\s*id::text\)/);
+      return {
+        rows: [
+          { id: 'fresh-1', content_key: 'fresh-1', canonical_key: null, title: '새 전시', main_category: '전시', venue: 'A관', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '신규 후보', buzz_score: 30 },
+          { id: 'fresh-2', content_key: 'fresh-2', canonical_key: null, title: '새 공연', main_category: '공연', venue: 'B홀', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '신규 후보', buzz_score: 20 },
+          { id: 'fresh-3', content_key: 'fresh-3', canonical_key: null, title: '새 팝업', main_category: '팝업', venue: 'C존', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '신규 후보', buzz_score: 10 },
+        ],
+      };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(cardsRouter), 'GET', '/today');
+
+  assert.equal(status, 200);
+  assert.match(earnLogSql, /earn_date\s*>=/);
+  assert.deepEqual(body.today.map((card) => card.eventId), ['fresh-1', 'fresh-2', 'fresh-3']);
 });
 
 test('POST /api/visits records a self-report stamp without location or reward', async () => {
@@ -278,6 +358,28 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
     if (text.includes('GROUP BY') && text.includes('canonical_events')) {
       return { rows: [{ category: '전시' }, { category: '팝업' }, { category: '기타' }] };
     }
+    if (text.includes('SELECT DISTINCT event_id') && text.includes('FROM user_visit_log')) {
+      return { rows: [{ event_id: 'event-1' }, { event_id: 'event-2' }, { event_id: 'event-old' }] };
+    }
+    if (text.includes('FROM user_ticket_earn_log el') && text.includes('DISTINCT ON')) {
+      return {
+        rows: [
+          {
+            event_id: 'event-3',
+            title: '발견한 팝업',
+            category: '팝업',
+            region: '성동구',
+            venue: '성수동',
+            image_url: 'http://img/3.jpg',
+            start_at: '2026-07-10T03:00:00.000Z',
+            end_at: '2026-07-20T03:00:00.000Z',
+            lat: 37.544,
+            lng: 127.055,
+            discovered_at: '2026-07-02T03:00:00.000Z',
+          },
+        ],
+      };
+    }
     if (text.includes('FROM user_visit_log') && text.includes('JOIN canonical_events')) {
       return {
         rows: [
@@ -301,6 +403,22 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
     { eventId: 'event-2', title: '공연 둘', category: '공연', region: '용산구', venue: '노들섬', imageUrl: 'http://img/2.jpg', visitedAt: '2026-07-01T03:00:00.000Z' },
     { eventId: 'event-1', title: '전시 하나', category: '전시', region: '성동구', venue: '성수 코사이어티', imageUrl: null, visitedAt: '2026-06-30T03:00:00.000Z' },
   ]);
+  assert.deepEqual(body.visitedEventIds, ['event-1', 'event-2', 'event-old']);
+  assert.deepEqual(body.discoveredCards, [
+    {
+      eventId: 'event-3',
+      title: '발견한 팝업',
+      category: '팝업',
+      region: '성동구',
+      venue: '성수동',
+      imageUrl: 'http://img/3.jpg',
+      startAt: '2026-07-10T03:00:00.000Z',
+      endAt: '2026-07-20T03:00:00.000Z',
+      lat: 37.544,
+      lng: 127.055,
+      discoveredAt: '2026-07-02T03:00:00.000Z',
+    },
+  ]);
   assert.equal(seenParams.length, 1);
 });
 
@@ -310,23 +428,30 @@ test('GET /api/tickets/history includes visit stamp bonuses from user_visit_log'
     if (text.includes('INSERT INTO user_tickets')) {
       return { rows: [{ ticket_count: 12, total_earned: 22, total_exchanged: 1 }], rowCount: 1 };
     }
-    if (text.includes('FROM user_ticket_earn_log') && text.includes('ORDER BY occurred_at DESC')) {
-      assert.match(text, /FROM user_visit_log/);
+    if (text.includes('FROM user_visit_log')) {
       assert.match(text, /'visit' AS type/);
-      assert.match(text, /'가봤어요 도장' AS label/);
+      assert.match(text, /'다녀왔어요 도장' AS label/);
       assert.match(text, /bonus_tickets AS amount/);
       assert.match(text, /visited_at AS occurred_at/);
       return {
         rows: [
           {
             type: 'visit',
-            label: '가봤어요 도장',
+            label: '다녀왔어요 도장',
             amount: 3,
             occurred_at: new Date('2026-07-01T03:00:00.000Z'),
           },
         ],
         rowCount: 1,
       };
+    }
+    if (
+      text.includes('FROM user_ticket_earn_log') ||
+      text.includes('FROM user_attendance_log') ||
+      text.includes('FROM user_weekly_bonus_log') ||
+      text.includes('FROM user_ticket_exchanges')
+    ) {
+      return { rows: [], rowCount: 0 };
     }
     throw new Error(`Unexpected query: ${text}`);
   };
@@ -339,9 +464,56 @@ test('GET /api/tickets/history includes visit stamp bonuses from user_visit_log'
   assert.deepEqual(body.history, [
     {
       type: 'visit',
-      label: '가봤어요 도장',
+      label: '다녀왔어요 도장',
       amount: 3,
       occurredAt: new Date('2026-07-01T03:00:00.000Z'),
+    },
+  ]);
+});
+
+test('GET /api/tickets/history keeps balance and available history when legacy sources fail', async () => {
+  pool.query = async (sql) => {
+    const text = String(sql);
+    if (text.includes('INSERT INTO user_tickets')) {
+      return { rows: [{ ticket_count: 92, total_earned: 105, total_exchanged: 1 }], rowCount: 1 };
+    }
+    if (text.includes('FROM user_attendance_log')) {
+      throw new Error('relation "user_attendance_log" does not exist');
+    }
+    if (text.includes('FROM user_ticket_earn_log')) {
+      return {
+        rows: [
+          {
+            type: 'ad',
+            label: '광고 시청',
+            amount: 7,
+            occurred_at: new Date('2026-07-07T01:00:00.000Z'),
+          },
+        ],
+        rowCount: 1,
+      };
+    }
+    if (
+      text.includes('FROM user_weekly_bonus_log') ||
+      text.includes('FROM user_visit_log') ||
+      text.includes('FROM user_ticket_exchanges')
+    ) {
+      return { rows: [], rowCount: 0 };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(ticketsRouter), 'GET', '/history');
+
+  assert.equal(status, 200);
+  assert.equal(body.ticketCount, 92);
+  assert.equal(body.totalExchanged, 1);
+  assert.deepEqual(body.history, [
+    {
+      type: 'ad',
+      label: '광고 시청',
+      amount: 7,
+      occurredAt: new Date('2026-07-07T01:00:00.000Z'),
     },
   ]);
 });

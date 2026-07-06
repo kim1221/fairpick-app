@@ -9,6 +9,8 @@ const router = express.Router();
 const DAILY_LIMIT = 30;
 const TODAY_CARD_COUNT = 3;
 const CARD_POOL_LIMIT = 12;
+const CARD_QUERY_LIMIT = 36;
+const RECENT_OPEN_COOLDOWN_DAYS = 14;
 const WALK_METERS_PER_MINUTE = 80;
 const NEARBY_RADIUS_STEPS_M = [3000, 10000, 50000] as const;
 const CATEGORY_PRIORITY = ['전시', '공연', '팝업', '축제', '기타'] as const;
@@ -16,6 +18,9 @@ const CATEGORY_PRIORITY = ['전시', '공연', '팝업', '축제', '기타'] as 
 type EventRow = {
   id: string;
   title: string;
+  display_title?: string | null;
+  content_key?: string | null;
+  canonical_key?: string | null;
   main_category: string | null;
   region: string | null;
   start_at: string | Date | null;
@@ -26,6 +31,12 @@ type EventRow = {
   lat?: number | string | null;
   lng?: number | string | null;
   distance_m?: number | string | null;
+};
+
+type OpenedEventRow = {
+  event_id: string;
+  earn_date: string | Date | null;
+  dedupe_key: string | null;
 };
 
 type LocationQuery = {
@@ -42,6 +53,33 @@ function isoOrNull(value: string | Date | null): string | null {
   if (value instanceof Date) return value.toISOString();
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? value : new Date(parsed).toISOString();
+}
+
+function dateOnly(value: string | Date | null | undefined): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
+}
+
+function normalizeDedupePart(value: string | Date | null | undefined): string {
+  if (!value) return '';
+  const raw = value instanceof Date ? value.toISOString().slice(0, 10) : String(value);
+  return raw
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[^\w가-힣 ]/g, '')
+    .trim();
+}
+
+function getEventDedupeKey(row: EventRow): string {
+  const stableKey = row.content_key || row.canonical_key;
+  if (stableKey) return stableKey;
+  return [
+    normalizeDedupePart(row.display_title || row.title),
+    normalizeDedupePart(row.venue),
+    normalizeDedupePart(row.start_at),
+    normalizeDedupePart(row.end_at),
+  ].join('|');
 }
 
 function normalizeCategory(category: string | null): string {
@@ -118,7 +156,7 @@ function toCard(row: EventRow, openedEventIds: Set<string>, location?: LocationQ
   const distanceM = getDistanceMeters(row, location);
   return {
     eventId,
-    title: row.title,
+    title: row.display_title?.trim() || row.title,
     category: normalizeCategory(row.main_category),
     venue: row.venue,
     region: row.region,
@@ -130,6 +168,32 @@ function toCard(row: EventRow, openedEventIds: Set<string>, location?: LocationQ
     blurb: firstLine(row.overview),
     opened: openedEventIds.has(eventId),
   };
+}
+
+function filterExcludedRows(
+  rows: EventRow[],
+  excludedEventIds: Set<string>,
+  excludedDedupeKeys: Set<string>
+): EventRow[] {
+  return rows.filter((row) => (
+    !excludedEventIds.has(String(row.id)) && !excludedDedupeKeys.has(getEventDedupeKey(row))
+  ));
+}
+
+function dedupeRows(rows: EventRow[]): EventRow[] {
+  const seen = new Set<string>();
+  const result: EventRow[] = [];
+  for (const row of rows) {
+    const key = getEventDedupeKey(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(row);
+  }
+  return result;
+}
+
+function mergeRows(primary: EventRow[], secondary: EventRow[]): EventRow[] {
+  return dedupeRows([...primary, ...secondary]).slice(0, CARD_POOL_LIMIT);
 }
 
 function pickDiverseTodayCards(cards: ReturnType<typeof toCard>[]) {
@@ -164,14 +228,20 @@ function pickDiverseTodayCards(cards: ReturnType<typeof toCard>[]) {
   return selected;
 }
 
-async function getFallbackEvents(today: string, openedEventIds: Set<string>): Promise<EventRow[]> {
-  const openedIds = Array.from(openedEventIds);
+async function getFallbackEvents(
+  today: string,
+  excludedEventIds: Set<string>,
+  excludedDedupeKeys: Set<string>
+): Promise<EventRow[]> {
+  const excludedIds = Array.from(excludedEventIds);
+  const excludedKeys = Array.from(excludedDedupeKeys);
   const { rows } = await pool.query<EventRow>(
-    `SELECT id, title, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng
+    `SELECT id, title, display_title, content_key, canonical_key, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng
      FROM canonical_events
      WHERE is_deleted = false
        AND (end_at IS NULL OR (end_at AT TIME ZONE 'Asia/Seoul')::date >= $1::date)
        AND NOT (id::text = ANY($2::text[]))
+       AND NOT (COALESCE(content_key, canonical_key, id::text) = ANY($3::text[]))
      ORDER BY
        CASE
          WHEN start_at <= NOW() AND (end_at IS NULL OR end_at >= NOW()) THEN 0
@@ -181,53 +251,73 @@ async function getFallbackEvents(today: string, openedEventIds: Set<string>): Pr
        CASE WHEN end_at IS NULL THEN 1 ELSE 0 END,
        end_at ASC,
        buzz_score DESC NULLS LAST
-     LIMIT $3`,
-    [today, openedIds, CARD_POOL_LIMIT]
+     LIMIT $4`,
+    [today, excludedIds, excludedKeys, CARD_QUERY_LIMIT]
   );
-  return rows;
+  return dedupeRows(filterExcludedRows(rows, excludedEventIds, excludedDedupeKeys)).slice(0, CARD_POOL_LIMIT);
 }
 
 async function getNearbyEvents(
   today: string,
   location: LocationQuery,
-  openedEventIds: Set<string>
+  excludedEventIds: Set<string>,
+  excludedDedupeKeys: Set<string>
 ): Promise<EventRow[]> {
   const distSQL = getHaversineDistanceSQL('$1', '$2');
-  const openedIds = Array.from(openedEventIds);
+  const excludedIds = Array.from(excludedEventIds);
+  const excludedKeys = Array.from(excludedDedupeKeys);
+  let bestNearbyRows: EventRow[] = [];
 
   for (const radiusM of NEARBY_RADIUS_STEPS_M) {
     const box = calculateBoundingBox(location.lat, location.lng, radiusM);
     const { rows } = await pool.query<EventRow>(
-      `SELECT id, title, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng,
+      `SELECT id, title, display_title, content_key, canonical_key, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng,
               (${distSQL}) AS distance_m
        FROM canonical_events
        WHERE is_deleted = false
          AND (end_at IS NULL OR (end_at AT TIME ZONE 'Asia/Seoul')::date >= $3::date)
          AND NOT (id::text = ANY($4::text[]))
+         AND NOT (COALESCE(content_key, canonical_key, id::text) = ANY($5::text[]))
          AND lat IS NOT NULL AND lng IS NOT NULL
-         AND lat BETWEEN $5 AND $6
-         AND lng BETWEEN $7 AND $8
-         AND (${distSQL}) <= $9
+         AND lat BETWEEN $6 AND $7
+         AND lng BETWEEN $8 AND $9
+         AND (${distSQL}) <= $10
        ORDER BY distance_m ASC NULLS LAST, buzz_score DESC NULLS LAST, id ASC
-       LIMIT $10`,
+       LIMIT $11`,
       [
         location.lat,
         location.lng,
         today,
-        openedIds,
+        excludedIds,
+        excludedKeys,
         box.latMin,
         box.latMax,
         box.lngMin,
         box.lngMax,
         radiusM,
-        CARD_POOL_LIMIT,
+        CARD_QUERY_LIMIT,
       ]
     );
 
-    if (rows.length >= CARD_POOL_LIMIT) return rows;
+    const nearbyRows = dedupeRows(filterExcludedRows(rows, excludedEventIds, excludedDedupeKeys));
+    if (nearbyRows.length > bestNearbyRows.length) bestNearbyRows = nearbyRows;
+    if (nearbyRows.length >= CARD_POOL_LIMIT) return nearbyRows.slice(0, CARD_POOL_LIMIT);
   }
 
-  return getFallbackEvents(today, openedEventIds);
+  if (bestNearbyRows.length === 0) {
+    return getFallbackEvents(today, excludedEventIds, excludedDedupeKeys);
+  }
+
+  const fillExcludedIds = new Set([
+    ...Array.from(excludedEventIds),
+    ...bestNearbyRows.map((row) => String(row.id)),
+  ]);
+  const fillExcludedKeys = new Set([
+    ...Array.from(excludedDedupeKeys),
+    ...bestNearbyRows.map(getEventDedupeKey),
+  ]);
+  const fallbackRows = await getFallbackEvents(today, fillExcludedIds, fillExcludedKeys);
+  return mergeRows(bestNearbyRows, fallbackRows);
 }
 
 router.get('/today', requireAuth, async (req: Request, res: Response) => {
@@ -256,19 +346,33 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
          LIMIT 1`,
         [userId]
       ),
-      pool.query<{ event_id: string }>(
-        `SELECT event_id
-         FROM user_ticket_earn_log
-         WHERE user_id = $1 AND earn_date = $2`,
-        [userId, today]
+      pool.query<OpenedEventRow>(
+        `SELECT el.event_id,
+                el.earn_date,
+                COALESCE(ce.content_key, ce.canonical_key, ce.id::text) AS dedupe_key
+         FROM user_ticket_earn_log el
+         LEFT JOIN canonical_events ce ON ce.id::text = el.event_id::text
+         WHERE el.user_id = $1
+           AND el.earn_date >= $2::date - (($3::int - 1) * INTERVAL '1 day')`,
+        [userId, today, RECENT_OPEN_COOLDOWN_DAYS]
       ),
     ]);
 
     const ticketRow = ticketResult.rows[0] ?? {};
-    const openedEventIds = new Set(openedResult.rows.map((row) => String(row.event_id)));
-    const rows = location
-      ? await getNearbyEvents(today, location, openedEventIds)
-      : await getFallbackEvents(today, openedEventIds);
+    const todayOpenedRows = openedResult.rows.filter((row) => dateOnly(row.earn_date) === today);
+    const openedEventIds = new Set(todayOpenedRows.map((row) => String(row.event_id)));
+    const openedDedupeKeys = new Set(todayOpenedRows.map((row) => row.dedupe_key).filter((key): key is string => !!key));
+    const recentEventIds = new Set(openedResult.rows.map((row) => String(row.event_id)));
+    const recentDedupeKeys = new Set(openedResult.rows.map((row) => row.dedupe_key).filter((key): key is string => !!key));
+    const loadRows = async (eventIds: Set<string>, dedupeKeys: Set<string>) => (
+      location
+        ? getNearbyEvents(today, location, eventIds, dedupeKeys)
+        : getFallbackEvents(today, eventIds, dedupeKeys)
+    );
+    let rows = await loadRows(recentEventIds, recentDedupeKeys);
+    if (rows.length < TODAY_CARD_COUNT && recentEventIds.size > openedEventIds.size) {
+      rows = await loadRows(openedEventIds, openedDedupeKeys);
+    }
     const cards = rows
       .map((row) => toCard(row, openedEventIds, location))
       .filter((card) => !card.opened);

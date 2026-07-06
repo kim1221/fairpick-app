@@ -55,6 +55,13 @@ const AD_EVENT_TIMESTAMP_COLUMNS: Record<string, string> = {
   error: 'error_at',
 };
 
+type TicketHistoryRow = {
+  type: string;
+  label: string;
+  amount: number;
+  occurred_at: Date;
+};
+
 // 1~3 랜덤 (50% / 35% / 15%)
 function randomTickets(): number {
   const r = Math.random();
@@ -106,6 +113,24 @@ async function getOrCreateTickets(userId: string): Promise<{
     [userId]
   );
   return rows[0];
+}
+
+async function queryHistorySource(
+  sourceName: string,
+  sql: string,
+  params: unknown[]
+): Promise<TicketHistoryRow[]> {
+  try {
+    const { rows } = await pool.query<TicketHistoryRow>(sql, params);
+    return rows;
+  } catch (err) {
+    console.warn(`[Tickets] history source skipped: ${sourceName}`, err);
+    return [];
+  }
+}
+
+function compareHistoryDesc(a: TicketHistoryRow, b: TicketHistoryRow): number {
+  return new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime();
 }
 
 /**
@@ -597,43 +622,44 @@ router.get('/history', requireAuth, async (req: Request, res: Response) => {
 
   const tickets = await getOrCreateTickets(userId);
 
-  const { rows: history } = await pool.query<{
-    type: string;
-    label: string;
-    amount: number;
-    occurred_at: Date;
-  }>(
-    `SELECT 'ad' AS type, '광고 시청' AS label, earned AS amount, created_at AS occurred_at
-     FROM user_ticket_earn_log
-     WHERE user_id = $1 AND earn_date >= CURRENT_DATE - INTERVAL '3 months'
-
-     UNION ALL
-
-     SELECT 'attendance', '출석 체크', 1, created_at
-     FROM user_attendance_log
-     WHERE user_id = $1 AND attend_date >= CURRENT_DATE - INTERVAL '3 months'
-
-     UNION ALL
-
-     SELECT 'bonus', '주간 보너스', bonus_tickets, granted_at
-     FROM user_weekly_bonus_log
-     WHERE user_id = $1 AND bonus_tickets > 0 AND granted_at >= NOW() - INTERVAL '3 months'
-
-     UNION ALL
-
-     SELECT 'visit' AS type, '가봤어요 도장' AS label, bonus_tickets AS amount, visited_at AS occurred_at
-     FROM user_visit_log
-     WHERE user_id = $1 AND bonus_tickets > 0 AND visited_at >= NOW() - INTERVAL '3 months'
-
-     UNION ALL
-
-     SELECT 'exchange', '포인트 교환', -${TICKETS_PER_EXCHANGE}, confirmed_at
-     FROM user_ticket_exchanges
-     WHERE user_id = $1 AND status = 'completed' AND confirmed_at >= NOW() - INTERVAL '3 months'
-
-     ORDER BY occurred_at DESC`,
-    [userId]
-  );
+  const historyGroups = await Promise.all([
+    queryHistorySource(
+      'ad',
+      `SELECT 'ad' AS type, '광고 시청' AS label, earned AS amount, created_at AS occurred_at
+       FROM user_ticket_earn_log
+       WHERE user_id = $1 AND earn_date >= CURRENT_DATE - INTERVAL '3 months'`,
+      [userId]
+    ),
+    queryHistorySource(
+      'attendance',
+      `SELECT 'attendance' AS type, '출석 체크' AS label, 1 AS amount, created_at AS occurred_at
+       FROM user_attendance_log
+       WHERE user_id = $1 AND attend_date >= CURRENT_DATE - INTERVAL '3 months'`,
+      [userId]
+    ),
+    queryHistorySource(
+      'weekly_bonus',
+      `SELECT 'bonus' AS type, '주간 보너스' AS label, bonus_tickets AS amount, granted_at AS occurred_at
+       FROM user_weekly_bonus_log
+       WHERE user_id = $1 AND bonus_tickets > 0 AND granted_at >= NOW() - INTERVAL '3 months'`,
+      [userId]
+    ),
+    queryHistorySource(
+      'visit',
+      `SELECT 'visit' AS type, '다녀왔어요 도장' AS label, bonus_tickets AS amount, visited_at AS occurred_at
+       FROM user_visit_log
+       WHERE user_id = $1 AND bonus_tickets > 0 AND visited_at >= NOW() - INTERVAL '3 months'`,
+      [userId]
+    ),
+    queryHistorySource(
+      'exchange',
+      `SELECT 'exchange' AS type, '포인트 교환' AS label, $2::integer AS amount, confirmed_at AS occurred_at
+       FROM user_ticket_exchanges
+       WHERE user_id = $1 AND status = 'completed' AND confirmed_at >= NOW() - INTERVAL '3 months'`,
+      [userId, -TICKETS_PER_EXCHANGE]
+    ),
+  ]);
+  const history = historyGroups.flat().sort(compareHistoryDesc);
 
   return res.json({
     ticketCount: tickets.ticket_count,

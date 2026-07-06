@@ -251,7 +251,7 @@ function PassportPage() {
     try {
       const next = await getPassport();
       setPassport(next);
-      setVisitedIds(new Set(next.stamps.map((stamp) => stamp.eventId)));
+      setVisitedIds(new Set((next.visitedEventIds ?? next.stamps.map((stamp) => stamp.eventId)).map(String)));
     } catch {
       setPassportError(true);
     } finally {
