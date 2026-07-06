@@ -198,6 +198,7 @@ function PassportPage() {
   const savingIdsRef = useRef<Set<string>>(new Set());
   const markingIdsRef = useRef<Set<string>>(new Set());
   const desiredBookSectionRef = useRef<PassportBookmarkSection>('cover');
+  const lastAlignedBookPageRef = useRef<string | null>(null);
   const [currentBookPage, setCurrentBookPage] = useState(0);
   const [savingIds, setSavingIds] = useState<Set<string>>(() => new Set());
 
@@ -564,13 +565,24 @@ function PassportPage() {
         ? desiredIndex
         : clampedIndex;
 
+    const alignmentKey = `${pageWidth}:${targetIndex}`;
+
     if (targetIndex !== currentBookPage) {
       setCurrentBookPage(targetIndex);
       if (pageWidth > 0) {
         requestAnimationFrame(() => {
           bookListRef.current?.scrollToIndex({ index: targetIndex, animated: false });
         });
+        lastAlignedBookPageRef.current = alignmentKey;
       }
+      return;
+    }
+
+    if (pageWidth > 0 && lastAlignedBookPageRef.current !== alignmentKey) {
+      requestAnimationFrame(() => {
+        bookListRef.current?.scrollToIndex({ index: targetIndex, animated: false });
+      });
+      lastAlignedBookPageRef.current = alignmentKey;
     }
   }, [bookPages, currentBookPage, pageWidth]);
 
@@ -592,6 +604,7 @@ function PassportPage() {
     setCurrentBookPage(index);
     if (pageWidth <= 0) return;
     bookListRef.current?.scrollToIndex({ index, animated: true });
+    lastAlignedBookPageRef.current = `${pageWidth}:${index}`;
   }, [bookmarkIndexes, pageWidth]);
 
   const handleScrollToIndexFailed = useCallback((info: ScrollToIndexFailure) => {
