@@ -181,7 +181,10 @@ export function SavedTicketRow({
                   saveState === 'loading' || isDeleted ? styles.actionDisabled : null,
                 ]}
               >
-                <Text style={[styles.saveButtonText, saveState === 'saved' ? styles.saveButtonDoneText : null]}>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.saveButtonText, saveState === 'saved' ? styles.saveButtonDoneText : null]}
+                >
                   {saveLabel}
                 </Text>
               </Pressable>
@@ -364,7 +367,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 8,
+    flexWrap: 'wrap',
+    gap: 6,
+    rowGap: 6,
   },
   visitButton: {
     minHeight: 28,
@@ -396,10 +401,12 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     minHeight: 30,
+    maxWidth: 72,
     borderRadius: 999,
     paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 1,
   },
   saveButtonIdle: {
     backgroundColor: NORMAL_BG,
