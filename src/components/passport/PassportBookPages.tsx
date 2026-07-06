@@ -1,6 +1,6 @@
 import { Icon, Loader } from '@toss/tds-react-native';
 import React from 'react';
-import { ImageBackground, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ImageBackground, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { manilaTagTexture } from '../../assets';
 import type {
   PassportBookmarkSection,
@@ -86,7 +86,12 @@ export function PassportTicketBookPage({
 
         <View style={styles.divider} />
 
-        <View style={styles.ticketList}>
+        <ScrollView
+          style={styles.ticketScroller}
+          contentContainerStyle={styles.ticketList}
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+        >
           {items.map((item) => (
             <SavedTicketRow
               key={item.id}
@@ -100,7 +105,7 @@ export function PassportTicketBookPage({
               onToggleSave={onToggleSave}
             />
           ))}
-        </View>
+        </ScrollView>
       </ImageBackground>
     </View>
   );
@@ -267,8 +272,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(44,42,34,0.32)',
     marginBottom: 12,
   },
+  ticketScroller: {
+    flex: 1,
+  },
   ticketList: {
     gap: 10,
+    paddingBottom: 2,
   },
   stateBox: {
     flex: 1,
@@ -313,8 +322,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   indexTab: {
-    width: 40,
-    minHeight: 38,
+    width: 44,
+    minHeight: 44,
     borderTopLeftRadius: 10,
     borderBottomLeftRadius: 10,
     backgroundColor: 'rgba(20,33,58,0.70)',
