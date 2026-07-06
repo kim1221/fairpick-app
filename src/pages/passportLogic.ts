@@ -127,10 +127,20 @@ function appendTicketSection<TTicket extends TicketLike, TStamp>(
     return;
   }
   chunk(items, perPage).forEach((pageItems, pageIndex) => {
+    if (section === 'discovered') {
+      pages.push({
+        key: `discovered-${pageIndex}`,
+        type: 'discovered',
+        section: 'discovered',
+        pageIndex,
+        items: pageItems,
+      });
+      return;
+    }
     pages.push({
-      key: `${section}-${pageIndex}`,
-      type: section,
-      section,
+      key: `wishlist-${pageIndex}`,
+      type: 'wishlist',
+      section: 'wishlist',
       pageIndex,
       items: pageItems,
     });
