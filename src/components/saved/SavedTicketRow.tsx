@@ -24,6 +24,7 @@ const GOLD_INK = '#1E1608';
 const STAMP = '#A8324A';
 
 export type VisitButtonState = 'idle' | 'loading' | 'visited';
+export type SaveButtonState = 'hidden' | 'idle' | 'saved' | 'loading';
 
 export interface SavedTicketItem {
   id: string;
@@ -45,18 +46,22 @@ interface SavedTicketRowProps {
   item: SavedTicketItem;
   visitState: VisitButtonState;
   stampSignal: number;
+  saveState?: SaveButtonState;
   onPress: (item: SavedTicketItem) => void;
   onDirections: (item: SavedTicketItem) => void;
   onVisit: (item: SavedTicketItem) => void;
+  onToggleSave?: (item: SavedTicketItem) => void;
 }
 
 export function SavedTicketRow({
   item,
   visitState,
   stampSignal,
+  saveState = 'hidden',
   onPress,
   onDirections,
   onVisit,
+  onToggleSave,
 }: SavedTicketRowProps) {
   const category = normalizeSavedCategory(item.category, item.subCategory);
   const color = SAVED_CATEGORY_COLORS[category];
@@ -107,6 +112,14 @@ export function SavedTicketRow({
     return '◉ 다녀왔어요';
   }, [visitState]);
 
+  const saveLabel = useMemo(() => {
+    if (saveState === 'loading') return '저장 중';
+    if (saveState === 'saved') return '저장됨';
+    return '저장';
+  }, [saveState]);
+
+  const showSaveButton = saveState !== 'hidden' && typeof onToggleSave === 'function';
+
   const isDeleted = item.lastKnownStatus === 'deleted';
   const canOpenDirections = Boolean(item.venue || item.region);
 
@@ -154,6 +167,25 @@ export function SavedTicketRow({
                 {visitLabel}
               </Text>
             </Pressable>
+            {showSaveButton ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  saveState === 'saved' ? `${item.title} 저장 취소` : `${item.title} 저장`
+                }
+                disabled={saveState === 'loading' || isDeleted}
+                onPress={() => onToggleSave?.(item)}
+                style={[
+                  styles.saveButton,
+                  saveState === 'saved' ? styles.saveButtonDone : styles.saveButtonIdle,
+                  saveState === 'loading' || isDeleted ? styles.actionDisabled : null,
+                ]}
+              >
+                <Text style={[styles.saveButtonText, saveState === 'saved' ? styles.saveButtonDoneText : null]}>
+                  {saveLabel}
+                </Text>
+              </Pressable>
+            ) : null}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`${item.title} 길찾기`}
@@ -361,6 +393,28 @@ const styles = StyleSheet.create({
   },
   visitButtonDoneText: {
     color: STAMP,
+  },
+  saveButton: {
+    minHeight: 30,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveButtonIdle: {
+    backgroundColor: NORMAL_BG,
+  },
+  saveButtonDone: {
+    backgroundColor: GOLD,
+  },
+  saveButtonText: {
+    color: NORMAL_TEXT,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '900',
+  },
+  saveButtonDoneText: {
+    color: GOLD_INK,
   },
   directions: {
     color: BLUE,
