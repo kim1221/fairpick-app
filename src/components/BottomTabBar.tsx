@@ -5,14 +5,16 @@ import { Icon } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 
 interface BottomTabBarProps {
-  currentTab: 'home' | 'saved' | 'points' | 'mypage';
+  currentTab: 'home' | 'passport' | 'points' | 'saved' | 'mypage';
   onHomeTabPress?: () => void; // 홈 탭 진입 시 최상단 스크롤 (다른 탭에서 복귀 포함)
 }
 
+// CDN 실존 확인(200): icon-home-mono / icon-stamp-mono / icon-diamond-mono
+// 여권=도장북 → 잉크 스탬프 글리프, 포인트=돈 → 시안 마름모와 동일한 다이아몬드.
 const TAB_ICONS = {
   home: 'icon-home-mono',
-  saved: 'icon-bookmark-mono',
-  points: 'icon-star-mono',
+  passport: 'icon-stamp-mono',
+  points: 'icon-diamond-mono',
 } as const;
 
 type Adaptive = ReturnType<typeof useAdaptive>;
@@ -58,8 +60,8 @@ export const BottomTabBar: React.FC<BottomTabBarProps> = ({ currentTab, onHomeTa
 
   const tabs = [
     { key: 'home' as const, label: '홈', route: '/' as const },
-    { key: 'saved' as const, label: '저장', route: '/saved' as const },
-    { key: 'points' as const, label: '내 문화', route: '/points' as const },
+    { key: 'passport' as const, label: '여권', route: '/passport' as const },
+    { key: 'points' as const, label: '포인트', route: '/points' as const },
   ];
 
   const handleTabPress = (tab: typeof tabs[number]) => {

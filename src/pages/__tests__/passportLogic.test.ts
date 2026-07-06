@@ -155,6 +155,27 @@ describe('passport logic', () => {
     ]);
   });
 
+  test('holds wishlist page while visited ids are still loading', () => {
+    const pages = buildPassportBookPages<TestTicket, TestStamp>({
+      discoveredItems: tickets(1),
+      wishlistItems: tickets(2),
+      stamps: [],
+      visitedIds: new Set(),
+      passportLoading: true,
+      passportError: false,
+      savedLoading: false,
+      savedError: false,
+    });
+
+    expect(pages.map((page) => `${page.type}:${page.section}`)).toEqual([
+      'cover:cover',
+      'identity:cover',
+      'discovered:discovered',
+      'loading:wishlist',
+      'loading:stamps',
+    ]);
+  });
+
   test('calculates bookmark indexes and active bookmark', () => {
     const pages = buildPassportBookPages<TestTicket, TestStamp>({
       discoveredItems: tickets(4),

@@ -164,10 +164,21 @@ export function buildPassportBookPages<TTicket extends TicketLike, TStamp>({
     { key: 'cover', type: 'cover', section: 'cover' },
     { key: 'identity', type: 'identity', section: 'cover' },
   ];
-  const pendingWishlistItems = wishlistItems.filter((item) => !visitedIds.has(item.id));
+  const shouldWaitForVisitedIds = passportLoading && wishlistItems.length > 0;
+  const shouldBlockWishlistForVisitError = passportError && wishlistItems.length > 0;
+  const pendingWishlistItems = shouldWaitForVisitedIds || shouldBlockWishlistForVisitError
+    ? []
+    : wishlistItems.filter((item) => !visitedIds.has(item.id));
 
   appendTicketSection(pages, 'discovered', discoveredItems, passportLoading, passportError, discoveredItemsPerPage);
-  appendTicketSection(pages, 'wishlist', pendingWishlistItems, savedLoading, savedError, wishlistItemsPerPage);
+  appendTicketSection(
+    pages,
+    'wishlist',
+    pendingWishlistItems,
+    savedLoading || shouldWaitForVisitedIds,
+    savedError || shouldBlockWishlistForVisitError,
+    wishlistItemsPerPage,
+  );
 
   if (passportLoading && stamps.length === 0) {
     pages.push({ key: 'stamps-loading', type: 'loading', section: 'stamps' });

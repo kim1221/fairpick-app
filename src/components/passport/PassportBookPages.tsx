@@ -28,12 +28,9 @@ export type PassportBookmarkItem = {
   label: string;
 };
 
-type TicketPageMode = 'discovered' | 'wishlist';
-
 export function PassportTicketBookPage({
   width,
   copy,
-  mode,
   pageIndex,
   totalPages,
   items,
@@ -47,7 +44,6 @@ export function PassportTicketBookPage({
 }: {
   width: number;
   copy: PassportSectionCopy;
-  mode: TicketPageMode;
   pageIndex: number;
   totalPages: number;
   items: SavedTicketItem[];
@@ -98,7 +94,7 @@ export function PassportTicketBookPage({
               item={item}
               visitState={getVisitState(item.id)}
               stampSignal={getStampSignal(item.id)}
-              saveState={mode === 'discovered' ? getSaveState(item.id) : 'saved'}
+              saveState={getSaveState(item.id)}
               onPress={onPressTicket}
               onDirections={onDirections}
               onVisit={onVisit}

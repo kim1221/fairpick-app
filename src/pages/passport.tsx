@@ -222,7 +222,7 @@ function PassportPage() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const firstStampNoticeShownRef = useRef(false);
 
-  const pageWidth = Math.max(screenWidth - 40, 0);
+  const pageWidth = Math.max(screenWidth, 0);
 
   const showToast = useCallback((message: SavedVisitToastMessage) => {
     if (toastTimerRef.current) {
@@ -651,7 +651,6 @@ function PassportPage() {
         <PassportTicketBookPage
           width={pageWidth}
           copy={getPassportSectionCopy('discovered')}
-          mode="discovered"
           pageIndex={item.pageIndex}
           totalPages={discoveredBookPageCount}
           items={item.items}
@@ -670,7 +669,6 @@ function PassportPage() {
         <PassportTicketBookPage
           width={pageWidth}
           copy={getPassportSectionCopy('wishlist')}
-          mode="wishlist"
           pageIndex={item.pageIndex}
           totalPages={wishlistBookPageCount}
           items={item.items}

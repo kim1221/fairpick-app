@@ -319,7 +319,7 @@ export function PassportStampPage({
 
 const styles = StyleSheet.create({
   page: {
-    paddingHorizontal: 2,
+    paddingHorizontal: 20,
   },
   // ── 표지 ──
   cover: {
