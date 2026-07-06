@@ -71,6 +71,11 @@ const ON_BG_MUTED = TAG_TOKENS.navSub;
 
 type OrderedLike = { id: string; timestamp: string };
 type EventWithWalk = EventCardData & { walkMinutes?: number | null };
+type ScrollToIndexFailure = {
+  index: number;
+  highestMeasuredFrameIndex: number;
+  averageItemLength: number;
+};
 
 function snapshotToTicketItem(item: StoredEventItemV2): SavedTicketItem {
   return {
@@ -190,6 +195,9 @@ function PassportPage() {
   const dialog = useDialog();
   const { isLoggedIn, isLoading: authLoading } = useAuth();
   const bookListRef = useRef<FlatList<PassportBookPage<SavedTicketItem, PassportStamp>>>(null);
+  const savingIdsRef = useRef<Set<string>>(new Set());
+  const markingIdsRef = useRef<Set<string>>(new Set());
+  const desiredBookSectionRef = useRef<PassportBookmarkSection>('cover');
   const [currentBookPage, setCurrentBookPage] = useState(0);
   const [savingIds, setSavingIds] = useState<Set<string>>(() => new Set());
 
@@ -384,20 +392,36 @@ function PassportPage() {
     }
   }, [showToast]);
 
+  const savedIds = useMemo(() => new Set(savedItems.map((item) => item.id)), [savedItems]);
+
+  const syncLocalLikeState = useCallback(async (item: SavedTicketItem, shouldSave: boolean) => {
+    const likes = await getLikesV2();
+    const exists = likes.items.some((like) => like.id === item.id);
+    if (exists === shouldSave) return;
+    await toggleLike(item.id, {
+      title: item.title,
+      startAt: item.startAt ?? undefined,
+      endAt: item.endAt ?? undefined,
+      venue: item.venue ?? undefined,
+      region: item.region ?? undefined,
+      mainCategory: item.category ?? undefined,
+      subCategory: item.subCategory ?? undefined,
+    });
+  }, []);
+
   const handleToggleSave = useCallback(async (item: SavedTicketItem) => {
+    if (savingIdsRef.current.has(item.id)) return;
     if (savingIds.has(item.id)) return;
+    savingIdsRef.current.add(item.id);
     addId(setSavingIds, item.id);
+    const shouldSave = !savedIds.has(item.id);
     try {
-      const result = await toggleLike(item.id, {
-        title: item.title,
-        startAt: item.startAt ?? undefined,
-        endAt: item.endAt ?? undefined,
-        venue: item.venue ?? undefined,
-        region: item.region ?? undefined,
-        mainCategory: item.category ?? undefined,
-        subCategory: item.subCategory ?? undefined,
-      });
-      if (result.liked) {
+      if (isLoggedIn) {
+        if (shouldSave) await http.post(`/users/me/likes/${item.id}`);
+        else await http.delete(`/users/me/likes/${item.id}`);
+      }
+      await syncLocalLikeState(item, shouldSave);
+      if (shouldSave) {
         userEventService.logEventSave(item.id).catch(() => {});
         setSavedItems((prev) => (
           prev.some((saved) => saved.id === item.id) ? prev : [item, ...prev]
@@ -410,14 +434,16 @@ function PassportPage() {
       }
     } catch (error) {
       showToast({ title: '저장 상태를 바꾸지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
+      loadSaved().catch(() => {});
       if (__DEV__) console.error('[PassportPage][toggleSave]', error);
     } finally {
+      savingIdsRef.current.delete(item.id);
       removeId(setSavingIds, item.id);
     }
-  }, [savingIds, showToast]);
+  }, [isLoggedIn, loadSaved, savedIds, savingIds, showToast, syncLocalLikeState]);
 
   const handleVisit = useCallback(async (item: SavedTicketItem) => {
-    if (markingIds.has(item.id)) return;
+    if (markingIdsRef.current.has(item.id)) return;
     if (!isLoggedIn) {
       await dialog.openAlert({
         title: '로그인하면 도장을 남길 수 있어요',
@@ -425,6 +451,7 @@ function PassportPage() {
       });
       return;
     }
+    markingIdsRef.current.add(item.id);
     const wasVisited = visitedIds.has(item.id);
     addId(setMarkingIds, item.id);
     if (wasVisited) {
@@ -437,6 +464,7 @@ function PassportPage() {
         showToast({ title: '도장을 취소하지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
         if (__DEV__) console.error('[PassportPage][unmarkVisited]', error);
       } finally {
+        markingIdsRef.current.delete(item.id);
         removeId(setMarkingIds, item.id);
       }
       return;
@@ -458,17 +486,16 @@ function PassportPage() {
       showToast({ title: '도장을 남기지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
       if (__DEV__) console.error('[PassportPage][markVisited]', error);
     } finally {
+      markingIdsRef.current.delete(item.id);
       removeId(setMarkingIds, item.id);
     }
-  }, [dialog, isLoggedIn, loadPassport, markingIds, showToast, visitedIds]);
+  }, [dialog, isLoggedIn, loadPassport, showToast, visitedIds]);
 
   const getVisitState = useCallback((id: string): VisitButtonState => {
     if (visitedIds.has(id)) return 'visited';
     if (markingIds.has(id)) return 'loading';
     return 'idle';
   }, [markingIds, visitedIds]);
-
-  const savedIds = useMemo(() => new Set(savedItems.map((item) => item.id)), [savedItems]);
 
   const getSaveState = useCallback((id: string): SaveButtonState => {
     if (savingIds.has(id)) return 'loading';
@@ -524,16 +551,55 @@ function PassportPage() {
     { section: 'stamps', label: '도장' },
   ], []);
 
+  useEffect(() => {
+    if (bookPages.length === 0) return;
+    const maxIndex = bookPages.length - 1;
+    const clampedIndex = Math.min(currentBookPage, maxIndex);
+    const desiredSection = desiredBookSectionRef.current;
+    const clampedPage = bookPages[clampedIndex];
+    const desiredIndex = bookPages.findIndex((page) => page.section === desiredSection);
+    const targetIndex = clampedPage?.section === desiredSection
+      ? clampedIndex
+      : desiredIndex >= 0
+        ? desiredIndex
+        : clampedIndex;
+
+    if (targetIndex !== currentBookPage) {
+      setCurrentBookPage(targetIndex);
+      if (pageWidth > 0) {
+        requestAnimationFrame(() => {
+          bookListRef.current?.scrollToIndex({ index: targetIndex, animated: false });
+        });
+      }
+    }
+  }, [bookPages, currentBookPage, pageWidth]);
+
+  useEffect(() => {
+    desiredBookSectionRef.current = activeBookmark;
+  }, [activeBookmark]);
+
   const handleBookMomentumEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (bookPages.length === 0) return;
     const nextIndex = Math.round(event.nativeEvent.contentOffset.x / Math.max(pageWidth, 1));
-    setCurrentBookPage(Math.max(0, Math.min(nextIndex, bookPages.length - 1)));
-  }, [bookPages.length, pageWidth]);
+    const validIndex = Math.max(0, Math.min(nextIndex, bookPages.length - 1));
+    desiredBookSectionRef.current = bookPages[validIndex]?.section ?? 'cover';
+    setCurrentBookPage(validIndex);
+  }, [bookPages, pageWidth]);
 
   const handlePressBookmark = useCallback((section: PassportBookmarkSection) => {
+    desiredBookSectionRef.current = section;
     const index = bookmarkIndexes[section];
     setCurrentBookPage(index);
+    if (pageWidth <= 0) return;
     bookListRef.current?.scrollToIndex({ index, animated: true });
-  }, [bookmarkIndexes]);
+  }, [bookmarkIndexes, pageWidth]);
+
+  const handleScrollToIndexFailed = useCallback((info: ScrollToIndexFailure) => {
+    const offset = Math.max(info.averageItemLength, pageWidth, 1) * info.index;
+    requestAnimationFrame(() => {
+      bookListRef.current?.scrollToOffset({ offset, animated: false });
+    });
+  }, [pageWidth]);
 
   const renderStateCopy = useCallback((section: PassportContentSection) => {
     if (section === 'wishlist') return getPassportSectionCopy('wishlist');
@@ -671,6 +737,7 @@ function PassportPage() {
             renderItem={renderBookPage}
             showsHorizontalScrollIndicator={false}
             onMomentumScrollEnd={handleBookMomentumEnd}
+            onScrollToIndexFailed={handleScrollToIndexFailed}
             getItemLayout={(_, index) => ({
               length: pageWidth,
               offset: pageWidth * index,
