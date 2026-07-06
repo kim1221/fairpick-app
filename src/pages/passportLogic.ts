@@ -10,15 +10,36 @@ export type PassportSectionCopy = {
   emptyDescription: string;
 };
 
+type PassportBasePage<
+  TSection extends PassportBookmarkSection,
+  TType extends string,
+  TKey extends string,
+> = {
+  key: TKey;
+  type: TType;
+  section: TSection;
+};
+
+type PassportTicketPage<TSection extends 'discovered' | 'wishlist', TTicket> =
+  PassportBasePage<TSection, TSection, `${TSection}-${number}`> & {
+    pageIndex: number;
+    items: TTicket[];
+  };
+
+type PassportStampPage<TStamp> = PassportBasePage<'stamps', 'stamps', `stamps-${number}`> & {
+  pageIndex: number;
+  stamps: TStamp[];
+};
+
 export type PassportBookPage<TTicket, TStamp> =
-  | { key: 'cover'; type: 'cover'; section: 'cover' }
-  | { key: 'identity'; type: 'identity'; section: 'cover' }
-  | { key: string; type: 'discovered'; section: 'discovered'; pageIndex: number; items: TTicket[] }
-  | { key: string; type: 'wishlist'; section: 'wishlist'; pageIndex: number; items: TTicket[] }
-  | { key: string; type: 'stamps'; section: 'stamps'; pageIndex: number; stamps: TStamp[] }
-  | { key: string; type: 'loading'; section: PassportContentSection }
-  | { key: string; type: 'empty'; section: PassportContentSection }
-  | { key: string; type: 'error'; section: PassportContentSection };
+  | PassportBasePage<'cover', 'cover', 'cover'>
+  | PassportBasePage<'cover', 'identity', 'identity'>
+  | PassportTicketPage<'discovered', TTicket>
+  | PassportTicketPage<'wishlist', TTicket>
+  | PassportStampPage<TStamp>
+  | PassportBasePage<PassportContentSection, 'loading', `${PassportContentSection}-loading`>
+  | PassportBasePage<PassportContentSection, 'empty', `${PassportContentSection}-empty`>
+  | PassportBasePage<PassportContentSection, 'error', `${PassportContentSection}-error`>;
 
 type TicketLike = { id: string };
 
@@ -73,11 +94,16 @@ export function getPassportTabLabel(segment: PassportSegment, count: number): st
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
+  const normalizedSize = normalizePageSize(size);
   const pages: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    pages.push(items.slice(index, index + size));
+  for (let index = 0; index < items.length; index += normalizedSize) {
+    pages.push(items.slice(index, index + normalizedSize));
   }
   return pages;
+}
+
+function normalizePageSize(size: number): number {
+  return Number.isFinite(size) && size > 0 ? Math.floor(size) : 1;
 }
 
 function appendTicketSection<TTicket extends TicketLike, TStamp>(
@@ -107,7 +133,7 @@ function appendTicketSection<TTicket extends TicketLike, TStamp>(
       section,
       pageIndex,
       items: pageItems,
-    } as PassportBookPage<TTicket, TStamp>);
+    });
   });
 }
 

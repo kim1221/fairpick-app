@@ -87,6 +87,33 @@ describe('passport logic', () => {
     expect(wishlistPages.map((page) => page.type === 'wishlist' ? page.items.length : 0)).toEqual([3, 1]);
   });
 
+  test('normalizes invalid page sizes to prevent stalled pagination', () => {
+    const pages = buildPassportBookPages<TestTicket, TestStamp>({
+      discoveredItems: tickets(2),
+      wishlistItems: tickets(2),
+      stamps: stamps(2),
+      visitedIds: new Set(),
+      passportLoading: false,
+      passportError: false,
+      savedLoading: false,
+      savedError: false,
+      discoveredItemsPerPage: 0,
+      wishlistItemsPerPage: -2,
+      stampsPerPage: 0,
+    });
+
+    expect(pages.map((page) => page.type)).toEqual([
+      'cover',
+      'identity',
+      'discovered',
+      'discovered',
+      'wishlist',
+      'wishlist',
+      'stamps',
+      'stamps',
+    ]);
+  });
+
   test('keeps empty sections inside the passport book', () => {
     const pages = buildPassportBookPages<TestTicket, TestStamp>({
       discoveredItems: [],
