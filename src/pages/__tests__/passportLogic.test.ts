@@ -5,6 +5,7 @@ import {
   getPassportSectionCopy,
   getPassportSectionIndexes,
   getPassportTabLabel,
+  getStampBookMeta,
 } from '../passportLogic';
 
 type TestTicket = { id: string; title: string };
@@ -68,7 +69,7 @@ describe('passport logic', () => {
     ]);
   });
 
-  test('chunks discovered and wishlist tickets into three-card pages', () => {
+  test('chunks discovered and wishlist tickets into two-card pages', () => {
     const pages = buildPassportBookPages<TestTicket, TestStamp>({
       discoveredItems: tickets(7),
       wishlistItems: tickets(4),
@@ -83,8 +84,8 @@ describe('passport logic', () => {
     const discoveredPages = pages.filter((page) => page.type === 'discovered');
     const wishlistPages = pages.filter((page) => page.type === 'wishlist');
 
-    expect(discoveredPages.map((page) => page.type === 'discovered' ? page.items.length : 0)).toEqual([3, 3, 1]);
-    expect(wishlistPages.map((page) => page.type === 'wishlist' ? page.items.length : 0)).toEqual([3, 1]);
+    expect(discoveredPages.map((page) => page.type === 'discovered' ? page.items.length : 0)).toEqual([2, 2, 2, 1]);
+    expect(wishlistPages.map((page) => page.type === 'wishlist' ? page.items.length : 0)).toEqual([2, 2]);
   });
 
   test('normalizes invalid page sizes to prevent stalled pagination', () => {
@@ -198,5 +199,37 @@ describe('passport logic', () => {
     expect(getActivePassportBookmark(pages, 3)).toBe('discovered');
     expect(getActivePassportBookmark(pages, 4)).toBe('wishlist');
     expect(getActivePassportBookmark(pages, 6)).toBe('stamps');
+  });
+
+  test('describes stamp passport books in chronological volume order', () => {
+    expect(getStampBookMeta(0, 1)).toMatchObject({
+      bookIndex: 1,
+      totalBooks: 1,
+      volumeNumber: 1,
+      startOrdinal: 0,
+      endOrdinal: 0,
+      hasNewerBook: false,
+      hasOlderBook: false,
+    });
+
+    expect(getStampBookMeta(72, 1)).toMatchObject({
+      bookIndex: 1,
+      totalBooks: 2,
+      volumeNumber: 2,
+      startOrdinal: 61,
+      endOrdinal: 72,
+      hasNewerBook: false,
+      hasOlderBook: true,
+    });
+
+    expect(getStampBookMeta(72, 2)).toMatchObject({
+      bookIndex: 2,
+      totalBooks: 2,
+      volumeNumber: 1,
+      startOrdinal: 1,
+      endOrdinal: 60,
+      hasNewerBook: true,
+      hasOlderBook: false,
+    });
   });
 });

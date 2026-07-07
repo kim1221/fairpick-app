@@ -37,13 +37,22 @@ export type PassportResponse = {
   discoveredCount: number; // earn_log distinct event (평생)
   visitedCount: number; // user_visit_log distinct
   monthDiscovered: number; // 이번달(KST) 발견 수
+  stampBook: number; // 1 = 최신 도장권
+  stampBookCount: number; // 전체 도장권 수
+  stampBookSize: number; // 도장권당 도장 수
   tasteCategories: string[]; // 상위 2~3 카테고리
   stamps: PassportStamp[]; // 다녀온 문화(도장 그리드용, 최대 60, visitedAt 내림차순)
   visitedEventIds: string[]; // 다녀온 이벤트 전체 id(위시리스트 필터용)
   discoveredCards: PassportDiscoveredCard[]; // 광고 보고 받은 카드(최신순, 최대 50)
 };
 
-export async function getPassport(): Promise<PassportResponse> {
-  const { data } = await http.get<PassportResponse>('/api/passport');
+export type GetPassportOptions = {
+  stampBook?: number;
+};
+
+export async function getPassport(options: GetPassportOptions = {}): Promise<PassportResponse> {
+  const { data } = await http.get<PassportResponse>('/api/passport', {
+    params: options.stampBook ? { stampBook: options.stampBook } : undefined,
+  });
   return data;
 }

@@ -57,9 +57,10 @@ export type BuildPassportBookPagesInput<TTicket extends TicketLike, TStamp> = {
   stampsPerPage?: number;
 };
 
-export const DISCOVERED_ITEMS_PER_PAGE = 3;
-export const WISHLIST_ITEMS_PER_PAGE = 3;
+export const DISCOVERED_ITEMS_PER_PAGE = 2;
+export const WISHLIST_ITEMS_PER_PAGE = 2;
 export const STAMPS_PER_BOOK_PAGE = 6;
+export const STAMPS_PER_PASSPORT_BOOK = 60;
 
 const SECTION_COPY: Record<PassportSegment, PassportSectionCopy> = {
   discovered: {
@@ -104,6 +105,46 @@ function chunk<T>(items: T[], size: number): T[][] {
 
 function normalizePageSize(size: number): number {
   return Number.isFinite(size) && size > 0 ? Math.floor(size) : 1;
+}
+
+export type StampBookMeta = {
+  bookIndex: number;
+  totalBooks: number;
+  volumeNumber: number;
+  startOrdinal: number;
+  endOrdinal: number;
+  hasNewerBook: boolean;
+  hasOlderBook: boolean;
+  label: string;
+  rangeLabel: string;
+};
+
+export function getStampBookMeta(
+  visitedCount: number,
+  bookIndex = 1,
+  bookSize = STAMPS_PER_PASSPORT_BOOK,
+): StampBookMeta {
+  const normalizedBookSize = normalizePageSize(bookSize);
+  const normalizedVisitedCount = Math.max(0, Math.floor(Number.isFinite(visitedCount) ? visitedCount : 0));
+  const totalBooks = Math.max(1, Math.ceil(normalizedVisitedCount / normalizedBookSize));
+  const normalizedBookIndex = Math.max(1, Math.min(Math.floor(Number.isFinite(bookIndex) ? bookIndex : 1), totalBooks));
+  const volumeNumber = totalBooks - normalizedBookIndex + 1;
+  const startOrdinal = normalizedVisitedCount === 0 ? 0 : ((volumeNumber - 1) * normalizedBookSize) + 1;
+  const endOrdinal = normalizedVisitedCount === 0
+    ? 0
+    : Math.min(volumeNumber * normalizedBookSize, normalizedVisitedCount);
+
+  return {
+    bookIndex: normalizedBookIndex,
+    totalBooks,
+    volumeNumber,
+    startOrdinal,
+    endOrdinal,
+    hasNewerBook: normalizedBookIndex > 1,
+    hasOlderBook: normalizedBookIndex < totalBooks,
+    label: `문화 여권 ${volumeNumber}권`,
+    rangeLabel: normalizedVisitedCount === 0 ? '아직 도장이 없어요' : `${startOrdinal}-${endOrdinal}번째 도장`,
+  };
 }
 
 function appendTicketSection<TTicket extends TicketLike, TStamp>(

@@ -342,6 +342,7 @@ test('GET /api/visits/ids returns the visited event id set', async () => {
 
 test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp summary', async () => {
   const seenParams = [];
+  const stampParams = [];
   pool.query = async (sql, params) => {
     const text = String(sql);
     if (text.includes('COUNT(DISTINCT event_id)') && text.includes('FROM user_ticket_earn_log') && !text.includes('earn_date >=')) {
@@ -381,6 +382,7 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
       };
     }
     if (text.includes('FROM user_visit_log') && text.includes('JOIN canonical_events')) {
+      stampParams.push(params);
       return {
         rows: [
           { event_id: 'event-2', title: '공연 둘', category: '공연', region: '용산구', venue: '노들섬', image_url: 'http://img/2.jpg', visited_at: '2026-07-01T03:00:00.000Z' },
@@ -404,6 +406,10 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
     { eventId: 'event-1', title: '전시 하나', category: '전시', region: '성동구', venue: '성수 코사이어티', imageUrl: null, visitedAt: '2026-06-30T03:00:00.000Z' },
   ]);
   assert.deepEqual(body.visitedEventIds, ['event-1', 'event-2', 'event-old']);
+  assert.equal(body.stampBook, 1);
+  assert.equal(body.stampBookCount, 1);
+  assert.equal(body.stampBookSize, 60);
+  assert.deepEqual(stampParams[0], [userId, 60, 0]);
   assert.deepEqual(body.discoveredCards, [
     {
       eventId: 'event-3',
@@ -420,6 +426,57 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
     },
   ]);
   assert.equal(seenParams.length, 1);
+});
+
+test('GET /api/passport loads older stamp books by query', async () => {
+  let stampParams = null;
+  pool.query = async (sql, params) => {
+    const text = String(sql);
+    if (text.includes('COUNT(DISTINCT event_id)') && text.includes('FROM user_ticket_earn_log') && !text.includes('earn_date >=')) {
+      return { rows: [{ count: '0' }] };
+    }
+    if (text.includes('COUNT(DISTINCT event_id)') && text.includes('FROM user_visit_log')) {
+      return { rows: [{ count: '72' }] };
+    }
+    if (text.includes('earn_date >=') && text.includes('FROM user_ticket_earn_log')) {
+      return { rows: [{ count: '0' }] };
+    }
+    if (text.includes('GROUP BY') && text.includes('canonical_events')) {
+      return { rows: [] };
+    }
+    if (text.includes('SELECT DISTINCT event_id') && text.includes('FROM user_visit_log')) {
+      return { rows: [{ event_id: 'event-old' }] };
+    }
+    if (text.includes('FROM user_ticket_earn_log el') && text.includes('DISTINCT ON')) {
+      return { rows: [] };
+    }
+    if (text.includes('FROM user_visit_log') && text.includes('JOIN canonical_events')) {
+      stampParams = params;
+      return {
+        rows: [
+          {
+            event_id: 'event-old',
+            title: '오래된 도장',
+            category: '전시',
+            region: '서울',
+            venue: '갤러리',
+            image_url: null,
+            visited_at: '2026-01-01T03:00:00.000Z',
+          },
+        ],
+      };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(passportRouter), 'GET', '/?stampBook=2');
+
+  assert.equal(status, 200);
+  assert.deepEqual(stampParams, [userId, 60, 60]);
+  assert.equal(body.stampBook, 2);
+  assert.equal(body.stampBookCount, 2);
+  assert.equal(body.stampBookSize, 60);
+  assert.deepEqual(body.stamps.map((stamp) => stamp.eventId), ['event-old']);
 });
 
 test('GET /api/tickets/history includes visit stamp bonuses from user_visit_log', async () => {

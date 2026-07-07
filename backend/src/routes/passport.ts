@@ -4,6 +4,7 @@ import { pool } from '../db';
 import { requireAuth } from '../middleware/requireAuth';
 
 const router = express.Router();
+const STAMP_BOOK_SIZE = 60;
 
 function currentKstMonthStart(): string {
   const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
@@ -46,9 +47,18 @@ function numberOrNull(value: string | number | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function positiveInt(value: unknown, fallback: number): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.floor(parsed);
+}
+
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const monthStart = currentKstMonthStart();
+  const stampBook = positiveInt(req.query.stampBook, 1);
+  const stampOffset = (stampBook - 1) * STAMP_BOOK_SIZE;
 
   try {
     const [
@@ -99,8 +109,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
          WHERE vl.user_id = $1
            AND ce.is_deleted = false
          ORDER BY vl.visited_at DESC
-         LIMIT 60`,
-        [userId]
+         LIMIT $2 OFFSET $3`,
+        [userId, STAMP_BOOK_SIZE, stampOffset]
       ),
       pool.query<{ event_id: string }>(
         `SELECT DISTINCT event_id
@@ -149,11 +159,15 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       ),
     ]);
 
+    const visitedCount = countFrom(visitedResult.rows[0]);
     return res.json({
       passportNo: passportNo(userId),
       discoveredCount: countFrom(discoveredResult.rows[0]),
-      visitedCount: countFrom(visitedResult.rows[0]),
+      visitedCount,
       monthDiscovered: countFrom(monthDiscoveredResult.rows[0]),
+      stampBook,
+      stampBookCount: Math.max(1, Math.ceil(visitedCount / STAMP_BOOK_SIZE)),
+      stampBookSize: STAMP_BOOK_SIZE,
       tasteCategories: tasteResult.rows.map((row) => normalizeCategory(row.category)),
       stamps: stampResult.rows.map((row) => ({
         eventId: row.event_id,

@@ -239,12 +239,16 @@ export function PassportStampPage({
   width,
   stamps,
   pageIndex,
+  bookLabel,
+  rangeLabel,
   pageMonthLabel,
   onPressStamp,
 }: {
   width: number;
   stamps: PassportStamp[];
   pageIndex: number;
+  bookLabel: string;
+  rangeLabel: string;
   pageMonthLabel: string;
   onPressStamp: (stamp: PassportStamp) => void;
 }) {
@@ -264,7 +268,12 @@ export function PassportStampPage({
         </View>
 
         <View style={styles.idHeaderRow}>
-          <Text style={styles.idHeaderText}>Stamps · {pageMonthLabel}</Text>
+          <View style={styles.idHeaderTextWrap}>
+            <Text style={styles.idHeaderText} numberOfLines={1}>{bookLabel}</Text>
+            <Text style={styles.idHeaderSubText} numberOfLines={1}>
+              Stamps · {rangeLabel} · {pageMonthLabel}
+            </Text>
+          </View>
           <Text style={styles.idHeaderPage}>p.{pageIndex + 3}</Text>
         </View>
 
@@ -460,11 +469,16 @@ const styles = StyleSheet.create({
   },
   idHeaderRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
+    gap: 10,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(110,99,80,0.3)',
     paddingBottom: 8,
+  },
+  idHeaderTextWrap: {
+    flex: 1,
+    minWidth: 0,
   },
   idHeaderText: {
     color: INK_SUB,
@@ -472,6 +486,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1,
     fontFamily: 'Noto Serif KR',
+  },
+  idHeaderSubText: {
+    marginTop: 2,
+    color: INK_SUB,
+    fontSize: 10.5,
+    lineHeight: 14,
+    fontWeight: '700',
+    opacity: 0.82,
   },
   idHeaderPage: {
     color: INK_SUB,

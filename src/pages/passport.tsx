@@ -8,6 +8,7 @@ import {
   Linking,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -56,6 +57,8 @@ import {
   getActivePassportBookmark,
   getPassportSectionCopy,
   getPassportSectionIndexes,
+  getStampBookMeta,
+  STAMPS_PER_PASSPORT_BOOK,
   type PassportBookPage,
   type PassportBookmarkSection,
   type PassportContentSection,
@@ -68,6 +71,7 @@ export const Route = createRoute('/passport', {
 const BG = TAG_TOKENS.bg;
 const ON_BG = TAG_TOKENS.headText;
 const ON_BG_MUTED = TAG_TOKENS.navSub;
+const GOLD = '#CBA15E';
 
 type OrderedLike = { id: string; timestamp: string };
 type EventWithWalk = EventCardData & { walkMinutes?: number | null };
@@ -198,6 +202,7 @@ function PassportPage() {
   const savingIdsRef = useRef<Set<string>>(new Set());
   const markingIdsRef = useRef<Set<string>>(new Set());
   const desiredBookSectionRef = useRef<PassportBookmarkSection>('cover');
+  const stampBookRef = useRef(1);
   const lastAlignedBookPageRef = useRef<string | null>(null);
   const [currentBookPage, setCurrentBookPage] = useState(0);
   const [savingIds, setSavingIds] = useState<Set<string>>(() => new Set());
@@ -205,6 +210,7 @@ function PassportPage() {
   const [passport, setPassport] = useState<PassportResponse | null>(null);
   const [passportLoading, setPassportLoading] = useState(true);
   const [passportError, setPassportError] = useState(false);
+  const [stampBook, setStampBook] = useState(1);
   const [activeStamp, setActiveStamp] = useState<PassportStamp | null>(null);
   const [cancelingStamp, setCancelingStamp] = useState(false);
 
@@ -223,6 +229,11 @@ function PassportPage() {
   const firstStampNoticeShownRef = useRef(false);
 
   const pageWidth = Math.max(screenWidth, 0);
+
+  const setCurrentStampBook = useCallback((nextBook: number) => {
+    stampBookRef.current = nextBook;
+    setStampBook(nextBook);
+  }, []);
 
   const showToast = useCallback((message: SavedVisitToastMessage) => {
     if (toastTimerRef.current) {
@@ -246,18 +257,33 @@ function PassportPage() {
     }, 2600);
   }, []);
 
-  const loadPassport = useCallback(async () => {
+  const loadPassport = useCallback(async (nextStampBook?: number) => {
+    const requestedStampBook = nextStampBook ?? stampBookRef.current;
     setPassportError(false);
     try {
-      const next = await getPassport();
+      let next = await getPassport({ stampBook: requestedStampBook });
+      let normalizedStampBook = getStampBookMeta(
+        next.visitedCount,
+        next.stampBook ?? requestedStampBook,
+        next.stampBookSize ?? STAMPS_PER_PASSPORT_BOOK,
+      ).bookIndex;
+      if (normalizedStampBook !== requestedStampBook) {
+        next = await getPassport({ stampBook: normalizedStampBook });
+        normalizedStampBook = getStampBookMeta(
+          next.visitedCount,
+          next.stampBook ?? normalizedStampBook,
+          next.stampBookSize ?? STAMPS_PER_PASSPORT_BOOK,
+        ).bookIndex;
+      }
       setPassport(next);
+      setCurrentStampBook(normalizedStampBook);
       setVisitedIds(new Set((next.visitedEventIds ?? next.stamps.map((stamp) => stamp.eventId)).map(String)));
     } catch {
       setPassportError(true);
     } finally {
       setPassportLoading(false);
     }
-  }, []);
+  }, [setCurrentStampBook]);
 
   const loadSaved = useCallback(async () => {
     setSavedError(false);
@@ -326,15 +352,6 @@ function PassportPage() {
 
   const stamps = passport?.stamps ?? [];
 
-  const stampOrdinal = useMemo(() => {
-    if (!activeStamp) return null;
-    const idx = stamps.findIndex(
-      (stamp) => stamp.eventId === activeStamp.eventId && stamp.visitedAt === activeStamp.visitedAt,
-    );
-    if (idx < 0) return null;
-    return stamps.length - idx;
-  }, [activeStamp, stamps]);
-
   const handleCancelStamp = useCallback(async (stamp: PassportStamp) => {
     if (cancelingStamp) return;
     if (!isLoggedIn) {
@@ -358,8 +375,9 @@ function PassportPage() {
     try {
       await unmarkVisited(stamp.eventId);
       removeId(setVisitedIds, stamp.eventId);
+      await loadPassport(1).catch(() => {});
     } catch (error) {
-      await loadPassport().catch(() => {});
+      await loadPassport(1).catch(() => {});
       showToast({ title: '도장을 취소하지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
       if (__DEV__) console.error('[PassportPage][cancelStamp]', error);
     } finally {
@@ -459,7 +477,7 @@ function PassportPage() {
       removeId(setVisitedIds, item.id);
       try {
         await unmarkVisited(item.id);
-        await loadPassport().catch(() => {});
+        await loadPassport(1).catch(() => {});
       } catch (error) {
         addId(setVisitedIds, item.id);
         showToast({ title: '도장을 취소하지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
@@ -474,7 +492,7 @@ function PassportPage() {
     setStampSignals((prev) => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }));
     try {
       await markVisited(item.id);
-      await loadPassport().catch(() => {});
+      await loadPassport(1).catch(() => {});
       if (!firstStampNoticeShownRef.current) {
         firstStampNoticeShownRef.current = true;
         showToast({
@@ -507,6 +525,22 @@ function PassportPage() {
   const getStampSignal = useCallback((id: string) => stampSignals[id] ?? 0, [stampSignals]);
 
   const visitedCount = passport?.visitedCount ?? stamps.length;
+  const stampBookMeta = useMemo(
+    () => getStampBookMeta(
+      visitedCount,
+      stampBook,
+      passport?.stampBookSize ?? STAMPS_PER_PASSPORT_BOOK,
+    ),
+    [passport?.stampBookSize, stampBook, visitedCount],
+  );
+  const stampOrdinal = useMemo(() => {
+    if (!activeStamp) return null;
+    const idx = stamps.findIndex(
+      (stamp) => stamp.eventId === activeStamp.eventId && stamp.visitedAt === activeStamp.visitedAt,
+    );
+    if (idx < 0 || stampBookMeta.endOrdinal <= 0) return null;
+    return Math.max(stampBookMeta.startOrdinal, stampBookMeta.endOrdinal - idx);
+  }, [activeStamp, stampBookMeta.endOrdinal, stampBookMeta.startOrdinal, stamps]);
   const discoveredItems = useMemo(
     () => (passport?.discoveredCards ?? []).map(discoveredToTicketItem),
     [passport?.discoveredCards],
@@ -607,6 +641,37 @@ function PassportPage() {
     lastAlignedBookPageRef.current = `${pageWidth}:${index}`;
   }, [bookmarkIndexes, pageWidth]);
 
+  const handleSelectStampBook = useCallback((nextBook: number) => {
+    const nextMeta = getStampBookMeta(
+      visitedCount,
+      nextBook,
+      passport?.stampBookSize ?? STAMPS_PER_PASSPORT_BOOK,
+    );
+    if (nextMeta.bookIndex === stampBook && !passportError) return;
+
+    setActiveStamp(null);
+    setCurrentStampBook(nextMeta.bookIndex);
+    setPassport((prev) => prev ? { ...prev, stamps: [] } : prev);
+    setPassportLoading(true);
+    desiredBookSectionRef.current = 'stamps';
+    const index = bookmarkIndexes.stamps;
+    setCurrentBookPage(index);
+    if (pageWidth > 0) {
+      bookListRef.current?.scrollToIndex({ index, animated: true });
+      lastAlignedBookPageRef.current = `${pageWidth}:${index}`;
+    }
+    loadPassport(nextMeta.bookIndex).catch(() => {});
+  }, [
+    bookmarkIndexes.stamps,
+    loadPassport,
+    pageWidth,
+    passport?.stampBookSize,
+    passportError,
+    setCurrentStampBook,
+    stampBook,
+    visitedCount,
+  ]);
+
   const handleScrollToIndexFailed = useCallback((info: ScrollToIndexFailure) => {
     const offset = Math.max(info.averageItemLength, pageWidth, 1) * info.index;
     requestAnimationFrame(() => {
@@ -688,6 +753,8 @@ function PassportPage() {
           width={pageWidth}
           stamps={item.stamps}
           pageIndex={item.pageIndex}
+          bookLabel={stampBookMeta.label}
+          rangeLabel={stampBookMeta.rangeLabel}
           pageMonthLabel={pageMonthLabel(item.stamps)}
           onPressStamp={handlePressStamp}
         />
@@ -719,6 +786,8 @@ function PassportPage() {
     pendingSavedCount,
     refresh,
     renderStateCopy,
+    stampBookMeta.label,
+    stampBookMeta.rangeLabel,
     tasteCategories,
     visitedCount,
     wishlistBookPageCount,
@@ -762,6 +831,52 @@ function PassportPage() {
           />
         </View>
         <Text style={styles.bookHint}>책갈피를 누르거나 옆으로 넘겨요</Text>
+        {activeBookmark === 'stamps' && stampBookMeta.totalBooks > 1 ? (
+          <View style={styles.stampBookPager}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="새 도장권 보기"
+              disabled={!stampBookMeta.hasNewerBook || passportLoading}
+              onPress={() => handleSelectStampBook(stampBook - 1)}
+              style={[
+                styles.stampBookButton,
+                !stampBookMeta.hasNewerBook || passportLoading ? styles.stampBookButtonDisabled : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.stampBookButtonText,
+                  !stampBookMeta.hasNewerBook || passportLoading ? styles.stampBookButtonTextDisabled : null,
+                ]}
+              >
+                새 권
+              </Text>
+            </Pressable>
+            <View style={styles.stampBookStatus}>
+              <Text style={styles.stampBookTitle} numberOfLines={1}>{stampBookMeta.label}</Text>
+              <Text style={styles.stampBookRange} numberOfLines={1}>{stampBookMeta.rangeLabel}</Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="지난 도장권 보기"
+              disabled={!stampBookMeta.hasOlderBook || passportLoading}
+              onPress={() => handleSelectStampBook(stampBook + 1)}
+              style={[
+                styles.stampBookButton,
+                !stampBookMeta.hasOlderBook || passportLoading ? styles.stampBookButtonDisabled : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.stampBookButtonText,
+                  !stampBookMeta.hasOlderBook || passportLoading ? styles.stampBookButtonTextDisabled : null,
+                ]}
+              >
+                지난 권
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
       </ScrollView>
 
       <SavedVisitToast message={toastMessage} opacity={toastOpacity.current} />
@@ -808,6 +923,56 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: ON_BG_MUTED,
     fontSize: 12.5,
+    fontWeight: '700',
+  },
+  stampBookPager: {
+    marginTop: 14,
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  stampBookButton: {
+    minWidth: 74,
+    minHeight: 42,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(203,161,94,0.54)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(203,161,94,0.16)',
+  },
+  stampBookButtonDisabled: {
+    borderColor: 'rgba(176,164,142,0.2)',
+    backgroundColor: 'rgba(176,164,142,0.08)',
+  },
+  stampBookButtonText: {
+    color: GOLD,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  stampBookButtonTextDisabled: {
+    color: 'rgba(176,164,142,0.38)',
+  },
+  stampBookStatus: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stampBookTitle: {
+    color: ON_BG,
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: '900',
+    fontFamily: 'Noto Serif KR',
+  },
+  stampBookRange: {
+    marginTop: 2,
+    color: ON_BG_MUTED,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '700',
   },
 });
