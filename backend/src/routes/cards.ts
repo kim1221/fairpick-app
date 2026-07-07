@@ -8,12 +8,22 @@ const router = express.Router();
 
 const DAILY_LIMIT = 30;
 const TODAY_CARD_COUNT = 3;
-const CARD_POOL_LIMIT = 12;
-const CARD_QUERY_LIMIT = 36;
-const RECENT_OPEN_COOLDOWN_DAYS = 14;
+const CARD_POOL_LIMIT = 12;           // 최종 노출(오늘+더보기) 상한
+const CANDIDATE_LIMIT = 80;           // JS 재랭킹용 후보 풀(회전 여유)
+const MIN_ROTATION_POOL = 24;         // 이만큼 모이면 반경 확장 중단(회전 풀 확보)
+const RECENT_OPEN_COOLDOWN_DAYS = 14; // 연(광고 본) 카드 재등장 방지
+const IMPRESSION_COOLDOWN_DAYS = 7;   // 최근 보여준 카드 소프트 제외(매일 새 발견)
+const FRESHNESS_WINDOW_DAYS = 60;     // created_at 신선도 감쇠 창
+const TASTE_WINDOW_DAYS = 90;         // 취향 신호 집계 창
 const WALK_METERS_PER_MINUTE = 80;
 const NEARBY_RADIUS_STEPS_M = [3000, 10000, 50000] as const;
 const CATEGORY_PRIORITY = ['전시', '공연', '팝업', '축제', '기타'] as const;
+// 공급 점수 가중치(합=1): 근접·신선도·일별로테이션·취향·버즈
+const W_PROXIMITY = 0.35;
+const W_FRESHNESS = 0.25;
+const W_JITTER = 0.20;
+const W_TASTE = 0.12;
+const W_BUZZ = 0.08;
 
 type EventRow = {
   id: string;
@@ -31,7 +41,13 @@ type EventRow = {
   lat?: number | string | null;
   lng?: number | string | null;
   distance_m?: number | string | null;
+  buzz_score?: number | string | null;
+  created_at?: string | Date | null;
 };
+
+type TasteRow = { category: string | null; n: number | string };
+type ImpressionRow = { event_id: string };
+type TasteMap = Map<string, number>;
 
 type OpenedEventRow = {
   event_id: string;
@@ -151,6 +167,76 @@ function firstLine(value: string | null): string | null {
   return line ?? null;
 }
 
+function hashStr(input: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+// 시드 기반 0..1 난수(mulberry32) — 유저·날짜별로 매일 다르지만 하루 안에서는 안정적인 순서를 만든다
+function seededUnit(seed: number): number {
+  let a = seed >>> 0;
+  a = (a + 0x6d2b79f5) | 0;
+  let t = Math.imul(a ^ (a >>> 15), 1 | a);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+function dailySeed(userId: string, today: string): number {
+  return hashStr(`${userId}|${today}`);
+}
+
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
+
+// created_at이 최근일수록 1에 가깝게(신규 등록 이벤트 우선 노출), 창 초과 시 0
+function freshnessScore(createdAt: string | Date | null | undefined): number {
+  if (!createdAt) return 0;
+  const created = createdAt instanceof Date ? createdAt.getTime() : Date.parse(String(createdAt));
+  if (Number.isNaN(created)) return 0;
+  const days = (Date.now() - created) / (24 * 60 * 60 * 1000);
+  return clamp01(1 - days / FRESHNESS_WINDOW_DAYS);
+}
+
+// 0.1 버킷 → 비슷한 거리끼리 동점 처리(지터/신선도/취향이 그 안에서 회전)
+function proximityScore(distanceM: number | null): number {
+  if (distanceM == null) return 0.5; // 위치 없음 = 중립
+  const raw = clamp01(1 - distanceM / 30000);
+  return Math.round(raw * 10) / 10;
+}
+
+function scoreRow(row: EventRow, ctx: { location: LocationQuery | null; taste: TasteMap; seed: number }): number {
+  const distanceM = getDistanceMeters(row, ctx.location);
+  const buzz = clamp01((toNumberOrNull(row.buzz_score) ?? 0) / 100);
+  const taste = ctx.taste.get(normalizeCategory(row.main_category)) ?? 0;
+  const jitter = seededUnit(hashStr(String(row.id)) ^ ctx.seed);
+  return (
+    W_PROXIMITY * proximityScore(distanceM) +
+    W_FRESHNESS * freshnessScore(row.created_at) +
+    W_JITTER * jitter +
+    W_TASTE * taste +
+    W_BUZZ * buzz
+  );
+}
+
+// 취향맵: (연 이벤트 90일 + 좋아요) 카테고리 빈도를 0..1로 정규화
+function buildTasteMap(rows: TasteRow[]): TasteMap {
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    if (!r.category) continue;
+    const cat = normalizeCategory(r.category);
+    counts.set(cat, (counts.get(cat) ?? 0) + Number(r.n));
+  }
+  const max = Math.max(1, ...counts.values());
+  const taste: TasteMap = new Map();
+  for (const [cat, n] of counts) taste.set(cat, n / max);
+  return taste;
+}
+
 function toCard(row: EventRow, openedEventIds: Set<string>, location?: LocationQuery | null) {
   const eventId = String(row.id);
   const distanceM = getDistanceMeters(row, location);
@@ -193,7 +279,7 @@ function dedupeRows(rows: EventRow[]): EventRow[] {
 }
 
 function mergeRows(primary: EventRow[], secondary: EventRow[]): EventRow[] {
-  return dedupeRows([...primary, ...secondary]).slice(0, CARD_POOL_LIMIT);
+  return dedupeRows([...primary, ...secondary]).slice(0, CANDIDATE_LIMIT);
 }
 
 function pickDiverseTodayCards(cards: ReturnType<typeof toCard>[]) {
@@ -236,7 +322,7 @@ async function getFallbackEvents(
   const excludedIds = Array.from(excludedEventIds);
   const excludedKeys = Array.from(excludedDedupeKeys);
   const { rows } = await pool.query<EventRow>(
-    `SELECT id, title, display_title, content_key, canonical_key, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng
+    `SELECT id, title, display_title, content_key, canonical_key, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng, buzz_score, created_at
      FROM canonical_events
      WHERE is_deleted = false
        AND (end_at IS NULL OR (end_at AT TIME ZONE 'Asia/Seoul')::date >= $1::date)
@@ -252,9 +338,9 @@ async function getFallbackEvents(
        end_at ASC,
        buzz_score DESC NULLS LAST
      LIMIT $4`,
-    [today, excludedIds, excludedKeys, CARD_QUERY_LIMIT]
+    [today, excludedIds, excludedKeys, CANDIDATE_LIMIT]
   );
-  return dedupeRows(filterExcludedRows(rows, excludedEventIds, excludedDedupeKeys)).slice(0, CARD_POOL_LIMIT);
+  return dedupeRows(filterExcludedRows(rows, excludedEventIds, excludedDedupeKeys)).slice(0, CANDIDATE_LIMIT);
 }
 
 async function getNearbyEvents(
@@ -271,7 +357,7 @@ async function getNearbyEvents(
   for (const radiusM of NEARBY_RADIUS_STEPS_M) {
     const box = calculateBoundingBox(location.lat, location.lng, radiusM);
     const { rows } = await pool.query<EventRow>(
-      `SELECT id, title, display_title, content_key, canonical_key, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng,
+      `SELECT id, title, display_title, content_key, canonical_key, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng, buzz_score, created_at,
               (${distSQL}) AS distance_m
        FROM canonical_events
        WHERE is_deleted = false
@@ -295,13 +381,14 @@ async function getNearbyEvents(
         box.lngMin,
         box.lngMax,
         radiusM,
-        CARD_QUERY_LIMIT,
+        CANDIDATE_LIMIT,
       ]
     );
 
     const nearbyRows = dedupeRows(filterExcludedRows(rows, excludedEventIds, excludedDedupeKeys));
     if (nearbyRows.length > bestNearbyRows.length) bestNearbyRows = nearbyRows;
-    if (nearbyRows.length >= CARD_POOL_LIMIT) return nearbyRows.slice(0, CARD_POOL_LIMIT);
+    // 회전 풀(MIN_ROTATION_POOL)이 확보되면 반경 확장 중단 — 근처를 넓게 받아 JS에서 매일 다르게 뽑는다
+    if (nearbyRows.length >= MIN_ROTATION_POOL) return nearbyRows.slice(0, CANDIDATE_LIMIT);
   }
 
   if (bestNearbyRows.length === 0) {
@@ -330,7 +417,7 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
     : Promise.resolve(null);
 
   try {
-    const [ticketResult, openedResult] = await Promise.all([
+    const [ticketResult, openedResult, tasteResult, impressionResult] = await Promise.all([
       pool.query(
         `WITH ensured AS (
            INSERT INTO user_tickets (user_id, ticket_count, total_earned, total_exchanged)
@@ -356,6 +443,26 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
            AND el.earn_date >= $2::date - (($3::int - 1) * INTERVAL '1 day')`,
         [userId, today, RECENT_OPEN_COOLDOWN_DAYS]
       ),
+      // 취향 신호: 최근 연 이벤트 + 좋아요의 카테고리 빈도 (테이블 없거나 실패해도 무시)
+      pool.query<TasteRow>(
+        `SELECT ce.main_category AS category, COUNT(*)::int AS n
+         FROM (
+           SELECT event_id FROM user_ticket_earn_log
+             WHERE user_id = $1 AND earn_date >= $2::date - (($3::int - 1) * INTERVAL '1 day')
+           UNION ALL
+           SELECT event_id FROM user_likes WHERE user_id = $1
+         ) src
+         JOIN canonical_events ce ON ce.id::text = src.event_id::text
+         WHERE ce.main_category IS NOT NULL
+         GROUP BY ce.main_category`,
+        [userId, today, TASTE_WINDOW_DAYS]
+      ).catch(() => ({ rows: [] as TasteRow[] })),
+      // 최근 노출한 카드(소프트 제외용) — 테이블 없거나 실패해도 무시
+      pool.query<ImpressionRow>(
+        `SELECT event_id FROM user_card_impressions
+         WHERE user_id = $1 AND last_shown_on >= $2::date - (($3::int - 1) * INTERVAL '1 day')`,
+        [userId, today, IMPRESSION_COOLDOWN_DAYS]
+      ).catch(() => ({ rows: [] as ImpressionRow[] })),
     ]);
 
     const ticketRow = ticketResult.rows[0] ?? {};
@@ -373,14 +480,44 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
     if (rows.length < TODAY_CARD_COUNT && recentEventIds.size > openedEventIds.size) {
       rows = await loadRows(openedEventIds, openedDedupeKeys);
     }
+
+    // 점수화 v2: 근접+신선도+일별시드+취향+버즈로 재랭킹 → 매일 다른 순서·새 이벤트 우선
+    const seed = dailySeed(userId, today);
+    const taste = buildTasteMap(tasteResult.rows);
+    const recentImpressionIds = new Set(impressionResult.rows.map((row) => String(row.event_id)));
+    const scoreById = new Map<string, number>();
+    for (const row of rows) scoreById.set(String(row.id), scoreRow(row, { location, taste, seed }));
+
     const cards = rows
       .map((row) => toCard(row, openedEventIds, location))
       .filter((card) => !card.opened);
-    const todayCards = pickDiverseTodayCards(cards);
+
+    // 최근 보여준 카드는 소프트 제외(제외 후 풀이 부족하면 완화해 빈 화면 방지)
+    const notRecentlyShown = cards.filter((card) => !recentImpressionIds.has(card.eventId));
+    const scored = (notRecentlyShown.length >= TODAY_CARD_COUNT ? notRecentlyShown : cards)
+      .slice()
+      .sort((a, b) => (scoreById.get(b.eventId) ?? 0) - (scoreById.get(a.eventId) ?? 0));
+
+    const todayCards = pickDiverseTodayCards(scored);
     const todayIds = new Set(todayCards.map((card) => card.eventId));
-    const morePool = cards.filter((card) => !todayIds.has(card.eventId));
+    const morePool = scored.filter((card) => !todayIds.has(card.eventId)).slice(0, CARD_POOL_LIMIT);
     const dailyEarnedDate = ticketRow.daily_earned_date ? String(ticketRow.daily_earned_date).slice(0, 10) : null;
     const userRegion = await userRegionPromise;
+
+    // 오늘 보여준 카드를 노출 기록(fire-and-forget) — 응답을 막지 않고 실패해도 무시
+    const shownIds = todayCards.map((card) => card.eventId);
+    if (shownIds.length > 0) {
+      setImmediate(() => {
+        pool.query(
+          `INSERT INTO user_card_impressions (user_id, event_id, last_shown_on, shown_count)
+           SELECT $1, e, $2::date, 1 FROM unnest($3::text[]) AS e
+           ON CONFLICT (user_id, event_id)
+           DO UPDATE SET last_shown_on = EXCLUDED.last_shown_on,
+                         shown_count = user_card_impressions.shown_count + 1`,
+          [userId, today, shownIds]
+        ).catch((e) => console.error('[Cards] impression log failed:', e?.message ?? e));
+      });
+    }
 
     return res.json({
       today: todayCards,

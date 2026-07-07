@@ -85,6 +85,8 @@ test('GET /api/cards/today returns three unopened cards, morePool, and ticket to
   const canonicalSql = [];
   pool.query = async (sql, params) => {
     const text = String(sql);
+    if (text.includes('user_card_impressions')) return { rows: [] };
+    if (text.includes('user_likes')) return { rows: [] }; // 취향 쿼리(빈 취향)
     if (text.includes('FROM user_tickets')) {
       return { rows: [{ ticket_count: 7, daily_earned: 4, daily_earned_date: todayKst() }] };
     }
@@ -93,7 +95,7 @@ test('GET /api/cards/today returns three unopened cards, morePool, and ticket to
     }
     if (text.includes('FROM canonical_events')) {
       canonicalSql.push(text);
-      assert.deepEqual(params.slice(-1), [36]);
+      assert.deepEqual(params.slice(-1), [80]);
       return {
         rows: [
           { id: 'event-1', title: '전시 하나', main_category: '전시', venue: 'A관', region: '서울', start_at: isoDaysFromNow(-2), end_at: isoDaysFromNow(2), image_url: 'https://img/1.jpg', overview: '첫 줄 소개\n둘째 줄', buzz_score: 50 },
@@ -131,6 +133,8 @@ test('GET /api/cards/today expands nearby radius, excludes opened events, divers
   const canonicalCalls = [];
   pool.query = async (sql, params = []) => {
     const text = String(sql);
+    if (text.includes('user_card_impressions')) return { rows: [] };
+    if (text.includes('user_likes')) return { rows: [] }; // 취향 쿼리(빈 취향)
     if (text.includes('FROM user_tickets')) {
       return { rows: [{ ticket_count: 9, daily_earned: 6, daily_earned_date: todayKst() }] };
     }
@@ -188,11 +192,64 @@ test('GET /api/cards/today expands nearby radius, excludes opened events, divers
 
   assert.equal(status, 200);
   assert.ok(canonicalCalls.length >= 3);
-  assert.deepEqual(body.today.map((card) => card.eventId), ['event-near-exhibition', 'event-performance', 'event-popup']);
+  // 반경 확장이 3km→10km→50km로 일어났는지(파라미터로 검증)
+  const radiiUsed = canonicalCalls.flatMap((call) => call.params).filter((p) => [3000, 10000, 50000].includes(p));
+  assert.ok(radiiUsed.includes(3000) && radiiUsed.includes(10000) && radiiUsed.includes(50000));
+  // v2 점수화는 시드로 매일 회전 → 정확한 eventId는 비결정적. 카테고리 다양성은 우선순위 고정이라 결정적.
+  assert.equal(body.today.length, 3);
   assert.deepEqual(body.today.map((card) => card.category), ['전시', '공연', '팝업']);
-  assert.deepEqual(body.today.map((card) => card.walkMinutes), [2, 5, 10]);
+  // 위치 있으면 모든 카드에 walkMinutes(양수) 채워짐
+  assert.equal(body.today.every((card) => typeof card.walkMinutes === 'number' && card.walkMinutes > 0), true);
+  // 오늘 3장은 서로 다른 이벤트 & 제공된 후보에서 나옴
+  assert.equal(new Set(body.today.map((c) => c.eventId)).size, 3);
+  // 연(opened) 이벤트는 오늘/더보기 어디에도 없음
   assert.equal(body.today.some((card) => card.eventId === 'event-opened'), false);
   assert.equal(body.morePool.some((card) => card.eventId === 'event-opened'), false);
+});
+
+test('GET /api/cards/today soft-excludes recently shown cards for fresh discovery', async () => {
+  const ev = (id, cat, buzz) => ({ id, title: id, main_category: cat, venue: 'V', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: null, buzz_score: buzz, created_at: null });
+  pool.query = async (sql) => {
+    const text = String(sql);
+    if (text.includes('user_card_impressions')) return { rows: [{ event_id: 'event-a' }, { event_id: 'event-b' }] };
+    if (text.includes('user_likes')) return { rows: [] };
+    if (text.includes('FROM user_tickets')) return { rows: [{ ticket_count: 0, daily_earned: 0, daily_earned_date: todayKst() }] };
+    if (text.includes('FROM user_ticket_earn_log')) return { rows: [] };
+    if (text.includes('FROM canonical_events')) {
+      // a,b는 buzz가 높아도 최근 노출됨 → 대안(c~f)이 충분하므로 제외되어야
+      return { rows: [ev('event-a', '전시', 90), ev('event-b', '공연', 90), ev('event-c', '전시', 10), ev('event-d', '공연', 10), ev('event-e', '팝업', 10), ev('event-f', '축제', 10)] };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(cardsRouter), 'GET', '/today');
+
+  assert.equal(status, 200);
+  const surfaced = [...body.today, ...body.morePool].map((c) => c.eventId);
+  assert.equal(surfaced.includes('event-a'), false);
+  assert.equal(surfaced.includes('event-b'), false);
+  assert.equal(body.today.length, 3);
+});
+
+test('GET /api/cards/today relaxes impression exclusion when the pool would be empty', async () => {
+  const ev = (id, cat) => ({ id, title: id, main_category: cat, venue: 'V', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: null, buzz_score: 10, created_at: null });
+  pool.query = async (sql) => {
+    const text = String(sql);
+    if (text.includes('user_card_impressions')) return { rows: [{ event_id: 'event-a' }, { event_id: 'event-b' }, { event_id: 'event-c' }] };
+    if (text.includes('user_likes')) return { rows: [] };
+    if (text.includes('FROM user_tickets')) return { rows: [{ ticket_count: 0, daily_earned: 0, daily_earned_date: todayKst() }] };
+    if (text.includes('FROM user_ticket_earn_log')) return { rows: [] };
+    if (text.includes('FROM canonical_events')) {
+      // 모든 후보가 최근 노출 → 빈 화면 대신 완화해서 보여줘야
+      return { rows: [ev('event-a', '전시'), ev('event-b', '공연'), ev('event-c', '팝업')] };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(cardsRouter), 'GET', '/today');
+
+  assert.equal(status, 200);
+  assert.ok(body.today.length >= 1);
 });
 
 test('GET /api/cards/today keeps partial nearby candidates and fills the rest from fallback', async () => {
