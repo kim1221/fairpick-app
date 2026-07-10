@@ -12,6 +12,11 @@
 import express, { Request, Response } from 'express';
 import { pool } from '../db';
 import { requireAuth } from '../middleware/requireAuth';
+import {
+  DAILY_TICKET_LIMIT,
+  grantTicketsForEvent,
+  TicketGrantError,
+} from '../services/ticketGrant';
 
 const router = express.Router();
 
@@ -28,7 +33,7 @@ const TICKETS_PER_EXCHANGE = 10;
  * - 광고를 끝까지 본 사용자가 0장 받는 경험을 방지
  * - 정책 상한(30개)은 절대 초과하지 않음
  */
-const DAILY_LIMIT = 30;
+const DAILY_LIMIT = DAILY_TICKET_LIMIT;
 // cooldown 없음: 리워드 광고 자체가 자연 속도 제한이며 daily_limit으로 총량 방어
 // 이상 징후 발생 시 COOLDOWN_SECONDS = 5~10으로 재도입 가능
 const EXCHANGE_EXPIRES_HOURS = 24; // pending 만료 시간
@@ -61,14 +66,6 @@ type TicketHistoryRow = {
   amount: number;
   occurred_at: Date;
 };
-
-// 1~3 랜덤 (50% / 35% / 15%)
-function randomTickets(): number {
-  const r = Math.random();
-  if (r < 0.50) return 1;
-  if (r < 0.85) return 2;
-  return 3;
-}
 
 // KST 오늘 날짜 (DATE 형식)
 function todayKst(): string {
@@ -340,104 +337,20 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    // 1. earn_log에 gate row INSERT — unique(user_id, event_id, earn_date)로 중복 방지
-    const { rows: logRows } = await client.query(
-      `INSERT INTO user_ticket_earn_log (user_id, event_id, earn_date, earned, ad_attempt_id)
-       VALUES ($1, $2, $3, 0, $4)
-       ON CONFLICT (user_id, event_id, earn_date) DO NOTHING
-       RETURNING id`,
-      [userId, eventId, today, normalizedAdAttemptId]
-    );
-
-    // 2. RETURNING 없으면 오늘 이미 적립한 이벤트 → ROLLBACK + 409
-    if (logRows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'EVENT_ALREADY_EARNED_TODAY' });
-    }
-    const logId = logRows[0].id;
-
-    // 3. user_tickets 레코드 보장 후 row lock (동시 요청 직렬화)
-    await client.query(
-      `INSERT INTO user_tickets (user_id, ticket_count, total_earned, total_exchanged)
-       VALUES ($1, 0, 0, 0)
-       ON CONFLICT (user_id) DO NOTHING`,
-      [userId]
-    );
-    const { rows: lockRows } = await client.query(
-      `SELECT ticket_count, daily_earned, daily_earned_date
-       FROM user_tickets WHERE user_id = $1 FOR UPDATE`,
-      [userId]
-    );
-    const row = lockRows[0];
-
-    // 4. daily_limit 검사 — 초과 시 ROLLBACK (earn_log INSERT도 취소)
-    const isNewDay = !row.daily_earned_date || String(row.daily_earned_date).slice(0, 10) !== today;
-    const currentDailyEarned = isNewDay ? 0 : (row.daily_earned ?? 0);
-    const remaining = DAILY_LIMIT - currentDailyEarned;
-
-    if (remaining <= 0) {
-      await client.query('ROLLBACK');
-      return res.status(429).json({
-        error: 'DAILY_LIMIT_REACHED',
-        dailyLimitReached: true,
-        dailyEarned: currentDailyEarned,
-        dailyLimit: DAILY_LIMIT,
-      });
-    }
-
-    // 5. earned 산출 → user_tickets 갱신 → earn_log earned 업데이트 → COMMIT
-    const earned = Math.min(randomTickets(), remaining);
-    const newDailyEarned = currentDailyEarned + earned;
-
-    const { rows: updated } = await client.query(
-      `UPDATE user_tickets
-       SET ticket_count      = ticket_count + $1,
-           total_earned      = total_earned + $1,
-           last_earned_at    = NOW(),
-           daily_earned      = $2,
-           daily_earned_date = $3,
-           updated_at        = NOW()
-       WHERE user_id = $4
-       RETURNING ticket_count, total_earned`,
-      [earned, newDailyEarned, today, userId]
-    );
-
-    await client.query(
-      `UPDATE user_ticket_earn_log
-       SET earned = $1,
-           ad_attempt_id = COALESCE(ad_attempt_id, $3)
-       WHERE id = $2`,
-      [earned, logId, normalizedAdAttemptId]
-    );
-
-    if (normalizedAdAttemptId) {
-      await client.query(
-        `UPDATE ad_reward_attempts
-         SET metadata = metadata || jsonb_build_object(
-               'ticketEarned', $1::integer,
-               'ticketEarnedAt', NOW()
-             ),
-             updated_at = NOW()
-         WHERE attempt_id = $2 AND user_id = $3`,
-        [earned, normalizedAdAttemptId, userId]
-      );
-    }
-
-    await client.query('COMMIT');
-
-    console.log(`[Tickets] 🎟 earn: user=${userId} event=${eventId} earned=${earned} daily=${newDailyEarned}/${DAILY_LIMIT}`);
-
-    return res.json({
-      earned,
-      ticketCount: updated[0].ticket_count,
-      totalEarned: updated[0].total_earned,
-      canExchange: updated[0].ticket_count >= TICKETS_PER_EXCHANGE,
-      dailyEarned: newDailyEarned,
-      dailyLimit: DAILY_LIMIT,
+    const result = await grantTicketsForEvent(client, {
+      userId,
+      eventId,
+      today,
+      adAttemptId: normalizedAdAttemptId,
     });
+    await client.query('COMMIT');
+    console.log(`[Tickets] 🎟 earn: user=${userId} event=${eventId} earned=${result.earned} daily=${result.dailyEarned}/${DAILY_LIMIT}`);
+    return res.json(result);
   } catch (err) {
     await client.query('ROLLBACK');
+    if (err instanceof TicketGrantError) {
+      return res.status(err.status).json({ error: err.code, ...err.details });
+    }
     console.error('[Tickets] earn error:', err);
     return res.status(500).json({ error: 'INTERNAL_ERROR' });
   } finally {

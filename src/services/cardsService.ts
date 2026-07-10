@@ -53,6 +53,42 @@ export type CardsTodayResponse = {
   personalization?: PersonalizationProfile;
 };
 
+export type LockedCardPreview = {
+  cardToken: string;
+  category: string;
+  areaLabel: string | null;
+  distanceLabel: string | null;
+  timingLabel: string;
+  reasonTags: string[];
+};
+
+export type WeeklyDiscovery = {
+  weekKey: string;
+  openedCount: number;
+  goal: number;
+  items: Card[];
+};
+
+export type CardsTodayV2Response = {
+  lockedCards: LockedCardPreview[];
+  ticketCount: number;
+  dailyEarned: number;
+  dailyLimit: number;
+  userRegion: string | null;
+  weeklyDiscovery: WeeklyDiscovery;
+  personalization: PersonalizationProfile;
+};
+
+export type OpenCultureCardResponse = {
+  card: Card;
+  earned: number;
+  ticketCount: number;
+  totalEarned: number;
+  canExchange: boolean;
+  dailyEarned: number;
+  dailyLimit: number;
+};
+
 export type CardLocation = {
   lat: number;
   lng: number;
@@ -61,6 +97,24 @@ export type CardLocation = {
 export async function getTodayCards(coords?: CardLocation): Promise<CardsTodayResponse> {
   const { data } = await http.get<CardsTodayResponse>('/api/cards/today', {
     params: coords ? { lat: coords.lat, lng: coords.lng } : undefined,
+  });
+  return data;
+}
+
+export async function getTodayCardsV2(coords?: CardLocation): Promise<CardsTodayV2Response> {
+  const { data } = await http.get<CardsTodayV2Response>('/api/cards/v2/today', {
+    params: coords ? { lat: coords.lat, lng: coords.lng } : undefined,
+  });
+  return data;
+}
+
+export async function openCultureCard(
+  cardToken: string,
+  adAttemptId: string,
+): Promise<OpenCultureCardResponse> {
+  const { data } = await http.post<OpenCultureCardResponse>('/api/cards/v2/open', {
+    cardToken,
+    adAttemptId,
   });
   return data;
 }

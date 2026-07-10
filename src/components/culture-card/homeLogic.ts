@@ -80,7 +80,9 @@ export function getTodayCardProgress(data: CardsTodayResponse | null): TodayCard
   };
 }
 
-export function hasReachedDailyLimit(data: CardsTodayResponse | null): boolean {
+export function hasReachedDailyLimit(
+  data: Pick<CardsTodayResponse, 'dailyLimit' | 'dailyEarned'> | null,
+): boolean {
   if (!data) return false;
   return data.dailyLimit > 0 && data.dailyEarned >= data.dailyLimit;
 }

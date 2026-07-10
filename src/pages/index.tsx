@@ -19,27 +19,27 @@ import { CultureCardReveal, type RevealedCultureCard } from '../components/cultu
 import { CultureCardStack } from '../components/culture-card/CultureCardStack';
 import { CultureCardStatePanel } from '../components/culture-card/CultureCardStatePanel';
 import { TasteCompass } from '../components/culture-card/TasteCompass';
-import { WeeklyCultureCollection } from '../components/culture-card/WeeklyCultureCollection';
+import { WeeklyDiscoveryCollection } from '../components/culture-card/WeeklyDiscoveryCollection';
 import {
   AD_LOAD_FAILED_COPY,
   AD_LOADING_COPY,
   AD_SHOW_REQUEST_TIMEOUT_MS,
   AD_SHOW_TERMINAL_TIMEOUT_MS,
   getEarnFailureCopy,
-  getNextOpenableCard,
-  getTodayCards as getThreeTodayCards,
   hasReachedDailyLimit,
   isRewardAdProgressEvent,
   isDailyLimitReachedError,
-  markCardOpened,
   type HomeCopy,
 } from '../components/culture-card/homeLogic';
 import { LikesProvider } from '../contexts/LikesContext';
 import { useAuth } from '../hooks/useAuth';
-import { getTodayCards, type CardsTodayResponse } from '../services/cardsService';
+import {
+  getTodayCardsV2,
+  openCultureCard,
+  type CardsTodayV2Response,
+} from '../services/cardsService';
 import {
   createRewardAdAttemptId,
-  earnTickets,
   logRewardAdEvent,
   type RewardAdEventType,
 } from '../services/ticketService';
@@ -223,7 +223,8 @@ function HomePageInner() {
   const { isLoggedIn, isLoading: authLoading, login } = useAuth();
 
   const [status, setStatus] = useState<HomeStatus>('loading');
-  const [cardsData, setCardsData] = useState<CardsTodayResponse | null>(null);
+  const [cardsData, setCardsData] = useState<CardsTodayV2Response | null>(null);
+  const [selectedToken, setSelectedToken] = useState<string | null>(null);
   const [openedCard, setOpenedCard] = useState<RevealedCultureCard | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [adLoadStatus, setAdLoadStatus] = useState<AdLoadStatus>('idle');
@@ -294,16 +295,21 @@ function HomePageInner() {
 
   const refreshCards = useCallback(async (nextStatus: HomeStatus = 'ready') => {
     const coords = await getCurrentCoordsOrNull();
-    const data = await getTodayCards(coords ?? undefined);
+    const data = await getTodayCardsV2(coords ?? undefined);
     if (!mountedRef.current) return;
     setCardsData(data);
+    setSelectedToken((current) => (
+      data.lockedCards.some((card) => card.cardToken === current)
+        ? current
+        : (data.lockedCards[0]?.cardToken ?? null)
+    ));
     if (hasReachedDailyLimit(data)) {
       setStatusCopy(getEarnFailureCopy({ response: { status: 429, data: { error: 'DAILY_LIMIT_REACHED' } } }));
       setStatus('daily_limit');
       return;
     }
     setStatusCopy(null);
-    setStatus(data.today.length === 0 ? 'empty' : nextStatus);
+    setStatus(data.lockedCards.length === 0 ? 'empty' : nextStatus);
   }, []);
 
   useEffect(() => {
@@ -335,8 +341,10 @@ function HomePageInner() {
     startRewardedAdLoad();
   }, [authLoading, isLoggedIn, refreshCards, startRewardedAdLoad]);
 
-  const todayCards = useMemo(() => getThreeTodayCards(cardsData?.today ?? []), [cardsData?.today]);
-  const activeCard = useMemo(() => getNextOpenableCard(cardsData), [cardsData]);
+  const activeCard = useMemo(() => {
+    const lockedCards = cardsData?.lockedCards ?? [];
+    return lockedCards.find((card) => card.cardToken === selectedToken) ?? lockedCards[0] ?? null;
+  }, [cardsData?.lockedCards, selectedToken]);
   const dailyLimitReached = hasReachedDailyLimit(cardsData);
   const ticketCount = cardsData?.ticketCount ?? 0;
   const dailyEarned = cardsData?.dailyEarned ?? 0;
@@ -416,21 +424,20 @@ function HomePageInner() {
 
     const attemptId = createRewardAdAttemptId();
     const card = activeCard;
-    const logAdEvent = (eventType: RewardAdEventType, eventData?: Record<string, unknown>) => {
+    const logAdEvent = (eventType: RewardAdEventType, eventData?: Record<string, unknown>) => (
       logRewardAdEvent({
         attemptId,
         eventType,
-        eventId: card.eventId,
         adGroupId: REWARDED_AD_ID,
         placement: 'culturecard_home_open',
         eventData,
         metadata: {
-          eventTitle: card.title,
+          cardToken: card.cardToken,
           route: '/',
           platform: Platform.OS,
         },
-      }).catch(() => {});
-    };
+      })
+    );
     const settleTimedOutAd = (phase: AdShowWatchdogPhase) => {
       if (!mountedRef.current || showSettledRef.current) return;
       showSettledRef.current = true;
@@ -438,7 +445,7 @@ function HomePageInner() {
         reason: 'watchdog_timeout',
         phase,
         lastEventType: lastShowEventTypeRef.current,
-      });
+      }).catch(() => {});
       showUnregisterRef.current?.();
       showUnregisterRef.current = null;
       setStatus('ready');
@@ -468,9 +475,10 @@ function HomePageInner() {
       onEvent: async (event) => {
         const eventType = event.type as RewardAdEventType;
         lastShowEventTypeRef.current = eventType;
-        logAdEvent(eventType, 'data' in event ? event.data : undefined);
+        const eventLog = logAdEvent(eventType, 'data' in event ? event.data : undefined);
 
         if (isRewardAdProgressEvent(eventType)) {
+          eventLog.catch(() => {});
           scheduleShowWatchdog('terminal');
           return;
         }
@@ -483,11 +491,19 @@ function HomePageInner() {
           showUnregisterRef.current = null;
 
           try {
-            const result = await earnTickets(card.eventId, attemptId);
+            // 공개 API는 reward 이벤트가 서버에 기록된 뒤에만 성공한다.
+            await eventLog;
+            const result = await openCultureCard(card.cardToken, attemptId);
             if (!mountedRef.current) return;
-            setCardsData((prev) => prev ? markCardOpened(prev, card.eventId, result) : prev);
+            setCardsData((prev) => prev ? {
+              ...prev,
+              lockedCards: prev.lockedCards.filter((item) => item.cardToken !== card.cardToken),
+              ticketCount: result.ticketCount,
+              dailyEarned: result.dailyEarned,
+              dailyLimit: result.dailyLimit,
+            } : prev);
             setOpenedCard({
-              card: { ...card, opened: true },
+              card: result.card,
               earned: result.earned,
               ticketCount: result.ticketCount,
               dailyEarned: result.dailyEarned,
@@ -507,6 +523,7 @@ function HomePageInner() {
         }
 
         if (event.type === 'dismissed') {
+          eventLog.catch(() => {});
           if (showSettledRef.current) return;
           showSettledRef.current = true;
           clearShowWatchdog();
@@ -521,6 +538,7 @@ function HomePageInner() {
         }
 
         if (event.type === 'failedToShow') {
+          eventLog.catch(() => {});
           if (showSettledRef.current) return;
           showSettledRef.current = true;
           clearShowWatchdog();
@@ -535,7 +553,7 @@ function HomePageInner() {
       onError: (error) => {
         logAdEvent('error', {
           message: error instanceof Error ? error.message : String(error),
-        });
+        }).catch(() => {});
         if (showSettledRef.current) return;
         showSettledRef.current = true;
         clearShowWatchdog();
@@ -652,13 +670,14 @@ function HomePageInner() {
         ) : (
           <>
             <CultureCardStack
-              cards={todayCards}
-              activeCard={activeCard}
+              cards={cardsData?.lockedCards ?? []}
+              selectedToken={activeCard?.cardToken ?? null}
               dailyEarned={dailyEarned}
               dailyLimit={dailyLimit}
               loading={status === 'ad_loading' || adLoadStatus === 'loading'}
               disabled={stackDisabled}
               actionLabel={actionLabel}
+              onSelect={setSelectedToken}
               onOpen={handleOpenCard}
               userRegion={cardsData?.userRegion ?? null}
             />
@@ -722,14 +741,14 @@ function HomePageInner() {
           </>
         )}
 
-        {cardsData?.weeklyCuration ? (
-          <WeeklyCultureCollection
-            curation={cardsData.weeklyCuration}
+        {cardsData?.weeklyDiscovery ? (
+          <WeeklyDiscoveryCollection
+            discovery={cardsData.weeklyDiscovery}
             onPressCard={(eventId) => navigation.navigate('/events/:id', { id: eventId })}
           />
         ) : null}
 
-        {cardsData?.personalization ? (
+        {cardsData?.personalization && cardsData.personalization.signalCount > 0 ? (
           <TasteCompass profile={cardsData.personalization} />
         ) : null}
 

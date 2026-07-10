@@ -1,323 +1,272 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Icon } from '@toss/tds-react-native';
-import type { Card } from '../../services/cardsService';
-import {
-  CondensedDisplay,
-  FieldRow,
-  FinePrint,
-  Rule,
-  RubberStamp,
-  TagBody,
-  TagHeader,
-  TAG_TOKENS,
-} from './tagKit';
+import type { LockedCardPreview } from '../../services/cardsService';
 
-const {
-  ink: INK,
-  navy: NAVY,
-  red: RED,
-  sub: SUB,
-  manila: MANILA,
-  headText: HEAD_TEXT,
-  navSub: NAV_SUB,
-  ringLine: RING_LINE,
-  ctaDisabledBg: CTA_DISABLED_BG,
-  ctaDisabledText: CTA_DISABLED_TEXT,
-} = TAG_TOKENS;
+const INK = '#100D09';
+const SURFACE = '#191714';
+const SURFACE_SELECTED = '#252018';
+const LINE = 'rgba(255,255,255,0.10)';
+const GOLD = '#D8B26A';
+const TEXT = '#F5F1E9';
+const MUTED = '#A7A095';
+const CTA = '#F2E7CB';
 
 interface CultureCardStackProps {
-  cards: Card[];
-  activeCard: Card | null;
+  cards: LockedCardPreview[];
+  selectedToken: string | null;
   dailyEarned: number;
   dailyLimit: number;
   loading: boolean;
   disabled: boolean;
   actionLabel: string;
+  onSelect: (cardToken: string) => void;
   onOpen: () => void;
   userRegion: string | null;
 }
 
-// 오늘 날짜 기반 티켓 번호(서버 값 없을 때) — 0704 / No.0704.25 형태
-function todayTicketNo(): { no: string; ref: string } {
-  const now = new Date();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  const yy = String(now.getFullYear()).slice(2);
-  return { no: `${mm}${dd}`, ref: `No.${mm}${dd}.${yy}` };
-}
-
-function todayStampText(): string {
-  const now = new Date();
-  return `${String(now.getMonth() + 1).padStart(2, '0')}·${String(now.getDate()).padStart(2, '0')}`;
-}
-
-function buildLocationHook(card: Card | null): string | null {
-  // "내 위치"는 헤더 근처 칩(userRegion)이 담당 → 여기선 헷갈리던 "○○ 근처" 대신 실거리만.
-  const walk = typeof card?.walkMinutes === 'number' && card.walkMinutes > 0 ? card.walkMinutes : null;
-  if (!walk) return null;
-  return `도보 ${walk}분 거리에 오늘의 문화가 있어요`;
-}
-
-function createStyles() {
-  return StyleSheet.create({
-    section: {
-      paddingHorizontal: 22,
-      paddingTop: 8,
-    },
-    top: {
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      justifyContent: 'space-between',
-    },
-    eyebrow: {
-      color: NAV_SUB,
-      fontSize: 11,
-      lineHeight: 15,
-      fontWeight: '800',
-      letterSpacing: 2.5,
-    },
-    title: {
-      marginTop: 7,
-      color: HEAD_TEXT,
-      fontSize: 22,
-      lineHeight: 27,
-      fontWeight: '800',
-      letterSpacing: -0.6,
-    },
-    locPill: {
-      marginTop: 10,
-      alignSelf: 'flex-start',
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 5,
-      paddingVertical: 5,
-      paddingHorizontal: 11,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: RING_LINE,
-      backgroundColor: 'rgba(233,224,204,0.05)',
-    },
-    locPin: {
-      color: MANILA,
-      fontSize: 10,
-      lineHeight: 14,
-    },
-    locText: {
-      color: HEAD_TEXT,
-      fontSize: 12.5,
-      lineHeight: 16,
-      fontWeight: '700',
-      letterSpacing: -0.2,
-    },
-    reasonRow: {
-      marginTop: 9,
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 6,
-    },
-    reasonPill: {
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: 'rgba(203,161,94,0.28)',
-      backgroundColor: 'rgba(203,161,94,0.08)',
-      paddingHorizontal: 9,
-      paddingVertical: 4,
-    },
-    reasonText: {
-      color: MANILA,
-      fontSize: 10.5,
-      lineHeight: 14,
-      fontWeight: '800',
-    },
-    tagArea: {
-      marginTop: 14,
-    },
-    // 태그 내부 콘텐츠
-    lbl: {
-      fontSize: 12,
-      fontWeight: '700',
-      letterSpacing: 2,
-      color: RED,
-      textTransform: 'uppercase',
-      marginTop: 2,
-    },
-    destKo: {
-      fontSize: 20,
-      lineHeight: 24,
-      fontWeight: '900',
-      letterSpacing: -0.8,
-      color: INK,
-      marginTop: 6,
-    },
-    noLbl: {
-      fontSize: 11,
-      fontWeight: '700',
-      letterSpacing: 1.5,
-      color: INK,
-      opacity: 0.72,
-      textTransform: 'uppercase',
-    },
-    noVal: {
-      fontSize: 24,
-      lineHeight: 26,
-      fontWeight: '900',
-      letterSpacing: 1,
-      color: RED,
-    },
-    noRow: {
-      flexDirection: 'row',
-      alignItems: 'baseline',
-      justifyContent: 'space-between',
-    },
-    sealMsg: {
-      fontSize: 12,
-      lineHeight: 18,
-      fontWeight: '600',
-      color: SUB,
-      marginTop: 8,
-    },
-    sealBottom: {
-      marginTop: 12,
-      minHeight: 54,
-      justifyContent: 'flex-end',
-    },
-    stampWrap: {
-      height: 56,
-    },
-    // CTA
-    cta: {
-      marginTop: 16,
-      height: 53,
-      borderRadius: 14,
-      backgroundColor: MANILA,
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexDirection: 'row',
-      gap: 8,
-    },
-    ctaDisabled: {
-      backgroundColor: CTA_DISABLED_BG,
-    },
-    ctaText: {
-      color: INK,
-      fontSize: 15,
-      lineHeight: 20,
-      fontWeight: '800',
-    },
-    ctaTextDisabled: {
-      color: CTA_DISABLED_TEXT,
-    },
-    ctaHint: {
-      marginTop: 11,
-      textAlign: 'center',
-      color: NAV_SUB,
-      fontSize: 11.5,
-      lineHeight: 16,
-      fontWeight: '600',
-    },
-    ctaHookPin: {
-      color: MANILA,
-    },
-  });
-}
-
-function SealedTag() {
-  const styles = React.useMemo(() => createStyles(), []);
-  const { no, ref } = React.useMemo(() => todayTicketNo(), []);
-
-  return (
-    <TagBody>
-      <TagHeader printedTop="CULTURE CARD" printedBottom={`SEOUL · ${ref}`} />
-      <Rule />
-      <Text style={styles.lbl}>TODAY · 오늘</Text>
-      <CondensedDisplay color={NAVY} size={48}>CULTURE</CondensedDisplay>
-      <Text style={styles.destKo}>오늘의 문화</Text>
-      <Rule variant="thin" />
-      <View style={styles.noRow}>
-        <Text style={styles.noLbl}>Ticket Nº</Text>
-        <Text style={styles.noVal}>{no}</Text>
-      </View>
-      <Rule />
-      <FieldRow label="ISSUED · 발행" value="컬처카드 · SEOUL" />
-      <Text style={styles.sealMsg}>
-        광고를 보면 오늘의 카드가 열려요.{'\n'}가까운 문화 한 장이 담겨 있어요.
-      </Text>
-      <View style={styles.sealBottom}>
-        <View style={styles.stampWrap}>
-          <RubberStamp right={16} bottom={4} topText="오늘" bottomText={todayStampText()} />
-        </View>
-        <Rule variant="dash" />
-        <FinePrint>Valid today only · Non-transferable · 컬처카드</FinePrint>
-      </View>
-    </TagBody>
-  );
+function previewTitle(card: LockedCardPreview): string {
+  const area = card.areaLabel || '가까운 곳';
+  return `${area}의 ${card.category}`;
 }
 
 export function CultureCardStack({
+  cards,
+  selectedToken,
   dailyEarned,
   dailyLimit,
   loading,
   disabled,
   actionLabel,
+  onSelect,
   onOpen,
-  activeCard,
   userRegion,
 }: CultureCardStackProps) {
-  const styles = React.useMemo(() => createStyles(), []);
-  const locationHook = buildLocationHook(activeCard);
-
   return (
     <View style={styles.section}>
-      <View style={styles.top}>
-        <View>
-          <Text style={styles.eyebrow}>{"TODAY'S CULTURE"}</Text>
-          <Text style={styles.title}>오늘의 문화 카드</Text>
-        </View>
-      </View>
+      <Text style={styles.eyebrow}>오늘의 큐레이션</Text>
+      <Text style={styles.title}>어떤 문화를 열어볼까요?</Text>
+      <Text style={styles.subtitle}>
+        {userRegion
+          ? `${userRegion} 근처에서 고른 세 가지예요.`
+          : '지금 가볼 만한 세 가지를 골랐어요.'}
+      </Text>
 
-      {userRegion ? (
-        <View style={styles.locPill}>
-          <Text style={styles.locPin}>◉</Text>
-          <Text style={styles.locText}>내 위치 · {userRegion}</Text>
-        </View>
-      ) : null}
-
-      {(activeCard?.reasonTags ?? []).length > 0 ? (
-        <View style={styles.reasonRow}>
-          {(activeCard?.reasonTags ?? []).map((reason) => (
-            <View key={reason} style={styles.reasonPill}>
-              <Text style={styles.reasonText}>{reason}</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
-
-      <View style={styles.tagArea}>
-        <SealedTag />
+      <View style={styles.candidates}>
+        {cards.map((card) => {
+          const selected = card.cardToken === selectedToken;
+          const meta = [card.distanceLabel, card.timingLabel].filter(Boolean).join(' · ');
+          return (
+            <Pressable
+              key={card.cardToken}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: selected }}
+              accessibilityLabel={`${previewTitle(card)}, ${meta}`}
+              onPress={() => onSelect(card.cardToken)}
+              style={({ pressed }) => [
+                styles.candidate,
+                selected ? styles.candidateSelected : null,
+                pressed ? styles.candidatePressed : null,
+              ]}
+            >
+              <View style={[styles.categoryMark, selected ? styles.categoryMarkSelected : null]}>
+                <Text style={[styles.categoryText, selected ? styles.categoryTextSelected : null]}>
+                  {card.category.slice(0, 1)}
+                </Text>
+              </View>
+              <View style={styles.candidateCopy}>
+                <View style={styles.categoryLine}>
+                  <Text style={styles.category}>{card.category}</Text>
+                  {(card.reasonTags ?? []).slice(0, 1).map((reason) => (
+                    <Text key={reason} style={styles.reason}>{reason}</Text>
+                  ))}
+                </View>
+                <Text style={styles.candidateTitle}>{previewTitle(card)}</Text>
+                <Text style={styles.meta}>{meta || '상세 일정은 공개 후 확인할 수 있어요'}</Text>
+              </View>
+              <View style={[styles.radio, selected ? styles.radioSelected : null]}>
+                {selected ? <View style={styles.radioDot} /> : null}
+              </View>
+            </Pressable>
+          );
+        })}
       </View>
 
       <Pressable
-        style={[styles.cta, disabled && styles.ctaDisabled]}
+        accessibilityRole="button"
+        style={[styles.cta, disabled ? styles.ctaDisabled : null]}
         onPress={onOpen}
         disabled={disabled}
       >
-        <Icon name="icon-play-mono" size={16} color={disabled ? CTA_DISABLED_TEXT : INK} />
-        <Text style={[styles.ctaText, disabled && styles.ctaTextDisabled]}>
+        <Icon name="icon-play-mono" size={16} color={disabled ? '#807A70' : INK} />
+        <Text style={[styles.ctaText, disabled ? styles.ctaTextDisabled : null]}>
           {loading ? '광고 준비 중' : actionLabel}
         </Text>
       </Pressable>
-
-      <Text style={styles.ctaHint}>
-        광고 1번 = 카드 1장 · 티켓 적립
-      </Text>
-      {locationHook ? (
-        <Text style={styles.ctaHint}>
-          <Text style={styles.ctaHookPin}>◉</Text> {locationHook}
-        </Text>
-      ) : (
-        <Text style={styles.ctaHint}>{dailyEarned} / {dailyLimit} 티켓</Text>
-      )}
+      <Text style={styles.hint}>광고가 끝나면 행사 정보와 티켓이 함께 열려요</Text>
+      <Text style={styles.progress}>{dailyEarned} / {dailyLimit} 티켓 적립</Text>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  section: {
+    paddingHorizontal: 22,
+    paddingTop: 12,
+  },
+  eyebrow: {
+    color: GOLD,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+  },
+  title: {
+    marginTop: 6,
+    color: TEXT,
+    fontSize: 25,
+    lineHeight: 32,
+    fontWeight: '900',
+    letterSpacing: -0.8,
+  },
+  subtitle: {
+    marginTop: 5,
+    color: MUTED,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '600',
+  },
+  candidates: {
+    marginTop: 18,
+    gap: 9,
+  },
+  candidate: {
+    minHeight: 82,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: LINE,
+    backgroundColor: SURFACE,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  candidateSelected: {
+    borderColor: 'rgba(216,178,106,0.72)',
+    backgroundColor: SURFACE_SELECTED,
+  },
+  candidatePressed: {
+    opacity: 0.8,
+  },
+  categoryMark: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    backgroundColor: '#292622',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryMarkSelected: {
+    backgroundColor: '#E2C98F',
+  },
+  categoryText: {
+    color: MUTED,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '900',
+  },
+  categoryTextSelected: {
+    color: INK,
+  },
+  candidateCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  categoryLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  category: {
+    color: GOLD,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '800',
+  },
+  reason: {
+    color: '#99A9C7',
+    fontSize: 10.5,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  candidateTitle: {
+    marginTop: 2,
+    color: TEXT,
+    fontSize: 15.5,
+    lineHeight: 21,
+    fontWeight: '800',
+  },
+  meta: {
+    marginTop: 2,
+    color: MUTED,
+    fontSize: 11.5,
+    lineHeight: 16,
+    fontWeight: '600',
+  },
+  radio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#68625A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioSelected: {
+    borderColor: GOLD,
+  },
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: GOLD,
+  },
+  cta: {
+    marginTop: 16,
+    height: 54,
+    borderRadius: 15,
+    backgroundColor: CTA,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  ctaDisabled: {
+    backgroundColor: '#27241F',
+  },
+  ctaText: {
+    color: INK,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '900',
+  },
+  ctaTextDisabled: {
+    color: '#807A70',
+  },
+  hint: {
+    marginTop: 10,
+    textAlign: 'center',
+    color: MUTED,
+    fontSize: 11.5,
+    lineHeight: 16,
+    fontWeight: '600',
+  },
+  progress: {
+    marginTop: 3,
+    textAlign: 'center',
+    color: '#756F66',
+    fontSize: 10.5,
+    lineHeight: 15,
+    fontWeight: '600',
+  },
+});

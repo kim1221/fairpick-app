@@ -136,6 +136,98 @@ test('GET /api/cards/today returns three unopened cards, morePool, and ticket to
   assert.match(canonicalSql[0], /is_deleted\s*=\s*false/i);
 });
 
+test('v2 locks curated details until rewarded open and keeps weekly discovery disjoint', async () => {
+  const opened = {
+    id: 'opened-weekly',
+    title: '이미 발견한 전시',
+    display_title: '이미 발견한 전시',
+    content_key: 'opened-key',
+    canonical_key: null,
+    main_category: '전시',
+    region: '서울',
+    start_at: isoDaysFromNow(-2),
+    end_at: isoDaysFromNow(20),
+    image_url: 'https://img/opened.jpg',
+    venue: '발견 미술관',
+    overview: '이미 광고로 공개한 이벤트',
+    buzz_score: 50,
+    earn_date: todayKst(),
+  };
+  const fresh = [
+    { id: 'locked-a', title: '비밀 전시', content_key: 'a', main_category: '전시', region: '서울', venue: 'A관', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: 'https://img/a.jpg', overview: 'A 소개', buzz_score: 40 },
+    { id: 'locked-b', title: '비밀 공연', content_key: 'b', main_category: '공연', region: '서울', venue: 'B홀', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(6), image_url: 'https://img/b.jpg', overview: 'B 소개', buzz_score: 30 },
+    { id: 'locked-c', title: '비밀 팝업', content_key: 'c', main_category: '팝업', region: '서울', venue: 'C존', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(7), image_url: 'https://img/c.jpg', overview: 'C 소개', buzz_score: 20 },
+  ];
+
+  pool.query = async (sql) => {
+    const text = String(sql);
+    if (text.includes('user_card_impressions')) return { rows: [], rowCount: 0 };
+    if (text.includes('user_likes')) return { rows: [] };
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 4, daily_earned: 2, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('MAX(el.earn_date)')) return { rows: [opened] };
+    if (text.includes('FROM user_ticket_earn_log el')) {
+      return { rows: [{ event_id: opened.id, earn_date: todayKst(), dedupe_key: opened.content_key }] };
+    }
+    if (text.includes('FROM canonical_events')) return { rows: [opened, ...fresh] };
+    throw new Error(`Unexpected v2 query: ${text}`);
+  };
+
+  const todayResponse = await request(makeApp(cardsRouter), 'GET', '/v2/today');
+  assert.equal(todayResponse.status, 200);
+  assert.equal(todayResponse.body.lockedCards.length, 3);
+  for (const preview of todayResponse.body.lockedCards) {
+    assert.equal(typeof preview.cardToken, 'string');
+    assert.equal('eventId' in preview, false);
+    assert.equal('title' in preview, false);
+    assert.equal('venue' in preview, false);
+    assert.equal('imageUrl' in preview, false);
+  }
+  assert.equal(todayResponse.body.weeklyDiscovery.items.length, 1);
+  assert.equal(todayResponse.body.weeklyDiscovery.items[0].eventId, opened.id);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const token = todayResponse.body.lockedCards.find((card) => card.category === '전시').cardToken;
+  const client = {
+    async query(sql) {
+      const text = String(sql);
+      if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (text.includes('FROM ad_reward_attempts')) {
+        assert.match(text, /reward_at IS NOT NULL/);
+        assert.match(text, /metadata->>'cardToken'/);
+        return { rows: [{ attempt_id: 'attempt-v2' }], rowCount: 1 };
+      }
+      if (text.includes('FROM canonical_events')) {
+        return { rows: [fresh[0]], rowCount: 1 };
+      }
+      if (text.includes('INSERT INTO user_ticket_earn_log')) return { rows: [{ id: 'earn-v2' }], rowCount: 1 };
+      if (text.includes('INSERT INTO user_tickets')) return { rows: [], rowCount: 1 };
+      if (text.includes('FROM user_tickets') && text.includes('FOR UPDATE')) {
+        return { rows: [{ ticket_count: 4, daily_earned: 2, daily_earned_date: todayKst() }], rowCount: 1 };
+      }
+      if (text.includes('UPDATE user_tickets')) {
+        return { rows: [{ ticket_count: 5, total_earned: 5 }], rowCount: 1 };
+      }
+      if (text.includes('UPDATE user_ticket_earn_log')) return { rows: [], rowCount: 1 };
+      if (text.includes('UPDATE ad_reward_attempts')) return { rows: [], rowCount: 1 };
+      throw new Error(`Unexpected v2 client query: ${text}`);
+    },
+    release() {},
+  };
+  pool.connect = async () => client;
+
+  const openedResponse = await request(makeApp(cardsRouter), 'POST', '/v2/open', {
+    cardToken: token,
+    adAttemptId: 'attempt-v2',
+  });
+  assert.equal(openedResponse.status, 200);
+  assert.equal(openedResponse.body.card.eventId, 'locked-a');
+  assert.equal(openedResponse.body.card.title, '비밀 전시');
+  assert.equal(openedResponse.body.card.opened, true);
+  assert.ok(openedResponse.body.earned >= 1 && openedResponse.body.earned <= 3);
+});
+
 test('GET /api/cards/today explains weighted taste personalization', async () => {
   pool.query = async (sql) => {
     const text = String(sql);

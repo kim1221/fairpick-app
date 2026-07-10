@@ -3,6 +3,8 @@ import { pool } from '../db';
 import { requireAuth } from '../middleware/requireAuth';
 import { calculateBoundingBox, getHaversineDistanceSQL } from '../utils/geo';
 import { reverseGeocodeRegion } from '../lib/geocode';
+import { openLockedCard, sealLockedCard } from '../services/cardToken';
+import { grantTicketsForEvent, TicketGrantError } from '../services/ticketGrant';
 
 const router = express.Router();
 
@@ -49,6 +51,7 @@ type EventRow = {
 type TasteRow = { category: string | null; n: number | string; signal_count?: number | string };
 type ImpressionRow = { event_id: string };
 type TasteMap = Map<string, number>;
+type WeeklyOpenedEventRow = EventRow & { earn_date: string | Date | null };
 
 type OpenedEventRow = {
   event_id: string;
@@ -468,6 +471,242 @@ async function getNearbyEvents(
   const fallbackRows = await getFallbackEvents(today, fillExcludedIds, fillExcludedKeys);
   return mergeRows(bestNearbyRows, fallbackRows);
 }
+
+function lockedTimingLabel(dday: number | null): string {
+  if (dday == null) return '일정 확인 중';
+  if (dday === 0) return '오늘 마감';
+  if (dday === 1) return '내일 마감';
+  if (dday > 1 && dday <= 7) return `${dday}일 안에 마감`;
+  return '일정 여유가 있어요';
+}
+
+function toLockedPreview(card: ReturnType<typeof toCard>, userId: string, today: string) {
+  return {
+    cardToken: sealLockedCard({
+      userId,
+      eventId: card.eventId,
+      assignedOn: today,
+      walkMinutes: card.walkMinutes,
+      reasonTags: card.reasonTags,
+    }),
+    category: card.category,
+    areaLabel: card.region,
+    distanceLabel: card.walkMinutes == null ? null : `도보 ${card.walkMinutes}분`,
+    timingLabel: lockedTimingLabel(card.dday),
+    reasonTags: card.reasonTags,
+  };
+}
+
+/**
+ * v2: 큐레이션 결과 자체를 잠긴 카드로 제공한다.
+ * 제목·장소·이미지·eventId는 광고 전 응답에 포함하지 않는다.
+ */
+router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const today = todayKst();
+  const weekKey = weekKeyKst(today);
+  const location = parseLocationQuery(req);
+  const userRegionPromise: Promise<string | null> = location
+    ? reverseGeocodeRegion(location.lat, location.lng).catch(() => null)
+    : Promise.resolve(null);
+
+  try {
+    const [ticketResult, discoveredResult, tasteResult, impressionResult, weeklyOpenedResult] = await Promise.all([
+      pool.query(
+        `WITH ensured AS (
+           INSERT INTO user_tickets (user_id, ticket_count, total_earned, total_exchanged)
+           VALUES ($1, 0, 0, 0)
+           ON CONFLICT (user_id) DO UPDATE SET updated_at = NOW()
+           RETURNING ticket_count, daily_earned, daily_earned_date
+         )
+         SELECT ticket_count, daily_earned, daily_earned_date FROM ensured
+         UNION ALL
+         SELECT ticket_count, daily_earned, daily_earned_date
+         FROM user_tickets WHERE user_id = $1
+         LIMIT 1`,
+        [userId],
+      ),
+      // 한 번 공개한 canonical 이벤트는 다시 잠긴 카드로 만들지 않는다.
+      pool.query<OpenedEventRow>(
+        `SELECT el.event_id,
+                el.earn_date,
+                COALESCE(ce.content_key, ce.canonical_key, ce.id::text) AS dedupe_key
+         FROM user_ticket_earn_log el
+         LEFT JOIN canonical_events ce ON ce.id::text = el.event_id::text
+         WHERE el.user_id = $1`,
+        [userId],
+      ),
+      pool.query<TasteRow>(
+        `SELECT ce.main_category AS category,
+                SUM(src.weight)::int AS n,
+                COUNT(*)::int AS signal_count
+         FROM (
+           SELECT event_id, 1::int AS weight FROM user_ticket_earn_log
+             WHERE user_id = $1 AND earn_date >= $2::date - (($3::int - 1) * INTERVAL '1 day')
+           UNION ALL
+           SELECT event_id, 3::int AS weight FROM user_likes WHERE user_id = $1
+           UNION ALL
+           SELECT event_id, 4::int AS weight FROM user_visit_log WHERE user_id = $1
+         ) src
+         JOIN canonical_events ce ON ce.id::text = src.event_id::text
+         WHERE ce.main_category IS NOT NULL
+         GROUP BY ce.main_category`,
+        [userId, today, TASTE_WINDOW_DAYS],
+      ).catch(() => ({ rows: [] as TasteRow[] })),
+      // 오늘 배정한 3장은 새로고침해도 유지하고, 이전 7일 노출만 소프트 제외한다.
+      pool.query<ImpressionRow>(
+        `SELECT event_id FROM user_card_impressions
+         WHERE user_id = $1
+           AND last_shown_on >= $2::date - (($3::int - 1) * INTERVAL '1 day')
+           AND last_shown_on < $2::date`,
+        [userId, today, IMPRESSION_COOLDOWN_DAYS],
+      ).catch(() => ({ rows: [] as ImpressionRow[] })),
+      pool.query<WeeklyOpenedEventRow>(
+        `SELECT ce.id, ce.title, ce.display_title, ce.content_key, ce.canonical_key,
+                ce.main_category, ce.region, ce.start_at, ce.end_at, ce.image_url,
+                ce.venue, ce.overview, ce.lat, ce.lng, ce.buzz_score, ce.created_at,
+                MAX(el.earn_date) AS earn_date
+         FROM user_ticket_earn_log el
+         JOIN canonical_events ce ON ce.id::text = el.event_id::text
+         WHERE el.user_id = $1
+           AND el.earn_date >= $2::date
+           AND ce.is_deleted = false
+         GROUP BY ce.id
+         ORDER BY MAX(el.earn_date) DESC, ce.id
+         LIMIT 7`,
+        [userId, weekKey],
+      ).catch(() => ({ rows: [] as WeeklyOpenedEventRow[] })),
+    ]);
+
+    const discoveredEventIds = new Set(discoveredResult.rows.map((row) => String(row.event_id)));
+    const discoveredDedupeKeys = new Set(
+      discoveredResult.rows.map((row) => row.dedupe_key).filter((key): key is string => !!key),
+    );
+    const rows = location
+      ? await getNearbyEvents(today, location, discoveredEventIds, discoveredDedupeKeys)
+      : await getFallbackEvents(today, discoveredEventIds, discoveredDedupeKeys);
+    const seed = dailySeed(userId, today);
+    const taste = buildTasteMap(tasteResult.rows);
+    const scoreById = new Map<string, number>();
+    for (const row of rows) scoreById.set(String(row.id), scoreRow(row, { location, taste, seed }));
+
+    const cards = rows.map((row) => toCard(row, new Set<string>(), location, taste));
+    const previousImpressionIds = new Set(impressionResult.rows.map((row) => String(row.event_id)));
+    const freshCards = cards.filter((card) => !previousImpressionIds.has(card.eventId));
+    const scored = (freshCards.length >= TODAY_CARD_COUNT ? freshCards : cards)
+      .slice()
+      .sort((a, b) => (scoreById.get(b.eventId) ?? 0) - (scoreById.get(a.eventId) ?? 0));
+    const selected = pickDiverseTodayCards(scored);
+
+    const shownIds = selected.map((card) => card.eventId);
+    if (shownIds.length > 0) {
+      setImmediate(() => {
+        pool.query(
+          `INSERT INTO user_card_impressions (user_id, event_id, last_shown_on, shown_count)
+           SELECT $1, e, $2::date, 1 FROM unnest($3::text[]) AS e
+           ON CONFLICT (user_id, event_id)
+           DO UPDATE SET last_shown_on = EXCLUDED.last_shown_on,
+                         shown_count = user_card_impressions.shown_count + 1`,
+          [userId, today, shownIds],
+        ).catch((e) => console.error('[Cards] v2 impression log failed:', e?.message ?? e));
+      });
+    }
+
+    const ticketRow = ticketResult.rows[0] ?? {};
+    const dailyEarnedDate = ticketRow.daily_earned_date ? String(ticketRow.daily_earned_date).slice(0, 10) : null;
+    const weeklyOpenedIds = new Set(weeklyOpenedResult.rows.map((row) => String(row.id)));
+    const weeklyItems = dedupeRows(weeklyOpenedResult.rows)
+      .map((row) => toCard(row, weeklyOpenedIds, location, taste));
+
+    return res.json({
+      lockedCards: selected.map((card) => toLockedPreview(card, userId, today)),
+      ticketCount: ticketRow.ticket_count ?? 0,
+      dailyEarned: dailyEarnedDate === today ? (ticketRow.daily_earned ?? 0) : 0,
+      dailyLimit: DAILY_LIMIT,
+      userRegion: await userRegionPromise,
+      weeklyDiscovery: {
+        weekKey,
+        openedCount: weeklyItems.length,
+        goal: 7,
+        items: weeklyItems,
+      },
+      personalization: buildPersonalization(tasteResult.rows, taste),
+    });
+  } catch (err) {
+    console.error('[Cards] v2 today error:', err);
+    return res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/** 광고 보상 확인과 카드 공개, 티켓 지급을 한 트랜잭션으로 처리한다. */
+router.post('/v2/open', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { cardToken, adAttemptId } = req.body as { cardToken?: unknown; adAttemptId?: unknown };
+  if (typeof cardToken !== 'string' || typeof adAttemptId !== 'string') {
+    return res.status(400).json({ error: 'INVALID_OPEN_PAYLOAD' });
+  }
+  const tokenPayload = openLockedCard(cardToken);
+  const today = todayKst();
+  if (!tokenPayload || tokenPayload.userId !== userId || tokenPayload.assignedOn !== today) {
+    return res.status(403).json({ error: 'INVALID_OR_EXPIRED_CARD' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const adResult = await client.query(
+      `SELECT attempt_id
+       FROM ad_reward_attempts
+       WHERE attempt_id = $1
+         AND user_id = $2
+         AND reward_at IS NOT NULL
+         AND metadata->>'cardToken' = $3
+       FOR UPDATE`,
+      [adAttemptId, userId, cardToken],
+    );
+    if (adResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'AD_REWARD_NOT_CONFIRMED' });
+    }
+
+    const eventResult = await client.query<EventRow>(
+      `SELECT id, title, display_title, content_key, canonical_key, main_category, region,
+              start_at, end_at, image_url, venue, overview, lat, lng, buzz_score, created_at
+       FROM canonical_events
+       WHERE id::text = $1
+         AND is_deleted = false
+         AND (end_at IS NULL OR (end_at AT TIME ZONE 'Asia/Seoul')::date >= $2::date)
+       LIMIT 1`,
+      [tokenPayload.eventId, today],
+    );
+    if (eventResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(410).json({ error: 'CARD_EVENT_UNAVAILABLE' });
+    }
+
+    const reward = await grantTicketsForEvent(client, {
+      userId,
+      eventId: tokenPayload.eventId,
+      today,
+      adAttemptId,
+    });
+    await client.query('COMMIT');
+
+    const fullCard = toCard(eventResult.rows[0], new Set([tokenPayload.eventId]), null, new Map());
+    fullCard.walkMinutes = tokenPayload.walkMinutes;
+    fullCard.reasonTags = tokenPayload.reasonTags;
+    return res.json({ card: fullCard, ...reward });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err instanceof TicketGrantError) {
+      return res.status(err.status).json({ error: err.code, ...err.details });
+    }
+    console.error('[Cards] v2 open error:', err);
+    return res.status(500).json({ error: 'INTERNAL_ERROR' });
+  } finally {
+    client.release();
+  }
+});
 
 router.get('/today', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
