@@ -15,9 +15,7 @@ import {
 } from '../saved/SavedTicketRow';
 import { PassportEmblem } from './PassportEmblem';
 
-const GOLD = '#CBA15E';
 const GOLD_SOFT = '#DDB877';
-const PAPER_EDGE = '#D6C79E';
 const INK = '#2C2A22';
 const INK_SUB = '#6E6350';
 const NAVY_STAMP = '#2A386A';
@@ -189,20 +187,20 @@ const styles = StyleSheet.create({
   },
   paperFace: {
     flex: 1,
-    borderRadius: 16,
+    borderRadius: 0,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: PAPER_EDGE,
+    borderColor: '#171717',
     paddingHorizontal: 14,
     paddingTop: 18,
     paddingBottom: 16,
   },
   paperFaceImg: {
-    opacity: 0.96,
+    opacity: 0.16,
   },
   paperWash: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,249,235,0.45)',
+    backgroundColor: 'rgba(247,245,239,0.86)',
   },
   watermark: {
     position: 'absolute',
@@ -222,7 +220,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   eyebrow: {
-    color: NAVY_STAMP,
+    color: '#A52822',
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '900',
@@ -246,9 +244,9 @@ const styles = StyleSheet.create({
   pageBadge: {
     minWidth: 42,
     height: 32,
-    borderRadius: 16,
+    borderRadius: 0,
     borderWidth: 1,
-    borderColor: GOLD,
+    borderColor: '#171717',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 8,
@@ -318,7 +316,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   indexTabActive: {
-    borderBottomColor: '#3157D5',
+    borderBottomColor: '#A52822',
   },
   indexText: {
     color: '#716D66',
@@ -327,6 +325,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   indexTextActive: {
-    color: '#3157D5',
+    color: '#A52822',
   },
 });

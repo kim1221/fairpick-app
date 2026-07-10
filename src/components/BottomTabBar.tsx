@@ -27,10 +27,10 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     right: 18,
     backgroundColor: a.background,
     flexDirection: 'row',
-    borderRadius: 22,
-    paddingVertical: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: a.grey200,
+    borderRadius: 4,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#171717',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
@@ -41,8 +41,13 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 4,
+    paddingVertical: 5,
     gap: 2,
+    borderTopWidth: 3,
+    borderTopColor: 'transparent',
+  },
+  tabActive: {
+    borderTopColor: '#A52822',
   },
   label: {
     fontSize: 11,
@@ -50,7 +55,7 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     fontWeight: '500',
   },
   labelActive: {
-    color: a.blue500,
+    color: '#A52822',
     fontWeight: '700',
   },
 });
@@ -61,9 +66,9 @@ export const BottomTabBar: React.FC<BottomTabBarProps> = ({ currentTab, onHomeTa
   const styles = React.useMemo(() => createStyles(adaptive), [adaptive]);
 
   const tabs = [
-    { key: 'home' as const, label: '홈', route: '/' as const },
-    { key: 'passport' as const, label: '여권', route: '/passport' as const },
-    { key: 'points' as const, label: '포인트', route: '/points' as const },
+    { key: 'home' as const, label: '오늘', route: '/' as const },
+    { key: 'passport' as const, label: '컬렉션', route: '/passport' as const },
+    { key: 'points' as const, label: '리워드', route: '/points' as const },
   ];
 
   const handleTabPress = (tab: typeof tabs[number]) => {
@@ -80,14 +85,14 @@ export const BottomTabBar: React.FC<BottomTabBarProps> = ({ currentTab, onHomeTa
         return (
           <TouchableOpacity
             key={tab.key}
-            style={styles.tab}
+            style={[styles.tab, isActive ? styles.tabActive : null]}
             onPress={() => handleTabPress(tab)}
             activeOpacity={0.7}
           >
             <Icon
               name={TAB_ICONS[tab.key]}
               size={22}
-              color={isActive ? adaptive.blue500 : adaptive.grey500}
+              color={isActive ? '#A52822' : adaptive.grey500}
             />
             <Text style={[styles.label, isActive && styles.labelActive]}>
               {tab.label}

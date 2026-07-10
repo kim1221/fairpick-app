@@ -136,7 +136,7 @@ export function StampDetailSheet({
                     <Text style={styles.doneStrong}>{fmtLongDate(stamp.visitedAt)}</Text>에 다녀왔어요
                   </Text>
                   {ordinal != null ? (
-                    <Text style={styles.doneLine2}>여권의 {ordinal}번째 도장이에요</Text>
+                    <Text style={styles.doneLine2}>컬렉션의 {ordinal}번째 방문 기록이에요</Text>
                   ) : null}
                 </View>
               </View>

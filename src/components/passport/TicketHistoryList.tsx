@@ -109,9 +109,13 @@ const styles = StyleSheet.create({
     color: ON_INK,
     fontSize: 20,
     fontWeight: '900',
+    fontFamily: 'Noto Serif KR',
   },
   sectionKicker: {
-    color: '#3157D5',
+    paddingTop: 8,
+    borderTopWidth: 3,
+    borderTopColor: '#171717',
+    color: '#A52822',
     fontSize: 10.5,
     fontWeight: '900',
     letterSpacing: 1.5,
@@ -131,8 +135,10 @@ const styles = StyleSheet.create({
   iconBox: {
     width: 38,
     height: 38,
-    borderRadius: 11,
-    backgroundColor: '#F3F0E9',
+    borderRadius: 0,
+    borderWidth: 1,
+    borderColor: '#171717',
+    backgroundColor: '#EFE9D8',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -158,7 +164,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   amountPlus: {
-    color: BRONZE,
+    color: '#A52822',
   },
   amountMinus: {
     color: BLUE,

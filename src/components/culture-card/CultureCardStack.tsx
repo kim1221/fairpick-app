@@ -14,8 +14,8 @@ import type { LockedCardPreview } from '../../services/cardsService';
 
 const INK = '#171717';
 const MUTED = '#6F6B65';
-const BLUE = '#3157D5';
-const FALLBACK_PALETTE = { background: '#3157D5', foreground: '#FFF8E8', accent: '#FFD65A' };
+const BLUE = '#A52822';
+const FALLBACK_PALETTE = { background: '#EFE9D8', foreground: '#171717', accent: '#A52822' };
 
 interface CultureCardStackProps {
   cards: LockedCardPreview[];
@@ -43,7 +43,7 @@ export function CultureCardStack({
   userRegion,
 }: CultureCardStackProps) {
   const { width } = useWindowDimensions();
-  const cardWidth = Math.min(286, width - 76);
+  const cardWidth = width - 44;
   const selectedIndex = Math.max(0, cards.findIndex((card) => card.cardToken === selectedToken));
   const handleMomentumEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const nextIndex = Math.max(
@@ -58,16 +58,14 @@ export function CultureCardStack({
     <View style={styles.section}>
       <View style={styles.heading}>
         <View style={styles.headingTop}>
-          <Text style={styles.eyebrow}>TODAY’S DROP</Text>
-          <View style={styles.dailyPill}>
-            <Text style={styles.dailyPillText}>오늘 {dailyOpenCount} · 최대 {dailyOpenLimit}</Text>
-          </View>
+          <Text style={styles.eyebrow}>THE COVER STORY</Text>
+          <Text style={styles.dailyPillText}>{dailyOpenCount} / {dailyOpenLimit} OPENED</Text>
         </View>
-        <Text style={styles.title}>오늘의 문화,{`\n`}한 장씩 발견해요</Text>
+        <Text style={styles.title}>오늘의 표지</Text>
         <Text style={styles.subtitle}>
           {userRegion
-            ? `${userRegion} 근처의 장면을 골랐어요. 넘겨보고 마음 가는 한 장을 열어보세요.`
-            : '지금 가볼 만한 장면을 골랐어요. 넘겨보고 마음 가는 한 장을 열어보세요.'}
+            ? `${userRegion} 근처에서 고른 세 장입니다. 표지를 넘기고 한 장을 열어보세요.`
+            : '오늘의 편집부가 고른 세 장입니다. 표지를 넘기고 한 장을 열어보세요.'}
         </Text>
       </View>
 
@@ -102,7 +100,7 @@ export function CultureCardStack({
             >
               <View
                 pointerEvents="none"
-                style={[styles.shapeLarge, { backgroundColor: palette.accent, opacity: 0.22 }]}
+                style={[styles.shapeLarge, { backgroundColor: palette.accent }]}
               />
               <View
                 pointerEvents="none"
@@ -116,10 +114,10 @@ export function CultureCardStack({
               </Text>
 
               <View style={styles.cardTop}>
-                <Text style={[styles.cardSerial, { color: palette.foreground }]}>CC / {String(index + 1).padStart(2, '0')}</Text>
+                <Text style={[styles.cardSerial, { color: palette.foreground }]}>VOL. 01 / NO. {String(index + 1).padStart(2, '0')}</Text>
                 <View style={styles.selectionLabel}>
                     <Text style={[styles.selectionText, { color: palette.foreground }]}>
-                    {selected ? '지금 이 카드' : '넘겨보기'}
+                    {selected ? 'SELECTED' : 'SWIPE'}
                   </Text>
                   <View style={[
                     styles.selectionDot,
@@ -182,7 +180,7 @@ export function CultureCardStack({
 
 const styles = StyleSheet.create({
   section: {
-    paddingTop: 8,
+    paddingTop: 14,
   },
   heading: {
     paddingHorizontal: 22,
@@ -191,89 +189,89 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingBottom: 7,
+    borderBottomWidth: 1,
+    borderBottomColor: '#171717',
   },
   eyebrow: {
-    color: BLUE,
+    color: '#A52822',
     fontSize: 11,
     lineHeight: 18,
     fontWeight: '900',
     letterSpacing: 1.6,
   },
-  dailyPill: {
-    borderRadius: 999,
-    backgroundColor: '#171717',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
   dailyPillText: {
-    color: '#FFFFFF',
-    fontSize: 10.5,
+    color: '#171717',
+    fontSize: 9.5,
     fontWeight: '800',
+    letterSpacing: 1,
   },
   title: {
     marginTop: 5,
     color: INK,
-    fontSize: 31,
-    lineHeight: 37,
+    fontSize: 30,
+    lineHeight: 38,
     fontWeight: '900',
     letterSpacing: -1.2,
+    fontFamily: 'Noto Serif KR',
   },
   subtitle: {
     marginTop: 6,
     color: MUTED,
-    fontSize: 12.5,
+    fontSize: 12,
     lineHeight: 18,
     fontWeight: '600',
   },
   cardRail: {
     paddingHorizontal: 22,
-    paddingTop: 14,
-    paddingBottom: 6,
+    paddingTop: 12,
+    paddingBottom: 8,
     gap: 12,
   },
   newsCard: {
-    height: 318,
-    borderRadius: 28,
-    padding: 20,
+    height: 396,
+    borderRadius: 2,
+    padding: 18,
     overflow: 'hidden',
     justifyContent: 'space-between',
-    borderWidth: 2,
-    borderColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#171717',
     shadowColor: '#1A1712',
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.14,
-    shadowRadius: 18,
-    elevation: 5,
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 2,
   },
   newsCardSelected: {
-    borderColor: '#FFFFFF',
-    transform: [{ translateY: -3 }],
+    borderWidth: 3,
+    borderColor: '#171717',
   },
   newsCardPressed: {
     transform: [{ scale: 0.985 }],
   },
   shapeLarge: {
     position: 'absolute',
-    width: 250,
-    height: 250,
-    borderRadius: 125,
-    right: -90,
-    top: 48,
+    width: 58,
+    top: 0,
+    bottom: 0,
+    left: 0,
+    opacity: 1,
   },
   shapeSmall: {
     position: 'absolute',
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    borderWidth: 18,
-    left: -28,
-    bottom: 42,
-    opacity: 0.28,
+    width: 104,
+    height: 150,
+    borderRadius: 0,
+    borderWidth: 1,
+    right: 18,
+    top: 70,
+    opacity: 0.52,
   },
   cardTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginLeft: 52,
   },
   cardSerial: {
     fontSize: 11,
@@ -284,12 +282,13 @@ const styles = StyleSheet.create({
   },
   posterLetter: {
     position: 'absolute',
-    right: 8,
-    top: 48,
-    fontSize: 176,
-    lineHeight: 190,
+    right: -5,
+    top: 42,
+    fontSize: 210,
+    lineHeight: 228,
     fontWeight: '900',
-    opacity: 0.22,
+    opacity: 0.18,
+    fontFamily: 'Noto Serif KR',
   },
   selectionLabel: {
     flexDirection: 'row',
@@ -309,23 +308,27 @@ const styles = StyleSheet.create({
   },
   cardCopy: {
     marginTop: 'auto',
-    marginBottom: 18,
+    marginBottom: 24,
+    marginLeft: 52,
+    maxWidth: '78%',
   },
   cardEyebrow: {
-    fontSize: 11.5,
+    fontSize: 10,
     lineHeight: 18,
     fontWeight: '900',
   },
   cardHeadline: {
     marginTop: 9,
-    fontSize: 27,
-    lineHeight: 34,
+    fontSize: 29,
+    lineHeight: 37,
     fontWeight: '900',
     letterSpacing: -1.1,
+    fontFamily: 'Noto Serif KR',
   },
   cardFooter: {
     paddingTop: 10,
     borderTopWidth: 1,
+    marginLeft: 52,
   },
   cardMeta: {
     fontSize: 12,
@@ -340,28 +343,28 @@ const styles = StyleSheet.create({
     opacity: 0.76,
   },
   pager: {
-    height: 14,
+    height: 18,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
   },
   pageDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 28,
+    height: 2,
+    borderRadius: 0,
     backgroundColor: '#C9C5BC',
   },
   pageDotActive: {
-    width: 18,
+    width: 52,
     backgroundColor: BLUE,
   },
   cta: {
     marginHorizontal: 22,
     marginTop: 13,
-    height: 54,
-    borderRadius: 17,
-    backgroundColor: '#3157D5',
+    height: 58,
+    borderRadius: 2,
+    backgroundColor: '#171717',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -380,7 +383,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#F6D45D',
+    backgroundColor: '#EFE9D8',
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -199,7 +199,7 @@ function PassportPage() {
   const bookListRef = useRef<FlatList<PassportBookPage<SavedTicketItem, PassportStamp>>>(null);
   const savingIdsRef = useRef<Set<string>>(new Set());
   const markingIdsRef = useRef<Set<string>>(new Set());
-  const desiredBookSectionRef = useRef<PassportBookmarkSection>('cover');
+  const desiredBookSectionRef = useRef<PassportBookmarkSection>('discovered');
   const stampBookRef = useRef(1);
   const lastAlignedBookPageRef = useRef<string | null>(null);
   const [currentBookPage, setCurrentBookPage] = useState(0);
@@ -464,7 +464,7 @@ function PassportPage() {
     if (!isLoggedIn) {
       await dialog.openAlert({
         title: '로그인하면 도장을 남길 수 있어요',
-        description: '다녀온 문화 기록을 문화 여권에 안전하게 보관해요.',
+        description: '다녀온 문화 기록을 컬렉션에 안전하게 보관해요.',
       });
       return;
     }
@@ -494,7 +494,7 @@ function PassportPage() {
       if (!firstStampNoticeShownRef.current) {
         firstStampNoticeShownRef.current = true;
         showToast({
-          title: '문화 여권에 도장을 남겼어요',
+          title: '컬렉션에 방문 기록을 남겼어요',
           description: '위치 인증 없이 추억으로 남겨요 (보상 아님)',
         });
       }
@@ -562,7 +562,7 @@ function PassportPage() {
       passportError,
       savedLoading,
       savedError,
-    }),
+    }).filter((page) => page.section !== 'cover'),
     [
       discoveredItems,
       passportError,
@@ -578,11 +578,10 @@ function PassportPage() {
   const bookmarkIndexes = useMemo(() => getPassportSectionIndexes(bookPages), [bookPages]);
   const activeBookmark = getActivePassportBookmark(bookPages, currentBookPage);
   const bookmarkItems: PassportBookmarkItem[] = useMemo(() => [
-    { section: 'cover', label: '표지' },
-    { section: 'discovered', label: '발견' },
-    { section: 'wishlist', label: '예정' },
-    { section: 'stamps', label: '도장' },
-  ], []);
+    { section: 'discovered', label: `공개 ${discoveredCount}` },
+    { section: 'wishlist', label: `저장 ${pendingSavedCount}` },
+    { section: 'stamps', label: `방문 ${visitedCount}` },
+  ], [discoveredCount, pendingSavedCount, visitedCount]);
 
   useEffect(() => {
     if (bookPages.length === 0) return;
@@ -626,7 +625,7 @@ function PassportPage() {
     if (bookPages.length === 0) return;
     const nextIndex = Math.round(event.nativeEvent.contentOffset.x / Math.max(pageWidth, 1));
     const validIndex = Math.max(0, Math.min(nextIndex, bookPages.length - 1));
-    desiredBookSectionRef.current = bookPages[validIndex]?.section ?? 'cover';
+    desiredBookSectionRef.current = bookPages[validIndex]?.section ?? 'discovered';
     setCurrentBookPage(validIndex);
   }, [bookPages, pageWidth]);
 
@@ -811,9 +810,11 @@ function PassportPage() {
       >
         <ScrollViewInertialBackground topColor={BG} bottomColor={BG} />
 
-        <Text style={styles.navEyebrow}>MY CULTURE ARCHIVE</Text>
-        <Text style={styles.navTitle}>모으고, 남기고,{`\n`}다시 꺼내보는 문화</Text>
+        <Text style={styles.navEyebrow}>THE CULTURE ARCHIVE</Text>
+        <Text style={styles.navTitle}>나의 컬렉션</Text>
+        <Text style={styles.navDescription}>광고로 공개하고, 저장하고, 직접 다녀온 문화를 한곳에 모았어요.</Text>
 
+        <PassportDiscoverySummary passport={passport} />
         <PassportIndexRail
           items={bookmarkItems}
           activeSection={activeBookmark}
@@ -837,8 +838,7 @@ function PassportPage() {
             })}
           />
         </View>
-        <Text style={styles.bookHint}>책갈피를 누르거나 옆으로 넘겨요</Text>
-        <PassportDiscoverySummary passport={passport} />
+        <Text style={styles.bookHint}>탭을 누르거나 옆으로 넘겨 컬렉션을 살펴보세요</Text>
         {activeBookmark === 'stamps' && stampBookMeta.totalBooks > 1 ? (
           <View style={styles.stampBookPager}>
             <Pressable
@@ -916,19 +916,27 @@ const styles = StyleSheet.create({
   },
   navTitle: {
     color: ON_BG,
-    fontSize: 27,
-    lineHeight: 34,
+    fontSize: 34,
+    lineHeight: 41,
     fontWeight: '900',
     letterSpacing: -1,
     marginTop: 5,
-    marginBottom: 14,
+    fontFamily: 'Noto Serif KR',
+    marginBottom: 4,
   },
   navEyebrow: {
-    color: '#3157D5',
+    color: '#A52822',
     fontSize: 10.5,
     lineHeight: 14,
     fontWeight: '900',
     letterSpacing: 1.6,
+  },
+  navDescription: {
+    color: ON_BG_MUTED,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+    marginBottom: 2,
   },
   bookStage: {
     height: 400,

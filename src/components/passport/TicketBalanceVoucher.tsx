@@ -6,8 +6,7 @@
  * 교환 로직(exchangeTickets 2-step)은 상위(points.tsx)가 소유하고, 여기선 표시/트리거만.
  */
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { Button } from '@toss/tds-react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 const BLUE = '#3182F6';
 const ON_BG_MUTED = '#716D66';
@@ -46,7 +45,7 @@ export function TicketBalanceVoucher({
       {/* 큰 잔액 카드(네이비) */}
       <View style={styles.balanceCard}>
         <View style={styles.balanceAccent} pointerEvents="none" />
-        <View style={styles.balanceOrb} pointerEvents="none" />
+        <Text style={styles.balanceWatermark} pointerEvents="none">TICKET</Text>
         <View style={styles.balanceHeader}>
           <Text style={styles.balanceLabel}>내 문화 티켓</Text>
           <View style={styles.exchangeBadge}>
@@ -74,15 +73,15 @@ export function TicketBalanceVoucher({
       </View>
 
       {/* 토스포인트로 바꾸기 */}
-      <Button
-        type="primary"
-        size="big"
-        viewStyle={styles.button}
+      <Pressable
+        accessibilityRole="button"
+        style={[styles.button, !canExchange || exchanging ? styles.buttonDisabled : null]}
         disabled={!canExchange || exchanging}
         onPress={onExchange}
       >
-        {buttonLabel}
-      </Button>
+        <Text style={[styles.buttonText, !canExchange || exchanging ? styles.buttonTextDisabled : null]}>{buttonLabel}</Text>
+        <Text style={[styles.buttonArrow, !canExchange || exchanging ? styles.buttonTextDisabled : null]}>→</Text>
+      </Pressable>
 
       <Text style={styles.exchangeInfo}>
         티켓 {per}장이 <Text style={styles.exchangeStrong}>토스포인트</Text>로 지급돼요 · 실제 돈처럼 써요
@@ -94,10 +93,11 @@ export function TicketBalanceVoucher({
 const styles = StyleSheet.create({
   balanceCard: {
     position: 'relative',
-    borderRadius: 20,
+    borderRadius: 0,
     overflow: 'hidden',
-    backgroundColor: '#3157D5',
-    borderWidth: 0,
+    backgroundColor: '#171717',
+    borderWidth: 1,
+    borderColor: '#171717',
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 18,
@@ -110,22 +110,20 @@ const styles = StyleSheet.create({
   balanceAccent: {
     position: 'absolute',
     top: 0,
-    left: 20,
-    width: 52,
-    height: 5,
-    borderBottomLeftRadius: 5,
-    borderBottomRightRadius: 5,
-    backgroundColor: '#F6D45D',
+    left: 0,
+    width: 10,
+    bottom: 0,
+    backgroundColor: '#A52822',
   },
-  balanceOrb: {
+  balanceWatermark: {
     position: 'absolute',
-    width: 190,
-    height: 190,
-    borderRadius: 95,
-    right: -72,
-    bottom: -82,
-    backgroundColor: '#FF6B4A',
-    opacity: 0.88,
+    right: -12,
+    top: 50,
+    color: 'rgba(255,255,255,0.06)',
+    fontSize: 78,
+    lineHeight: 84,
+    fontWeight: '900',
+    letterSpacing: -5,
   },
   balanceHeader: {
     flexDirection: 'row',
@@ -164,8 +162,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   exchangeBadge: {
-    borderRadius: 999,
-    backgroundColor: '#F6D45D',
+    borderRadius: 0,
+    backgroundColor: '#F5EDDA',
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -202,11 +200,35 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.24)',
   },
   ticketDotFilled: {
-    backgroundColor: '#F6D45D',
+    backgroundColor: '#A52822',
   },
   button: {
     width: '100%',
     marginTop: 16,
+    minHeight: 58,
+    backgroundColor: '#A52822',
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  buttonDisabled: {
+    backgroundColor: '#D8D3C7',
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '900',
+  },
+  buttonArrow: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: '500',
+  },
+  buttonTextDisabled: {
+    color: '#8A857D',
   },
   exchangeInfo: {
     marginTop: 12,

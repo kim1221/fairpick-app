@@ -57,7 +57,7 @@ const INK = '#F7F5EF';
 const INK_BOTTOM = '#EFECE4';
 const SURFACE = '#FFFFFF';
 const LINE = '#DDD8CE';
-const GOLD = '#3157D5';
+const GOLD = '#A52822';
 const TEXT = '#171717';
 const MUTED = '#6F6B65';
 const MUTED_2 = '#817C74';
@@ -83,25 +83,21 @@ function createStyles(a: Adaptive) {
     },
     header: {
       paddingHorizontal: 22,
-      paddingBottom: 8,
+      paddingBottom: 10,
     },
     nav: {
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-end',
       justifyContent: 'space-between',
+      paddingBottom: 9,
+      borderBottomWidth: 2,
+      borderBottomColor: '#171717',
     },
     brand: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
+      flex: 1,
     },
     mark: {
-      width: 25,
-      height: 25,
-      borderRadius: 6,
-      backgroundColor: GOLD,
-      alignItems: 'center',
-      justifyContent: 'center',
+      display: 'none',
     },
     markText: {
       color: '#FFFFFF',
@@ -111,17 +107,27 @@ function createStyles(a: Adaptive) {
     },
     name: {
       color: TEXT,
-      fontSize: 17,
-      lineHeight: 23,
+      fontSize: 32,
+      lineHeight: 30,
+      fontWeight: '900',
+      letterSpacing: -1.8,
+      fontFamily: 'Noto Serif KR',
+    },
+    issue: {
+      marginTop: 7,
+      color: TEXT,
+      fontSize: 9.5,
+      lineHeight: 13,
       fontWeight: '800',
+      letterSpacing: 1.2,
     },
     ticketChip: {
-      height: 36,
-      borderRadius: 999,
-      paddingHorizontal: 12,
+      height: 39,
+      borderRadius: 2,
+      paddingHorizontal: 10,
       borderWidth: 1,
-      borderColor: '#D8D2C7',
-      backgroundColor: '#FFFFFF',
+      borderColor: '#171717',
+      backgroundColor: '#F7F5EF',
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
@@ -599,7 +605,7 @@ function HomePageInner() {
     if (likes?.items.some((item) => item.id === card.eventId)) {
       await dialog.openAlert({
         title: '이미 저장돼 있어요',
-        description: '여권의 ‘가고 싶어요’에서 다시 볼 수 있어요.',
+        description: '컬렉션의 ‘저장’에서 다시 볼 수 있어요.',
       });
       return;
     }
@@ -616,7 +622,7 @@ function HomePageInner() {
     userEventService.logEventSave(card.eventId).catch(() => {});
     await dialog.openAlert({
       title: '저장했어요',
-      description: '여권의 ‘가고 싶어요’에서 다시 볼 수 있어요.',
+      description: '컬렉션의 ‘저장’에서 다시 볼 수 있어요.',
     });
   }, [dialog, openedCard]);
 
@@ -644,10 +650,8 @@ function HomePageInner() {
         <View style={[styles.header, { paddingTop: 14 }]}>
           <View style={styles.nav}>
             <View style={styles.brand}>
-              <View style={styles.mark}>
-                <Text style={styles.markText}>C</Text>
-              </View>
-              <Text style={styles.name}>컬처카드</Text>
+              <Text style={styles.name}>CULTURE{`\n`}CARD</Text>
+              <Text style={styles.issue}>SEOUL · DAILY EDITION · 07.11.2026</Text>
             </View>
             <Pressable style={styles.ticketChip} onPress={() => navigation.navigate('/points' as never)}>
               <Icon name="icon-ticket-mono" size={15} color={GOLD} />
@@ -723,7 +727,7 @@ function HomePageInner() {
               <CultureCardStatePanel
                 label="오늘 완료"
                 title={statusCopy?.title ?? '오늘 컬처카드 50장을 모두 열었어요'}
-                description={statusCopy?.description ?? '공개한 카드는 여권에서 다시 볼 수 있어요.'}
+                description={statusCopy?.description ?? '공개한 카드는 컬렉션에서 다시 볼 수 있어요.'}
                 tone="success"
               />
             ) : null}

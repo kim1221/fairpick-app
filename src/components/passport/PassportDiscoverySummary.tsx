@@ -72,12 +72,13 @@ export function PassportDiscoverySummary({ passport }: { passport: PassportRespo
 
 const styles = StyleSheet.create({
   section: {
-    marginTop: 22,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E9C63E',
-    backgroundColor: '#F6D45D',
-    padding: 18,
+    marginTop: 18,
+    marginBottom: 22,
+    borderTopWidth: 3,
+    borderBottomWidth: 1,
+    borderColor: '#171717',
+    backgroundColor: '#EFE9D8',
+    paddingVertical: 14,
   },
   headingRow: {
     flexDirection: 'row',
@@ -86,7 +87,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   eyebrow: {
-    color: '#3157D5',
+    color: '#A52822',
     fontSize: 10.5,
     lineHeight: 14,
     letterSpacing: 2,
@@ -98,20 +99,19 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 24,
     fontWeight: '900',
+    fontFamily: 'Noto Serif KR',
   },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#171717',
-    backgroundColor: '#171717',
+    borderRadius: 0,
+    backgroundColor: '#A52822',
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   badgeMark: {
-    color: '#F6D45D',
+    color: '#F5EDDA',
     fontSize: 11,
     fontWeight: '900',
   },
@@ -124,8 +124,10 @@ const styles = StyleSheet.create({
     marginTop: 18,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.48)',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#171717',
+    backgroundColor: 'transparent',
     paddingVertical: 13,
   },
   metric: {
@@ -135,7 +137,7 @@ const styles = StyleSheet.create({
   metricDivider: {
     width: 1,
     height: 32,
-    backgroundColor: 'rgba(23,23,23,0.16)',
+    backgroundColor: '#171717',
   },
   metricNumber: {
     color: TEXT,
@@ -165,8 +167,10 @@ const styles = StyleSheet.create({
   collectionChip: {
     flex: 1,
     minHeight: 68,
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
+    borderRadius: 0,
+    borderWidth: 1,
+    borderColor: '#171717',
+    backgroundColor: '#F7F5EF',
     padding: 12,
     justifyContent: 'space-between',
   },
@@ -176,7 +180,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   collectionValue: {
-    color: '#3157D5',
+    color: '#A52822',
     fontSize: 20,
     lineHeight: 23,
     fontWeight: '900',

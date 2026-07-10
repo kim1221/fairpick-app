@@ -25,28 +25,28 @@ const stamps = (count: number): TestStamp[] =>
   }));
 
 describe('passport logic', () => {
-  test('describes every segment as a passport page', () => {
+  test('describes every segment as a collection story', () => {
     expect(getPassportSectionCopy('discovered')).toMatchObject({
-      eyebrow: 'ENTRY CARDS',
-      title: '발견한 카드',
-      description: '광고를 보고 발급받은 문화 카드',
+      eyebrow: 'OPENED STORIES',
+      title: '공개한 문화',
+      description: '광고를 보고 전체 내용을 확인한 카드',
     });
     expect(getPassportSectionCopy('visited')).toMatchObject({
-      eyebrow: 'PASSPORT STAMPS',
-      title: '다녀왔어요',
-      description: '다녀온 문화에 남긴 도장',
+      eyebrow: 'VISITED STORIES',
+      title: '직접 다녀온 문화',
+      description: '방문한 카드에 남긴 기록',
     });
     expect(getPassportSectionCopy('wishlist')).toMatchObject({
-      eyebrow: 'TRAVEL PLAN',
-      title: '가고 싶어요',
-      description: '다음에 들를 문화 일정',
+      eyebrow: 'SAVED STORIES',
+      title: '저장한 문화',
+      description: '다음에 보고 싶은 문화 일정',
     });
   });
 
   test('keeps tab labels short while counts change', () => {
-    expect(getPassportTabLabel('discovered', 67)).toBe('발견한 카드 67');
-    expect(getPassportTabLabel('visited', 2)).toBe('다녀왔어요 2');
-    expect(getPassportTabLabel('wishlist', 3)).toBe('가고 싶어요 3');
+    expect(getPassportTabLabel('discovered', 67)).toBe('공개한 문화 67');
+    expect(getPassportTabLabel('visited', 2)).toBe('직접 다녀온 문화 2');
+    expect(getPassportTabLabel('wishlist', 3)).toBe('저장한 문화 3');
   });
 
   test('builds discovery progress with the next region milestone', () => {

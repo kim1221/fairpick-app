@@ -116,23 +116,23 @@ export function getPassportDiscoverySummary(input: {
 
 const SECTION_COPY: Record<PassportSegment, PassportSectionCopy> = {
   discovered: {
-    eyebrow: 'ENTRY CARDS',
-    title: '발견한 카드',
-    description: '광고를 보고 발급받은 문화 카드',
-    emptyTitle: '아직 받은 카드가 없어요',
-    emptyDescription: '홈에서 광고를 보면 문화 카드가 발급돼요',
+    eyebrow: 'OPENED STORIES',
+    title: '공개한 문화',
+    description: '광고를 보고 전체 내용을 확인한 카드',
+    emptyTitle: '아직 공개한 문화가 없어요',
+    emptyDescription: '오늘 탭에서 광고를 보면 첫 카드가 여기에 실려요',
   },
   visited: {
-    eyebrow: 'PASSPORT STAMPS',
-    title: '다녀왔어요',
-    description: '다녀온 문화에 남긴 도장',
+    eyebrow: 'VISITED STORIES',
+    title: '직접 다녀온 문화',
+    description: '방문한 카드에 남긴 기록',
     emptyTitle: '아직 도장이 없어요',
     emptyDescription: '다녀온 문화를 도장으로 남겨요',
   },
   wishlist: {
-    eyebrow: 'TRAVEL PLAN',
-    title: '가고 싶어요',
-    description: '다음에 들를 문화 일정',
+    eyebrow: 'SAVED STORIES',
+    title: '저장한 문화',
+    description: '다음에 보고 싶은 문화 일정',
     emptyTitle: '아직 가고 싶은 문화가 없어요',
     emptyDescription: '마음에 드는 카드를 저장해 두세요',
   },
@@ -194,7 +194,7 @@ export function getStampBookMeta(
     endOrdinal,
     hasNewerBook: normalizedBookIndex > 1,
     hasOlderBook: normalizedBookIndex < totalBooks,
-    label: `문화 여권 ${volumeNumber}권`,
+    label: `방문 기록 ${volumeNumber}권`,
     rangeLabel: normalizedVisitedCount === 0 ? '아직 도장이 없어요' : `${startOrdinal}-${endOrdinal}번째 도장`,
   };
 }

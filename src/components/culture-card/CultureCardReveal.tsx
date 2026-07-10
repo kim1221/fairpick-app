@@ -6,7 +6,6 @@ import type { Card } from '../../services/cardsService';
 const SURFACE = '#FFFFFF';
 const INK = '#211F1B';
 const SUB = '#69645B';
-const GOLD = '#3157D5';
 const RED = '#B43A27';
 const LINE = 'rgba(33,31,27,0.14)';
 const DARK_TEXT = '#171717';
@@ -116,39 +115,43 @@ export function CultureCardReveal({ openedCard, onDetail, onNext, onSave }: Cult
 const styles = StyleSheet.create({
   wrap: {
     paddingHorizontal: 22,
-    paddingTop: 10,
+    paddingTop: 14,
   },
   openedHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    paddingTop: 8,
+    marginBottom: 10,
+    borderTopWidth: 3,
+    borderTopColor: '#171717',
   },
   openedEyebrow: {
     color: DARK_TEXT,
-    fontSize: 19,
-    lineHeight: 26,
+    fontSize: 22,
+    lineHeight: 29,
     fontWeight: '900',
     letterSpacing: -0.5,
+    fontFamily: 'Noto Serif KR',
   },
   rewardPill: {
-    borderRadius: 999,
-    backgroundColor: '#E9EDFF',
+    borderRadius: 0,
+    backgroundColor: '#A52822',
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   rewardPillText: {
-    color: '#3157D5',
+    color: '#FFFFFF',
     fontSize: 11.5,
     lineHeight: 16,
     fontWeight: '900',
   },
   card: {
-    borderRadius: 22,
+    borderRadius: 0,
     overflow: 'hidden',
     backgroundColor: SURFACE,
     borderWidth: 1,
-    borderColor: '#DDD8CE',
+    borderColor: '#171717',
   },
   copy: {
     paddingHorizontal: 20,
@@ -161,7 +164,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   category: {
-    color: GOLD,
+    color: '#A52822',
     fontSize: 12,
     lineHeight: 17,
     fontWeight: '900',
@@ -175,10 +178,11 @@ const styles = StyleSheet.create({
   title: {
     marginTop: 7,
     color: INK,
-    fontSize: 25,
-    lineHeight: 33,
+    fontSize: 28,
+    lineHeight: 36,
     fontWeight: '900',
     letterSpacing: -1,
+    fontFamily: 'Noto Serif KR',
   },
   venue: {
     marginTop: 7,
@@ -196,7 +200,7 @@ const styles = StyleSheet.create({
   },
   image: {
     width: '100%',
-    height: 218,
+    height: 252,
     backgroundColor: '#D8D0C0',
   },
   imageFallback: {
@@ -264,18 +268,18 @@ const styles = StyleSheet.create({
   primaryButton: {
     flex: 1.7,
     height: 52,
-    borderRadius: 15,
-    backgroundColor: '#3157D5',
+    borderRadius: 0,
+    backgroundColor: '#A52822',
     alignItems: 'center',
     justifyContent: 'center',
   },
   outlineButton: {
     flex: 1,
     height: 52,
-    borderRadius: 15,
+    borderRadius: 0,
     borderWidth: 1,
-    borderColor: '#D8D2C7',
-    backgroundColor: '#FFFFFF',
+    borderColor: '#171717',
+    backgroundColor: '#F7F5EF',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

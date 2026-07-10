@@ -499,24 +499,24 @@ type CardNewsPalette = {
 
 const CARD_NEWS_PALETTES: Record<string, CardNewsPalette[]> = {
   전시: [
-    { background: '#3157D5', foreground: '#FFF8E8', accent: '#FFD65A' },
-    { background: '#EF684F', foreground: '#201A17', accent: '#FFE7A8' },
+    { background: '#EFE9D8', foreground: '#171717', accent: '#A52822' },
+    { background: '#D8D3C7', foreground: '#171717', accent: '#27264C' },
   ],
   공연: [
-    { background: '#7657D8', foreground: '#FFF9ED', accent: '#C9F36A' },
-    { background: '#E94F72', foreground: '#FFF8ED', accent: '#FFD45E' },
+    { background: '#171717', foreground: '#F3EDDE', accent: '#A52822' },
+    { background: '#70211F', foreground: '#F5EDDA', accent: '#171717' },
   ],
   팝업: [
-    { background: '#C9EF58', foreground: '#172017', accent: '#3157D5' },
-    { background: '#FF8E3C', foreground: '#251A13', accent: '#FFF0B8' },
+    { background: '#A52822', foreground: '#F5EDDA', accent: '#171717' },
+    { background: '#E1C9B5', foreground: '#171717', accent: '#A52822' },
   ],
   축제: [
-    { background: '#35A7E8', foreground: '#10202A', accent: '#FFE05F' },
-    { background: '#FFB83E', foreground: '#251B0F', accent: '#E94F72' },
+    { background: '#D1A84B', foreground: '#171717', accent: '#70211F' },
+    { background: '#27264C', foreground: '#F5EDDA', accent: '#A52822' },
   ],
   기타: [
-    { background: '#38B99A', foreground: '#10221E', accent: '#FFF0A6' },
-    { background: '#F1C8DD', foreground: '#2A1922', accent: '#7657D8' },
+    { background: '#D8D3C7', foreground: '#171717', accent: '#A52822' },
+    { background: '#171717', foreground: '#F5EDDA', accent: '#D1A84B' },
   ],
 };
 
