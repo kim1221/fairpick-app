@@ -42,13 +42,22 @@ function createStyles() {
     },
     navTitle: {
       color: ON_BG,
-      fontSize: 24,
-      lineHeight: 31,
-      fontWeight: '800',
-      marginBottom: 4,
+      fontSize: 29,
+      lineHeight: 36,
+      fontWeight: '900',
+      letterSpacing: -1,
+      marginTop: 5,
+      marginBottom: 7,
+    },
+    navEyebrow: {
+      color: '#3157D5',
+      fontSize: 10.5,
+      lineHeight: 14,
+      fontWeight: '900',
+      letterSpacing: 1.6,
     },
     navSubtitle: {
-      marginBottom: 18,
+      marginBottom: 20,
       color: ON_BG_MUTED,
       fontSize: 13,
       lineHeight: 19,
@@ -202,8 +211,9 @@ function PointsPage() {
       >
         <ScrollViewInertialBackground topColor={BG} bottomColor={BG} />
 
-        <Text style={styles.navTitle}>포인트</Text>
-        <Text style={styles.navSubtitle}>문화 티켓을 모아 바로 쓸 수 있는 토스포인트로 바꿔요.</Text>
+        <Text style={styles.navEyebrow}>CULTURE WALLET</Text>
+        <Text style={styles.navTitle}>모은 티켓,{`\n`}바로 포인트로</Text>
+        <Text style={styles.navSubtitle}>문화를 발견할수록 내 지갑도 가벼워지지 않게.</Text>
 
         {showInitialLoading ? (
           <View style={styles.loadingBox}>

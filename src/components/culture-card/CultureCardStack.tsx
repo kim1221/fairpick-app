@@ -57,12 +57,17 @@ export function CultureCardStack({
   return (
     <View style={styles.section}>
       <View style={styles.heading}>
-        <Text style={styles.eyebrow}>오늘의 컬처카드</Text>
-        <Text style={styles.title}>오늘, 어떤 문화를 열까요?</Text>
+        <View style={styles.headingTop}>
+          <Text style={styles.eyebrow}>TODAY’S DROP</Text>
+          <View style={styles.dailyPill}>
+            <Text style={styles.dailyPillText}>오늘 {dailyOpenCount} · 최대 {dailyOpenLimit}</Text>
+          </View>
+        </View>
+        <Text style={styles.title}>오늘의 문화,{`\n`}한 장씩 발견해요</Text>
         <Text style={styles.subtitle}>
           {userRegion
-            ? `${userRegion} 근처에서 고른 카드예요. 한 장을 열면 새로운 카드가 채워져요.`
-            : '지금 가볼 만한 문화를 골랐어요. 한 장을 열면 새로운 카드가 채워져요.'}
+            ? `${userRegion} 근처의 장면을 골랐어요. 넘겨보고 마음 가는 한 장을 열어보세요.`
+            : '지금 가볼 만한 장면을 골랐어요. 넘겨보고 마음 가는 한 장을 열어보세요.'}
         </Text>
       </View>
 
@@ -103,16 +108,18 @@ export function CultureCardStack({
                 pointerEvents="none"
                 style={[styles.shapeSmall, { borderColor: palette.accent }]}
               />
+              <Text
+                pointerEvents="none"
+                style={[styles.posterLetter, { color: palette.accent }]}
+              >
+                {card.category?.trim().slice(0, 1) || 'C'}
+              </Text>
 
               <View style={styles.cardTop}>
-                <View style={[styles.numberBadge, { backgroundColor: palette.accent }]}>
-                  <Text style={[styles.numberText, { color: palette.background }]}>
-                    {String(index + 1).padStart(2, '0')}
-                  </Text>
-                </View>
+                <Text style={[styles.cardSerial, { color: palette.foreground }]}>CC / {String(index + 1).padStart(2, '0')}</Text>
                 <View style={styles.selectionLabel}>
                     <Text style={[styles.selectionText, { color: palette.foreground }]}>
-                    {selected ? '선택됨' : '선택하기'}
+                    {selected ? '지금 이 카드' : '넘겨보기'}
                   </Text>
                   <View style={[
                     styles.selectionDot,
@@ -138,7 +145,7 @@ export function CultureCardStack({
                   {meta}
                 </Text>
                 <Text style={[styles.lockedCopy, { color: palette.foreground }]}>
-                  {card.isRevisit ? '다시 추천된 카드 · 광고 후 상세 확인' : '광고 후 행사명과 장소 공개'}
+                  {card.isRevisit ? '다시 만난 장면 · 광고 후 전체 공개' : '행사명과 장소는 광고 뒤에 공개돼요'}
                 </Text>
               </View>
             </Pressable>
@@ -155,31 +162,20 @@ export function CultureCardStack({
         ))}
       </View>
 
-      <View style={styles.progressRow}>
-        <Text style={styles.progressStrong}>오늘 {dailyOpenCount}장 공개</Text>
-        <Text style={styles.progressMuted}>최대 {dailyOpenLimit}장까지</Text>
-      </View>
-      <View style={styles.progressTrack}>
-        <View
-          style={[
-            styles.progressFill,
-            { width: `${Math.min(100, Math.round((dailyOpenCount / Math.max(1, dailyOpenLimit)) * 100))}%` },
-          ]}
-        />
-      </View>
-
       <Pressable
         accessibilityRole="button"
         style={[styles.cta, disabled ? styles.ctaDisabled : null]}
         onPress={onOpen}
         disabled={disabled}
       >
-        <Icon name="icon-play-mono" size={17} color={disabled ? '#A39F98' : '#FFFFFF'} />
+        <View style={styles.ctaIcon}>
+          <Icon name="icon-play-mono" size={15} color={disabled ? '#A39F98' : '#171717'} />
+        </View>
         <Text style={[styles.ctaText, disabled ? styles.ctaTextDisabled : null]}>
           {loading ? '광고 준비 중' : actionLabel}
         </Text>
       </Pressable>
-      <Text style={styles.hint}>광고가 끝나면 이벤트 정보와 문화 티켓을 함께 받아요</Text>
+      <Text style={styles.hint}>광고가 끝나면 행사 전체 정보와 문화 티켓을 함께 받아요</Text>
     </View>
   );
 }
@@ -191,25 +187,42 @@ const styles = StyleSheet.create({
   heading: {
     paddingHorizontal: 22,
   },
+  headingTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   eyebrow: {
     color: BLUE,
-    fontSize: 13,
+    fontSize: 11,
     lineHeight: 18,
     fontWeight: '900',
+    letterSpacing: 1.6,
+  },
+  dailyPill: {
+    borderRadius: 999,
+    backgroundColor: '#171717',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  dailyPillText: {
+    color: '#FFFFFF',
+    fontSize: 10.5,
+    fontWeight: '800',
   },
   title: {
     marginTop: 5,
     color: INK,
-    fontSize: 27,
-    lineHeight: 35,
+    fontSize: 31,
+    lineHeight: 37,
     fontWeight: '900',
     letterSpacing: -1.2,
   },
   subtitle: {
     marginTop: 6,
     color: MUTED,
-    fontSize: 13.5,
-    lineHeight: 19,
+    fontSize: 12.5,
+    lineHeight: 18,
     fontWeight: '600',
   },
   cardRail: {
@@ -219,12 +232,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   newsCard: {
-    height: 276,
-    borderRadius: 24,
-    padding: 18,
+    height: 318,
+    borderRadius: 28,
+    padding: 20,
     overflow: 'hidden',
     justifyContent: 'space-between',
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: 'transparent',
     shadowColor: '#1A1712',
     shadowOffset: { width: 0, height: 8 },
@@ -233,18 +246,19 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   newsCardSelected: {
-    borderColor: '#171717',
+    borderColor: '#FFFFFF',
+    transform: [{ translateY: -3 }],
   },
   newsCardPressed: {
     transform: [{ scale: 0.985 }],
   },
   shapeLarge: {
     position: 'absolute',
-    width: 230,
-    height: 230,
-    borderRadius: 115,
-    right: -105,
-    top: 28,
+    width: 250,
+    height: 250,
+    borderRadius: 125,
+    right: -90,
+    top: 48,
   },
   shapeSmall: {
     position: 'absolute',
@@ -253,7 +267,7 @@ const styles = StyleSheet.create({
     borderRadius: 43,
     borderWidth: 18,
     left: -28,
-    bottom: 58,
+    bottom: 42,
     opacity: 0.28,
   },
   cardTop: {
@@ -261,17 +275,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  numberBadge: {
-    width: 36,
-    height: 26,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  numberText: {
+  cardSerial: {
     fontSize: 11,
     lineHeight: 15,
     fontWeight: '900',
+    letterSpacing: 1.4,
+    opacity: 0.8,
+  },
+  posterLetter: {
+    position: 'absolute',
+    right: 8,
+    top: 48,
+    fontSize: 176,
+    lineHeight: 190,
+    fontWeight: '900',
+    opacity: 0.22,
   },
   selectionLabel: {
     flexDirection: 'row',
@@ -291,17 +309,17 @@ const styles = StyleSheet.create({
   },
   cardCopy: {
     marginTop: 'auto',
-    marginBottom: 16,
+    marginBottom: 18,
   },
   cardEyebrow: {
-    fontSize: 12.5,
+    fontSize: 11.5,
     lineHeight: 18,
     fontWeight: '900',
   },
   cardHeadline: {
     marginTop: 9,
-    fontSize: 24,
-    lineHeight: 31,
+    fontSize: 27,
+    lineHeight: 34,
     fontWeight: '900',
     letterSpacing: -1.1,
   },
@@ -338,44 +356,12 @@ const styles = StyleSheet.create({
     width: 18,
     backgroundColor: BLUE,
   },
-  progressRow: {
-    marginTop: 4,
-    paddingHorizontal: 22,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  progressStrong: {
-    color: INK,
-    fontSize: 12.5,
-    lineHeight: 18,
-    fontWeight: '900',
-  },
-  progressMuted: {
-    color: MUTED,
-    fontSize: 11.5,
-    lineHeight: 17,
-    fontWeight: '600',
-  },
-  progressTrack: {
-    marginHorizontal: 22,
-    marginTop: 8,
-    height: 5,
-    borderRadius: 3,
-    overflow: 'hidden',
-    backgroundColor: '#DDD9CF',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 3,
-    backgroundColor: BLUE,
-  },
   cta: {
     marginHorizontal: 22,
     marginTop: 13,
     height: 54,
     borderRadius: 17,
-    backgroundColor: INK,
+    backgroundColor: '#3157D5',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -389,6 +375,14 @@ const styles = StyleSheet.create({
     fontSize: 15.5,
     lineHeight: 21,
     fontWeight: '900',
+  },
+  ctaIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#F6D45D',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   ctaTextDisabled: {
     color: '#A39F98',

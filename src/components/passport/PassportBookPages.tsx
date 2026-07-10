@@ -305,23 +305,20 @@ const styles = StyleSheet.create({
   },
   indexRail: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 20,
     paddingHorizontal: 20,
     marginBottom: 12,
   },
   indexTab: {
-    flex: 1,
-    minHeight: 38,
-    borderRadius: 999,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#DED9CF',
+    minHeight: 36,
+    backgroundColor: 'transparent',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
   },
   indexTabActive: {
-    backgroundColor: '#3157D5',
-    borderColor: '#3157D5',
+    borderBottomColor: '#3157D5',
   },
   indexText: {
     color: '#716D66',
@@ -330,6 +327,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   indexTextActive: {
-    color: '#FFFFFF',
+    color: '#3157D5',
   },
 });

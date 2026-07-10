@@ -82,9 +82,15 @@ function fmtIssueMonth(monthKey: string | null): string {
 export function PassportCoverPage({
   width,
   passportNo,
+  discoveredCount,
+  wishlistCount,
+  visitedCount,
 }: {
   width: number;
   passportNo: string;
+  discoveredCount: number;
+  wishlistCount: number;
+  visitedCount: number;
 }) {
   return (
     <View style={[styles.page, { width }]}>
@@ -100,17 +106,30 @@ export function PassportCoverPage({
         <View style={[styles.corner, styles.cornerBR]} pointerEvents="none" />
 
         <View style={styles.coverTop}>
-          <Text style={styles.coverKicker}>REPUBLIC OF CULTURE</Text>
+          <Text style={styles.coverKicker}>MY CULTURE ARCHIVE</Text>
         </View>
 
-        <View style={styles.coverEmblemWrap}>
-          <View style={styles.coverEmblemRing}>
-            <PassportEmblem size={46} color={GOLD_SOFT} />
+        <View style={styles.coverCollage}>
+          <View style={styles.coverEmblemCard}>
+            <PassportEmblem size={38} color="#171717" />
+            <Text style={styles.coverEmblemLabel}>CULTURE{`\n`}CARD</Text>
+          </View>
+          <View style={[styles.coverStatCard, styles.coverStatCoral]}>
+            <Text style={styles.coverStatNumber}>{discoveredCount}</Text>
+            <Text style={styles.coverStatLabel}>발견</Text>
+          </View>
+          <View style={[styles.coverStatCard, styles.coverStatYellow]}>
+            <Text style={styles.coverStatNumber}>{wishlistCount}</Text>
+            <Text style={styles.coverStatLabel}>예정</Text>
+          </View>
+          <View style={[styles.coverStatCard, styles.coverStatMint]}>
+            <Text style={styles.coverStatNumber}>{visitedCount}</Text>
+            <Text style={styles.coverStatLabel}>도장</Text>
           </View>
         </View>
 
         <View style={styles.coverBottom}>
-          <Text style={styles.coverTitle}>문 화 여 권</Text>
+          <Text style={styles.coverTitle}>나의 문화 기록</Text>
           <Text style={styles.coverEnTitle}>CULTURE PASSPORT</Text>
           <View style={styles.coverDivider} />
           <Text style={styles.coverNo}>No. {passportNo} · SEOUL · 2026</Text>
@@ -402,20 +421,67 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
     fontWeight: '700',
   },
-  coverEmblemWrap: {
+  coverCollage: {
     flex: 1,
-    alignItems: 'center',
+    position: 'relative',
     justifyContent: 'center',
+    marginHorizontal: 16,
   },
-  coverEmblemRing: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    borderWidth: 1.5,
-    borderColor: 'rgba(203,161,94,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(203,161,94,0.06)',
+  coverEmblemCard: {
+    position: 'absolute',
+    left: 18,
+    top: 40,
+    width: 128,
+    height: 112,
+    borderRadius: 22,
+    padding: 16,
+    backgroundColor: '#F6D45D',
+    transform: [{ rotate: '-6deg' }],
+    justifyContent: 'space-between',
+  },
+  coverEmblemLabel: {
+    color: '#171717',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+  },
+  coverStatCard: {
+    position: 'absolute',
+    width: 86,
+    height: 80,
+    borderRadius: 19,
+    padding: 13,
+    justifyContent: 'space-between',
+  },
+  coverStatCoral: {
+    right: 24,
+    top: 22,
+    backgroundColor: '#FF6B4A',
+    transform: [{ rotate: '7deg' }],
+  },
+  coverStatYellow: {
+    right: 2,
+    top: 105,
+    backgroundColor: '#F6D45D',
+    transform: [{ rotate: '-4deg' }],
+  },
+  coverStatMint: {
+    left: 126,
+    top: 126,
+    backgroundColor: '#80D7B2',
+    transform: [{ rotate: '5deg' }],
+  },
+  coverStatNumber: {
+    color: '#171717',
+    fontSize: 26,
+    lineHeight: 29,
+    fontWeight: '900',
+  },
+  coverStatLabel: {
+    color: '#171717',
+    fontSize: 11,
+    fontWeight: '800',
   },
   coverBottom: {
     alignItems: 'center',
@@ -426,8 +492,7 @@ const styles = StyleSheet.create({
     fontSize: 27,
     lineHeight: 34,
     fontWeight: '900',
-    letterSpacing: 2,
-    fontFamily: 'Noto Serif KR',
+    letterSpacing: -0.8,
   },
   coverEnTitle: {
     marginTop: 8,

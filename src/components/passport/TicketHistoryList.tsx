@@ -59,7 +59,8 @@ function formatAmount(amount: number): string {
 export function TicketHistoryList({ items, loading, error = false }: TicketHistoryListProps) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>최근 내역</Text>
+      <Text style={styles.sectionKicker}>TICKET LOG</Text>
+      <Text style={styles.sectionTitle}>최근 티켓 기록</Text>
 
       <View style={styles.list}>
         {loading ? (
@@ -103,18 +104,20 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   sectionTitle: {
-    marginBottom: 12,
+    marginTop: 4,
+    marginBottom: 8,
     color: ON_INK,
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: '900',
   },
+  sectionKicker: {
+    color: '#3157D5',
+    fontSize: 10.5,
+    fontWeight: '900',
+    letterSpacing: 1.5,
+  },
   list: {
-    borderWidth: 1,
-    borderColor: LINE,
-    borderRadius: 18,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 14,
-    overflow: 'hidden',
+    paddingHorizontal: 0,
   },
   row: {
     minHeight: 64,
@@ -122,7 +125,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 13,
     paddingVertical: 13,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: LINE,
   },
   iconBox: {

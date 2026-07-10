@@ -3,30 +3,18 @@ import { StyleSheet, Text, View } from 'react-native';
 import type { PassportResponse } from '../../services/passportService';
 import { getPassportDiscoverySummary } from '../../pages/passportLogic';
 
-const PANEL = '#FFFFFF';
-const LINE = '#DED9CF';
-const GOLD = '#3157D5';
-const GOLD_SOFT = '#3157D5';
 const TEXT = '#171717';
 const MUTED = '#716D66';
-const TRACK = '#E8E5DE';
-const NAVY = '#EEF3FF';
 
-function ProgressRow({ label, value, goal, progress }: {
+function CollectionChip({ label, value, goal }: {
   label: string;
   value: number;
   goal: number;
-  progress: number;
 }) {
   return (
-    <View style={styles.progressBlock}>
-      <View style={styles.progressHead}>
-        <Text style={styles.progressLabel}>{label}</Text>
-        <Text style={styles.progressValue}>{value} / {goal}</Text>
-      </View>
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
-      </View>
+    <View style={styles.collectionChip}>
+      <Text style={styles.collectionLabel}>{label}</Text>
+      <Text style={styles.collectionValue}>{value}<Text style={styles.collectionGoal}>/{goal}</Text></Text>
     </View>
   );
 }
@@ -74,18 +62,10 @@ export function PassportDiscoverySummary({ passport }: { passport: PassportRespo
 
       <Text style={styles.favorite}>{favoriteCopy}</Text>
 
-      <ProgressRow
-        label="지역 수집"
-        value={summary.regionsDiscovered}
-        goal={summary.regionGoal}
-        progress={summary.regionProgress}
-      />
-      <ProgressRow
-        label="장르 수집"
-        value={summary.categoriesDiscovered}
-        goal={summary.categoryGoal}
-        progress={summary.categoryProgress}
-      />
+      <View style={styles.collectionRow}>
+        <CollectionChip label="지역 수집" value={summary.regionsDiscovered} goal={summary.regionGoal} />
+        <CollectionChip label="장르 수집" value={summary.categoriesDiscovered} goal={summary.categoryGoal} />
+      </View>
     </View>
   );
 }
@@ -95,8 +75,8 @@ const styles = StyleSheet.create({
     marginTop: 22,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: LINE,
-    backgroundColor: PANEL,
+    borderColor: '#E9C63E',
+    backgroundColor: '#F6D45D',
     padding: 18,
   },
   headingRow: {
@@ -106,7 +86,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   eyebrow: {
-    color: GOLD,
+    color: '#3157D5',
     fontSize: 10.5,
     lineHeight: 14,
     letterSpacing: 2,
@@ -125,18 +105,18 @@ const styles = StyleSheet.create({
     gap: 5,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#D8E2FF',
-    backgroundColor: '#EEF3FF',
+    borderColor: '#171717',
+    backgroundColor: '#171717',
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   badgeMark: {
-    color: GOLD_SOFT,
+    color: '#F6D45D',
     fontSize: 11,
     fontWeight: '900',
   },
   badgeText: {
-    color: GOLD_SOFT,
+    color: '#FFFFFF',
     fontSize: 11.5,
     fontWeight: '900',
   },
@@ -145,7 +125,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 14,
-    backgroundColor: NAVY,
+    backgroundColor: 'rgba(255,255,255,0.48)',
     paddingVertical: 13,
   },
   metric: {
@@ -155,7 +135,7 @@ const styles = StyleSheet.create({
   metricDivider: {
     width: 1,
     height: 32,
-    backgroundColor: '#D8E2FF',
+    backgroundColor: 'rgba(23,23,23,0.16)',
   },
   metricNumber: {
     color: TEXT,
@@ -165,7 +145,7 @@ const styles = StyleSheet.create({
   },
   metricLabel: {
     marginTop: 3,
-    color: '#66749A',
+    color: '#5A5131',
     fontSize: 10.5,
     lineHeight: 14,
     fontWeight: '700',
@@ -177,34 +157,32 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
   },
-  progressBlock: {
-    marginTop: 13,
-  },
-  progressHead: {
+  collectionRow: {
+    marginTop: 14,
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    gap: 8,
   },
-  progressLabel: {
+  collectionChip: {
+    flex: 1,
+    minHeight: 68,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    padding: 12,
+    justifyContent: 'space-between',
+  },
+  collectionLabel: {
     color: TEXT,
-    fontSize: 12.5,
+    fontSize: 11,
     fontWeight: '800',
   },
-  progressValue: {
-    color: GOLD_SOFT,
-    fontSize: 11.5,
+  collectionValue: {
+    color: '#3157D5',
+    fontSize: 20,
+    lineHeight: 23,
     fontWeight: '900',
   },
-  progressTrack: {
-    marginTop: 7,
-    height: 6,
-    borderRadius: 999,
-    overflow: 'hidden',
-    backgroundColor: TRACK,
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 999,
-    backgroundColor: GOLD,
+  collectionGoal: {
+    color: '#716D66',
+    fontSize: 12,
   },
 });

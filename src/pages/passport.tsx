@@ -694,7 +694,15 @@ function PassportPage() {
 
   const renderBookPage = useCallback(({ item }: { item: PassportBookPage<SavedTicketItem, PassportStamp> }) => {
     if (item.type === 'cover') {
-      return <PassportCoverPage width={pageWidth} passportNo={passportNo} />;
+      return (
+        <PassportCoverPage
+          width={pageWidth}
+          passportNo={passportNo}
+          discoveredCount={discoveredCount}
+          wishlistCount={pendingSavedCount}
+          visitedCount={visitedCount}
+        />
+      );
     }
     if (item.type === 'identity') {
       return (
@@ -803,7 +811,8 @@ function PassportPage() {
       >
         <ScrollViewInertialBackground topColor={BG} bottomColor={BG} />
 
-        <Text style={styles.navTitle}>문화 여권</Text>
+        <Text style={styles.navEyebrow}>MY CULTURE ARCHIVE</Text>
+        <Text style={styles.navTitle}>모으고, 남기고,{`\n`}다시 꺼내보는 문화</Text>
 
         <PassportIndexRail
           items={bookmarkItems}
@@ -907,10 +916,19 @@ const styles = StyleSheet.create({
   },
   navTitle: {
     color: ON_BG,
-    fontSize: 24,
-    lineHeight: 31,
-    fontWeight: '800',
-    marginBottom: 12,
+    fontSize: 27,
+    lineHeight: 34,
+    fontWeight: '900',
+    letterSpacing: -1,
+    marginTop: 5,
+    marginBottom: 14,
+  },
+  navEyebrow: {
+    color: '#3157D5',
+    fontSize: 10.5,
+    lineHeight: 14,
+    fontWeight: '900',
+    letterSpacing: 1.6,
   },
   bookStage: {
     height: 400,
