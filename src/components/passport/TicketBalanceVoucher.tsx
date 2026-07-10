@@ -9,15 +9,12 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Button } from '@toss/tds-react-native';
 
-// 시안 네이비 잔액 카드 · 골드 · 토스블루
-const NAVY_TOP = '#20304F';
-const NAVY_MID = '#16233C';
-const GOLD = '#CBA15E';
-const GOLD_SOFT = '#DDB877';
-const CARD_LABEL = '#AEBBD6';
-const CARD_TITLE = '#F2ECDE';
+const GOLD = '#E5A62B';
+const GOLD_SOFT = '#F6C861';
+const CARD_LABEL = '#716D66';
+const CARD_TITLE = '#171717';
 const BLUE = '#3182F6';
-const ON_BG_MUTED = '#9A8F77';
+const ON_BG_MUTED = '#716D66';
 
 export interface TicketBalanceVoucherProps {
   ticketCount: number;
@@ -36,6 +33,7 @@ export function TicketBalanceVoucher({
   const exchangeableTimes = Math.floor(ticketCount / per);
   const canExchange = exchangeableTimes >= 1;
   const remainingTickets = Math.max(per - (ticketCount % per), 0);
+  const progress = ticketCount % per === 0 && ticketCount > 0 ? 1 : (ticketCount % per) / per;
 
   const helpLine = canExchange
     ? `${per}티켓 = 토스포인트 교환 · 지금 ${exchangeableTimes}번 바꿀 수 있어요`
@@ -51,11 +49,23 @@ export function TicketBalanceVoucher({
     <View>
       {/* 큰 잔액 카드(네이비) */}
       <View style={styles.balanceCard}>
-        <View style={styles.balanceHighlight} pointerEvents="none" />
-        <Text style={styles.balanceLabel}>내가 모은 문화 티켓</Text>
+        <View style={styles.balanceAccent} pointerEvents="none" />
+        <View style={styles.balanceHeader}>
+          <Text style={styles.balanceLabel}>내 문화 티켓</Text>
+          <View style={styles.exchangeBadge}>
+            <Text style={styles.exchangeBadgeText}>{exchangeableTimes}회 교환 가능</Text>
+          </View>
+        </View>
         <View style={styles.balanceRow}>
           <Text style={styles.balanceNumber} allowFontScaling={false}>{ticketCount}</Text>
           <Text style={styles.balanceUnit}>티켓</Text>
+        </View>
+        <View style={styles.nextRewardRow}>
+          <Text style={styles.nextRewardText}>{canExchange ? '지금 바로 교환할 수 있어요' : `다음 포인트까지 ${remainingTickets}티켓`}</Text>
+          <Text style={styles.nextRewardCount}>{Math.min(ticketCount % per || (canExchange ? per : 0), per)} / {per}</Text>
+        </View>
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
         </View>
         <Text style={styles.balanceHelp}>{helpLine}</Text>
       </View>
@@ -83,26 +93,32 @@ const styles = StyleSheet.create({
     position: 'relative',
     borderRadius: 20,
     overflow: 'hidden',
-    backgroundColor: NAVY_MID,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(203,161,94,0.30)',
+    borderColor: '#DED9CF',
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 18,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.4,
-    shadowRadius: 28,
-    elevation: 9,
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    elevation: 4,
   },
-  balanceHighlight: {
+  balanceAccent: {
     position: 'absolute',
     top: 0,
-    left: 0,
-    right: 0,
-    height: '58%',
-    backgroundColor: NAVY_TOP,
-    opacity: 0.9,
+    left: 20,
+    width: 52,
+    height: 5,
+    borderBottomLeftRadius: 5,
+    borderBottomRightRadius: 5,
+    backgroundColor: GOLD,
+  },
+  balanceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   balanceLabel: {
     color: CARD_LABEL,
@@ -122,7 +138,6 @@ const styles = StyleSheet.create({
     lineHeight: 50,
     fontWeight: '900',
     letterSpacing: -1,
-    fontFamily: 'Noto Serif KR',
   },
   balanceUnit: {
     color: GOLD_SOFT,
@@ -130,11 +145,50 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   balanceHelp: {
-    marginTop: 12,
-    color: GOLD,
+    marginTop: 10,
+    color: ON_BG_MUTED,
     fontSize: 12.5,
     lineHeight: 18,
     fontWeight: '700',
+  },
+  exchangeBadge: {
+    borderRadius: 999,
+    backgroundColor: '#EEF3FF',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  exchangeBadgeText: {
+    color: '#3157D5',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  nextRewardRow: {
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  nextRewardText: {
+    color: CARD_TITLE,
+    fontSize: 12.5,
+    fontWeight: '800',
+  },
+  nextRewardCount: {
+    color: '#3157D5',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  progressTrack: {
+    marginTop: 8,
+    height: 8,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: '#E8E5DE',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#3157D5',
   },
   button: {
     width: '100%',

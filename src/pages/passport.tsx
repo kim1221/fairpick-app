@@ -1,5 +1,4 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
-import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import { useDialog } from '@toss/tds-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -32,7 +31,6 @@ import { StampDetailSheet } from '../components/passport/StampDetailSheet';
 import { PassportDiscoverySummary } from '../components/passport/PassportDiscoverySummary';
 import type { SavedTicketItem, SaveButtonState, VisitButtonState } from '../components/saved/SavedTicketRow';
 import { SavedVisitToast, SavedVisitToastMessage } from '../components/saved/SavedVisitToast';
-import { TAG_TOKENS } from '../components/culture-card/tagKit';
 import type { EventCardData } from '../data/events';
 import { useAuth } from '../hooks/useAuth';
 import http from '../lib/http';
@@ -69,9 +67,9 @@ export const Route = createRoute('/passport', {
   component: PassportPage,
 });
 
-const BG = TAG_TOKENS.bg;
-const ON_BG = TAG_TOKENS.headText;
-const ON_BG_MUTED = TAG_TOKENS.navSub;
+const BG = '#F7F5EF';
+const ON_BG = '#171717';
+const ON_BG_MUTED = '#716D66';
 const GOLD = '#CBA15E';
 
 type OrderedLike = { id: string; timestamp: string };
@@ -194,7 +192,6 @@ function deriveIssueMonth(stamps: PassportStamp[]): string | null {
 }
 
 function PassportPage() {
-  const { top } = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const navigation = Route.useNavigation();
   const dialog = useDialog();
@@ -798,7 +795,7 @@ function PassportPage() {
     <View style={styles.container}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.content, { paddingTop: top + 18 }]}
+        contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={ON_BG_MUTED} />
@@ -808,6 +805,11 @@ function PassportPage() {
 
         <Text style={styles.navTitle}>문화 여권</Text>
 
+        <PassportIndexRail
+          items={bookmarkItems}
+          activeSection={activeBookmark}
+          onPress={handlePressBookmark}
+        />
         <View style={styles.bookStage}>
           <FlatList
             ref={bookListRef}
@@ -824,11 +826,6 @@ function PassportPage() {
               offset: pageWidth * index,
               index,
             })}
-          />
-          <PassportIndexRail
-            items={bookmarkItems}
-            activeSection={activeBookmark}
-            onPress={handlePressBookmark}
           />
         </View>
         <Text style={styles.bookHint}>책갈피를 누르거나 옆으로 넘겨요</Text>
@@ -905,18 +902,18 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    paddingBottom: 132,
+    paddingTop: 18,
+    paddingBottom: 124,
   },
   navTitle: {
     color: ON_BG,
     fontSize: 24,
     lineHeight: 31,
     fontWeight: '800',
-    fontFamily: 'Noto Serif KR',
-    marginBottom: 14,
+    marginBottom: 12,
   },
   bookStage: {
-    height: 520,
+    height: 400,
     marginHorizontal: -20,
     position: 'relative',
   },

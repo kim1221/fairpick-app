@@ -1,5 +1,14 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { Icon } from '@toss/tds-react-native';
 import type { LockedCardPreview } from '../../services/cardsService';
 
@@ -34,13 +43,22 @@ export function CultureCardStack({
   userRegion,
 }: CultureCardStackProps) {
   const { width } = useWindowDimensions();
-  const cardWidth = Math.min(302, width - 70);
+  const cardWidth = Math.min(286, width - 76);
+  const selectedIndex = Math.max(0, cards.findIndex((card) => card.cardToken === selectedToken));
+  const handleMomentumEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const nextIndex = Math.max(
+      0,
+      Math.min(cards.length - 1, Math.round(event.nativeEvent.contentOffset.x / (cardWidth + 12))),
+    );
+    const nextCard = cards[nextIndex];
+    if (nextCard && nextCard.cardToken !== selectedToken) onSelect(nextCard.cardToken);
+  };
 
   return (
     <View style={styles.section}>
       <View style={styles.heading}>
         <Text style={styles.eyebrow}>오늘의 컬처카드</Text>
-        <Text style={styles.title}>마음이 가는 한 장을{`\n`}열어보세요</Text>
+        <Text style={styles.title}>오늘, 어떤 문화를 열까요?</Text>
         <Text style={styles.subtitle}>
           {userRegion
             ? `${userRegion} 근처에서 고른 카드예요. 한 장을 열면 새로운 카드가 채워져요.`
@@ -54,6 +72,7 @@ export function CultureCardStack({
         decelerationRate="fast"
         snapToInterval={cardWidth + 12}
         snapToAlignment="start"
+        onMomentumScrollEnd={handleMomentumEnd}
         contentContainerStyle={styles.cardRail}
       >
         {cards.map((card, index) => {
@@ -127,6 +146,15 @@ export function CultureCardStack({
         })}
       </ScrollView>
 
+      <View style={styles.pager} accessibilityLabel={`${selectedIndex + 1}번째 카드 선택됨`}>
+        {cards.map((card, index) => (
+          <View
+            key={`page-${card.cardToken}`}
+            style={[styles.pageDot, index === selectedIndex ? styles.pageDotActive : null]}
+          />
+        ))}
+      </View>
+
       <View style={styles.progressRow}>
         <Text style={styles.progressStrong}>오늘 {dailyOpenCount}장 공개</Text>
         <Text style={styles.progressMuted}>최대 {dailyOpenLimit}장까지</Text>
@@ -158,7 +186,7 @@ export function CultureCardStack({
 
 const styles = StyleSheet.create({
   section: {
-    paddingTop: 14,
+    paddingTop: 8,
   },
   heading: {
     paddingHorizontal: 22,
@@ -170,30 +198,30 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   title: {
-    marginTop: 7,
+    marginTop: 5,
     color: INK,
-    fontSize: 30,
-    lineHeight: 38,
+    fontSize: 27,
+    lineHeight: 35,
     fontWeight: '900',
     letterSpacing: -1.2,
   },
   subtitle: {
-    marginTop: 8,
+    marginTop: 6,
     color: MUTED,
     fontSize: 13.5,
-    lineHeight: 21,
+    lineHeight: 19,
     fontWeight: '600',
   },
   cardRail: {
     paddingHorizontal: 22,
-    paddingTop: 20,
-    paddingBottom: 8,
+    paddingTop: 14,
+    paddingBottom: 6,
     gap: 12,
   },
   newsCard: {
-    height: 356,
-    borderRadius: 25,
-    padding: 20,
+    height: 276,
+    borderRadius: 24,
+    padding: 18,
     overflow: 'hidden',
     justifyContent: 'space-between',
     borderWidth: 3,
@@ -216,7 +244,7 @@ const styles = StyleSheet.create({
     height: 230,
     borderRadius: 115,
     right: -105,
-    top: 58,
+    top: 28,
   },
   shapeSmall: {
     position: 'absolute',
@@ -263,7 +291,7 @@ const styles = StyleSheet.create({
   },
   cardCopy: {
     marginTop: 'auto',
-    marginBottom: 28,
+    marginBottom: 16,
   },
   cardEyebrow: {
     fontSize: 12.5,
@@ -272,13 +300,13 @@ const styles = StyleSheet.create({
   },
   cardHeadline: {
     marginTop: 9,
-    fontSize: 27,
-    lineHeight: 35,
+    fontSize: 24,
+    lineHeight: 31,
     fontWeight: '900',
     letterSpacing: -1.1,
   },
   cardFooter: {
-    paddingTop: 14,
+    paddingTop: 10,
     borderTopWidth: 1,
   },
   cardMeta: {
@@ -293,8 +321,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     opacity: 0.76,
   },
+  pager: {
+    height: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  pageDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#C9C5BC',
+  },
+  pageDotActive: {
+    width: 18,
+    backgroundColor: BLUE,
+  },
   progressRow: {
-    marginTop: 8,
+    marginTop: 4,
     paddingHorizontal: 22,
     flexDirection: 'row',
     alignItems: 'center',
@@ -327,8 +372,8 @@ const styles = StyleSheet.create({
   },
   cta: {
     marginHorizontal: 22,
-    marginTop: 16,
-    height: 56,
+    marginTop: 13,
+    height: 54,
     borderRadius: 17,
     backgroundColor: INK,
     flexDirection: 'row',

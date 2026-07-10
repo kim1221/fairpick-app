@@ -3,14 +3,14 @@ import { StyleSheet, Text, View } from 'react-native';
 import type { PassportResponse } from '../../services/passportService';
 import { getPassportDiscoverySummary } from '../../pages/passportLogic';
 
-const PANEL = '#17130E';
-const LINE = 'rgba(203,161,94,0.28)';
-const GOLD = '#CBA15E';
-const GOLD_SOFT = '#E1C58A';
-const TEXT = '#F2ECDE';
-const MUTED = '#9A8F77';
-const TRACK = '#30291E';
-const NAVY = '#2A386A';
+const PANEL = '#FFFFFF';
+const LINE = '#DED9CF';
+const GOLD = '#3157D5';
+const GOLD_SOFT = '#3157D5';
+const TEXT = '#171717';
+const MUTED = '#716D66';
+const TRACK = '#E8E5DE';
+const NAVY = '#EEF3FF';
 
 function ProgressRow({ label, value, goal, progress }: {
   label: string;
@@ -118,7 +118,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 24,
     fontWeight: '900',
-    fontFamily: 'Noto Serif KR',
   },
   badge: {
     flexDirection: 'row',
@@ -126,8 +125,8 @@ const styles = StyleSheet.create({
     gap: 5,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(225,197,138,0.45)',
-    backgroundColor: 'rgba(203,161,94,0.12)',
+    borderColor: '#D8E2FF',
+    backgroundColor: '#EEF3FF',
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -156,7 +155,7 @@ const styles = StyleSheet.create({
   metricDivider: {
     width: 1,
     height: 32,
-    backgroundColor: 'rgba(242,236,222,0.16)',
+    backgroundColor: '#D8E2FF',
   },
   metricNumber: {
     color: TEXT,
@@ -166,7 +165,7 @@ const styles = StyleSheet.create({
   },
   metricLabel: {
     marginTop: 3,
-    color: '#AEBBD6',
+    color: '#66749A',
     fontSize: 10.5,
     lineHeight: 14,
     fontWeight: '700',

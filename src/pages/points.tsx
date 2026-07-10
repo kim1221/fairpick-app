@@ -1,12 +1,10 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
-import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Loader, useDialog } from '@toss/tds-react-native';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { TicketBalanceVoucher } from '../components/passport/TicketBalanceVoucher';
 import { TicketHistoryList } from '../components/passport/TicketHistoryList';
-import { TAG_TOKENS } from '../components/culture-card/tagKit';
 import {
   exchangeTickets,
   getLastKnownTicketCount,
@@ -23,10 +21,10 @@ export const Route = createRoute('/points', {
   component: PointsPage,
 });
 
-const BG = TAG_TOKENS.bg;
-const ON_BG = TAG_TOKENS.headText;
-const ON_BG_MUTED = TAG_TOKENS.navSub;
-const ERROR_BG = '#2A2222';
+const BG = '#F7F5EF';
+const ON_BG = '#171717';
+const ON_BG_MUTED = '#716D66';
+const ERROR_BG = '#FFF0ED';
 
 function createStyles() {
   return StyleSheet.create({
@@ -39,15 +37,22 @@ function createStyles() {
     },
     content: {
       paddingHorizontal: 20,
-      paddingBottom: 132,
+      paddingTop: 18,
+      paddingBottom: 124,
     },
     navTitle: {
       color: ON_BG,
       fontSize: 24,
       lineHeight: 31,
       fontWeight: '800',
-      fontFamily: 'Noto Serif KR',
-      marginBottom: 16,
+      marginBottom: 4,
+    },
+    navSubtitle: {
+      marginBottom: 18,
+      color: ON_BG_MUTED,
+      fontSize: 13,
+      lineHeight: 19,
+      fontWeight: '600',
     },
     loadingBox: {
       minHeight: 240,
@@ -65,7 +70,7 @@ function createStyles() {
       borderRadius: 16,
       backgroundColor: ERROR_BG,
       borderWidth: 1,
-      borderColor: '#473131',
+      borderColor: '#FFD5CF',
       paddingHorizontal: 16,
       paddingVertical: 13,
     },
@@ -85,7 +90,6 @@ function createStyles() {
 }
 
 function PointsPage() {
-  const { top } = useSafeAreaInsets();
   const styles = useMemo(createStyles, []);
   const dialog = useDialog();
 
@@ -186,7 +190,7 @@ function PointsPage() {
     <View style={styles.container}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.content, { paddingTop: top + 18 }]}
+        contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -199,6 +203,7 @@ function PointsPage() {
         <ScrollViewInertialBackground topColor={BG} bottomColor={BG} />
 
         <Text style={styles.navTitle}>포인트</Text>
+        <Text style={styles.navSubtitle}>문화 티켓을 모아 바로 쓸 수 있는 토스포인트로 바꿔요.</Text>
 
         {showInitialLoading ? (
           <View style={styles.loadingBox}>

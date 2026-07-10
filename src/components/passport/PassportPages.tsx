@@ -17,8 +17,8 @@ import type { PassportStamp } from '../../services/passportService';
 import { PassportEmblem } from './PassportEmblem';
 
 // 네이비 표지 · 금박
-const NAVY_TOP = '#20304F';
-const NAVY_MID = '#14213A';
+const NAVY_TOP = '#3157D5';
+const NAVY_MID = '#183577';
 const GOLD = '#CBA15E';
 const GOLD_SOFT = '#DDB877';
 const COVER_TITLE = '#F2ECDE';
@@ -346,12 +346,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(203,161,94,0.34)',
     paddingHorizontal: 22,
-    paddingVertical: 30,
+    paddingVertical: 22,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.5,
-    shadowRadius: 34,
-    elevation: 12,
+    shadowOpacity: 0.18,
+    shadowRadius: 22,
+    elevation: 7,
   },
   coverHighlight: {
     position: 'absolute',
@@ -394,7 +394,7 @@ const styles = StyleSheet.create({
   cornerBR: { bottom: 22, right: 22, borderBottomWidth: 1.5, borderRightWidth: 1.5, borderBottomRightRadius: 4 },
   coverTop: {
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 4,
   },
   coverKicker: {
     color: GOLD_SOFT,
@@ -408,9 +408,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   coverEmblemRing: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     borderWidth: 1.5,
     borderColor: 'rgba(203,161,94,0.55)',
     alignItems: 'center',
@@ -419,12 +419,12 @@ const styles = StyleSheet.create({
   },
   coverBottom: {
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 2,
   },
   coverTitle: {
     color: COVER_TITLE,
-    fontSize: 30,
-    lineHeight: 38,
+    fontSize: 27,
+    lineHeight: 34,
     fontWeight: '900',
     letterSpacing: 2,
     fontFamily: 'Noto Serif KR',

@@ -184,7 +184,7 @@ export function PassportIndexRail({
 
 const styles = StyleSheet.create({
   page: {
-    height: 520,
+    height: 400,
     paddingHorizontal: 20,
   },
   paperFace: {
@@ -304,33 +304,32 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   indexRail: {
-    position: 'absolute',
-    right: 4,
-    top: 48,
-    gap: 8,
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 20,
+    marginBottom: 12,
   },
   indexTab: {
-    width: 44,
-    minHeight: 44,
-    borderTopLeftRadius: 10,
-    borderBottomLeftRadius: 10,
-    backgroundColor: 'rgba(20,33,58,0.70)',
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderRightWidth: 0,
-    borderColor: 'rgba(203,161,94,0.46)',
+    borderColor: '#DED9CF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   indexTabActive: {
-    backgroundColor: GOLD,
+    backgroundColor: '#3157D5',
+    borderColor: '#3157D5',
   },
   indexText: {
-    color: GOLD_SOFT,
+    color: '#716D66',
     fontSize: 11,
     lineHeight: 14,
     fontWeight: '900',
   },
   indexTextActive: {
-    color: '#20160A',
+    color: '#FFFFFF',
   },
 });

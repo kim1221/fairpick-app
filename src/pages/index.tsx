@@ -1,5 +1,4 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
-import { useSafeAreaInsets } from '@granite-js/native/react-native-safe-area-context';
 import { loadFullScreenAd, showFullScreenAd } from '@apps-in-toss/framework';
 import { Button, Icon, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
@@ -218,7 +217,6 @@ function HomePageInner() {
   const navigation = Route.useNavigation();
   const adaptive = useAdaptive();
   const styles = useMemo(() => createStyles(adaptive), [adaptive]);
-  const { top } = useSafeAreaInsets();
   const dialog = useDialog();
   const { isLoggedIn, isLoading: authLoading, login } = useAuth();
 
@@ -643,7 +641,7 @@ function HomePageInner() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={GOLD} />}
       >
         <ScrollViewInertialBackground topColor={INK} bottomColor={INK_BOTTOM} />
-        <View style={[styles.header, { paddingTop: top + 14 }]}>
+        <View style={[styles.header, { paddingTop: 14 }]}>
           <View style={styles.nav}>
             <View style={styles.brand}>
               <View style={styles.mark}>

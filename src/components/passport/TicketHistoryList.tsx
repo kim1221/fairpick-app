@@ -3,9 +3,9 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Icon, Loader } from '@toss/tds-react-native';
 import type { TicketHistoryItem } from '../../services/ticketService';
 
-const LINE = '#232329';
-const ON_INK = '#F2EEE5';
-const ON_INK_MUTED = '#9A968E';
+const LINE = '#E5E1D9';
+const ON_INK = '#171717';
+const ON_INK_MUTED = '#716D66';
 const BRONZE = '#B8924A';
 const BLUE = '#3182F6';
 
@@ -109,8 +109,12 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   list: {
-    borderTopWidth: 1,
-    borderTopColor: LINE,
+    borderWidth: 1,
+    borderColor: LINE,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    overflow: 'hidden',
   },
   row: {
     minHeight: 64,
@@ -125,7 +129,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 11,
-    backgroundColor: '#22222A',
+    backgroundColor: '#F3F0E9',
     alignItems: 'center',
     justifyContent: 'center',
   },
