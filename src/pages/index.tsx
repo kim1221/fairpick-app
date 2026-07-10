@@ -21,11 +21,13 @@ import { CultureCardStatePanel } from '../components/culture-card/CultureCardSta
 import {
   AD_LOAD_FAILED_COPY,
   AD_LOADING_COPY,
+  AD_SHOW_REQUEST_TIMEOUT_MS,
+  AD_SHOW_TERMINAL_TIMEOUT_MS,
   getEarnFailureCopy,
   getNextOpenableCard,
-  getTodayCardProgress,
   getTodayCards as getThreeTodayCards,
   hasReachedDailyLimit,
+  isRewardAdProgressEvent,
   isDailyLimitReachedError,
   markCardOpened,
   type HomeCopy,
@@ -49,7 +51,6 @@ export const Route = createRoute('/', {
 
 const REWARDED_AD_ID = 'ait.v2.live.b50cf7d900884c5b';
 const AD_LOAD_TIMEOUT_MS = 15_000;
-const AD_SHOW_WATCHDOG_MS = 60_000;
 // 워엄 다크 배경 + 마닐라 워엄톤 크롬 (컬처카드 태그 방향)
 const INK = '#100D09';
 const INK_BOTTOM = '#0A0805';
@@ -63,6 +64,7 @@ const MUTED_2 = '#7A6E58';
 type Adaptive = ReturnType<typeof useAdaptive>;
 type HomeStatus = 'loading' | 'ready' | 'ad_loading' | 'ad_failed' | 'earn_failed' | 'daily_limit' | 'revealed' | 'empty';
 type AdLoadStatus = 'idle' | 'loading' | 'loaded' | 'failed';
+type AdShowWatchdogPhase = 'request' | 'terminal';
 
 const WATCHDOG_COPY: HomeCopy = {
   title: '광고 응답이 없어요',
@@ -231,6 +233,7 @@ function HomePageInner() {
   const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showSettledRef = useRef(false);
+  const lastShowEventTypeRef = useRef<RewardAdEventType | null>(null);
   const mountedRef = useRef(true);
 
   const clearLoadTimeout = useCallback(() => {
@@ -331,14 +334,11 @@ function HomePageInner() {
   }, [authLoading, isLoggedIn, refreshCards, startRewardedAdLoad]);
 
   const todayCards = useMemo(() => getThreeTodayCards(cardsData?.today ?? []), [cardsData?.today]);
-  const progress = useMemo(() => getTodayCardProgress(cardsData), [cardsData]);
   const activeCard = useMemo(() => getNextOpenableCard(cardsData), [cardsData]);
   const dailyLimitReached = hasReachedDailyLimit(cardsData);
   const ticketCount = cardsData?.ticketCount ?? 0;
   const dailyEarned = cardsData?.dailyEarned ?? 0;
   const dailyLimit = cardsData?.dailyLimit ?? 30;
-  const bonusMode = progress.opened >= 3 && !dailyLimitReached && !!activeCard;
-  const openedTodayCards = useMemo(() => todayCards.filter((card) => card.opened), [todayCards]);
 
   const handleRefresh = useCallback(async () => {
     if (!isLoggedIn) return;
@@ -429,29 +429,49 @@ function HomePageInner() {
         },
       }).catch(() => {});
     };
-
-    setStatus('ad_loading');
-    setStatusCopy(null);
-    setOpenedCard(null);
-    showSettledRef.current = false;
-    showUnregisterRef.current?.();
-    showUnregisterRef.current = null;
-
-    showWatchdogRef.current = setTimeout(() => {
+    const settleTimedOutAd = (phase: AdShowWatchdogPhase) => {
       if (!mountedRef.current || showSettledRef.current) return;
       showSettledRef.current = true;
+      logAdEvent('error', {
+        reason: 'watchdog_timeout',
+        phase,
+        lastEventType: lastShowEventTypeRef.current,
+      });
       showUnregisterRef.current?.();
       showUnregisterRef.current = null;
       setStatus('ready');
       setStatusCopy(WATCHDOG_COPY);
       resetAdAfterAttempt();
       openAlert(WATCHDOG_COPY);
-    }, AD_SHOW_WATCHDOG_MS);
+    };
+    const scheduleShowWatchdog = (phase: AdShowWatchdogPhase) => {
+      clearShowWatchdog();
+      const timeoutMs = phase === 'request'
+        ? AD_SHOW_REQUEST_TIMEOUT_MS
+        : AD_SHOW_TERMINAL_TIMEOUT_MS;
+      showWatchdogRef.current = setTimeout(() => settleTimedOutAd(phase), timeoutMs);
+    };
+
+    setStatus('ad_loading');
+    setStatusCopy(null);
+    setOpenedCard(null);
+    showSettledRef.current = false;
+    lastShowEventTypeRef.current = null;
+    showUnregisterRef.current?.();
+    showUnregisterRef.current = null;
+    scheduleShowWatchdog('request');
 
     showUnregisterRef.current = showFullScreenAd({
       options: { adGroupId: REWARDED_AD_ID },
       onEvent: async (event) => {
-        logAdEvent(event.type as RewardAdEventType, 'data' in event ? event.data : undefined);
+        const eventType = event.type as RewardAdEventType;
+        lastShowEventTypeRef.current = eventType;
+        logAdEvent(eventType, 'data' in event ? event.data : undefined);
+
+        if (isRewardAdProgressEvent(eventType)) {
+          scheduleShowWatchdog('terminal');
+          return;
+        }
 
         if (event.type === 'userEarnedReward') {
           if (showSettledRef.current) return;
@@ -559,7 +579,7 @@ function HomePageInner() {
     if (likes?.items.some((item) => item.id === card.eventId)) {
       await dialog.openAlert({
         title: '이미 저장돼 있어요',
-        description: '저장 탭에서 다시 볼 수 있어요.',
+        description: '여권의 ‘가고 싶어요’에서 다시 볼 수 있어요.',
       });
       return;
     }
@@ -576,7 +596,7 @@ function HomePageInner() {
     userEventService.logEventSave(card.eventId).catch(() => {});
     await dialog.openAlert({
       title: '저장했어요',
-      description: '저장 탭에서 다시 볼 수 있어요.',
+      description: '여권의 ‘가고 싶어요’에서 다시 볼 수 있어요.',
     });
   }, [dialog, openedCard]);
 
@@ -584,9 +604,7 @@ function HomePageInner() {
     ? '로그인하고 열기'
     : dailyLimitReached
       ? '오늘 티켓 완료'
-      : bonusMode
-        ? '광고 보고 보너스 열기'
-        : '광고 보고 열기';
+      : '광고 보고 열기';
   const stackDisabled = (
     authLoading
     || loginPending
@@ -634,25 +652,14 @@ function HomePageInner() {
             <CultureCardStack
               cards={todayCards}
               activeCard={activeCard}
-              progress={progress}
               dailyEarned={dailyEarned}
               dailyLimit={dailyLimit}
               loading={status === 'ad_loading' || adLoadStatus === 'loading'}
               disabled={stackDisabled}
               actionLabel={actionLabel}
               onOpen={handleOpenCard}
-              bonusMode={bonusMode}
-              openedCards={openedTodayCards}
               userRegion={cardsData?.userRegion ?? null}
             />
-
-            {status === 'loading' ? (
-              <View style={styles.loadingBox}>
-                <ActivityIndicator color={GOLD} />
-                <Text style={styles.loadingTitle}>카드를 준비하고 있어요</Text>
-                <Text style={styles.loadingDesc}>오늘 열어볼 문화 이벤트를 고르는 중이에요.</Text>
-              </View>
-            ) : null}
 
             {status === 'ad_loading' ? (
               <View style={styles.loadingBox}>

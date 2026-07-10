@@ -1,9 +1,12 @@
 import { describe, expect, test } from '@jest/globals';
 import type { Card, CardsTodayResponse } from '../../../services/cardsService';
 import {
+  AD_SHOW_REQUEST_TIMEOUT_MS,
+  AD_SHOW_TERMINAL_TIMEOUT_MS,
   getEarnFailureCopy,
   getNextOpenableCard,
   getTodayCardProgress,
+  isRewardAdProgressEvent,
 } from '../homeLogic';
 
 function card(eventId: string, opened = false): Card {
@@ -71,5 +74,16 @@ describe('culture-card home logic', () => {
 
     expect(getEarnFailureCopy(limitError).title).toBe('오늘 티켓을 다 모았어요');
     expect(getEarnFailureCopy(networkError).title).toBe('티켓 적립에 실패했어요');
+  });
+
+  test('keeps waiting for terminal reward ad events after ad progress starts', () => {
+    expect(isRewardAdProgressEvent('requested')).toBe(true);
+    expect(isRewardAdProgressEvent('show')).toBe(true);
+    expect(isRewardAdProgressEvent('impression')).toBe(true);
+    expect(isRewardAdProgressEvent('clicked')).toBe(true);
+    expect(isRewardAdProgressEvent('userEarnedReward')).toBe(false);
+    expect(isRewardAdProgressEvent('dismissed')).toBe(false);
+    expect(isRewardAdProgressEvent('failedToShow')).toBe(false);
+    expect(AD_SHOW_TERMINAL_TIMEOUT_MS).toBeGreaterThan(AD_SHOW_REQUEST_TIMEOUT_MS);
   });
 });

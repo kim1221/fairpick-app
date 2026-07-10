@@ -21,6 +21,11 @@ export const AD_LOADING_COPY: HomeCopy = {
   description: '광고를 불러오는 중이에요. 잠시 후 다시 눌러 주세요.',
 };
 
+export const AD_SHOW_REQUEST_TIMEOUT_MS = 60_000;
+export const AD_SHOW_TERMINAL_TIMEOUT_MS = 240_000;
+
+const REWARD_AD_PROGRESS_EVENTS = new Set(['requested', 'show', 'impression', 'clicked']);
+
 const DAILY_LIMIT_COPY: HomeCopy = {
   title: '오늘 티켓을 다 모았어요',
   description: '내일 다시 새로운 문화카드를 열 수 있어요.',
@@ -55,6 +60,10 @@ export function isDailyLimitReachedError(error: unknown): boolean {
 
 export function getEarnFailureCopy(error: unknown): HomeCopy {
   return isDailyLimitReachedError(error) ? DAILY_LIMIT_COPY : EARN_FAILED_COPY;
+}
+
+export function isRewardAdProgressEvent(eventType: string): boolean {
+  return REWARD_AD_PROGRESS_EVENTS.has(eventType);
 }
 
 export function getTodayCards(cards: Card[]): Card[] {

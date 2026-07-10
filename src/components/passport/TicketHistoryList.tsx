@@ -12,6 +12,7 @@ const BLUE = '#3182F6';
 export interface TicketHistoryListProps {
   items: TicketHistoryItem[];
   loading: boolean;
+  error?: boolean;
 }
 
 type HistoryMeta = {
@@ -25,7 +26,7 @@ function getHistoryMeta(item: TicketHistoryItem): HistoryMeta {
     return { label: '광고 보고 카드 열기', iconName: 'icon-star-mono', iconColor: BRONZE };
   }
   if (item.type === 'visit' || item.type === 'stamp') {
-    return { label: '가봤어요 도장', iconName: 'icon-check-mono', iconColor: BRONZE };
+    return { label: '다녀왔어요 도장', iconName: 'icon-check-mono', iconColor: BRONZE };
   }
   if (item.type === 'attendance') {
     return { label: '출석 체크', iconName: 'icon-calendar-mono', iconColor: BRONZE };
@@ -55,7 +56,7 @@ function formatAmount(amount: number): string {
   return `${amount} 티켓`;
 }
 
-export function TicketHistoryList({ items, loading }: TicketHistoryListProps) {
+export function TicketHistoryList({ items, loading, error = false }: TicketHistoryListProps) {
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>최근 내역</Text>
@@ -65,6 +66,8 @@ export function TicketHistoryList({ items, loading }: TicketHistoryListProps) {
           <View style={styles.loadingBox}>
             <Loader size="small" customStrokeColor={ON_INK_MUTED} />
           </View>
+        ) : error ? (
+          <Text style={styles.emptyText}>최근 내역은 잠시 후 다시 확인해 주세요.</Text>
         ) : items.length === 0 ? (
           <Text style={styles.emptyText}>아직 티켓 내역이 없어요.</Text>
         ) : (

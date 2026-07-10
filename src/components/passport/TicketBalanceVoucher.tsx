@@ -1,15 +1,23 @@
+/**
+ * 포인트(돈) 화면 상단 잔액 카드 + 토스포인트 교환 CTA.
+ * 시안(culturecard-flow-v1 ③): 네이비 잔액 카드("내가 모은 문화 티켓 N") +
+ * "10티켓 = 토스포인트 교환 · 지금 M번 바꿀 수 있어요" + 토스블루 CTA + 안내 문구.
+ *
+ * 교환 로직(exchangeTickets 2-step)은 상위(points.tsx)가 소유하고, 여기선 표시/트리거만.
+ */
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Button } from '@toss/tds-react-native';
 
-const PAPER = '#F5F1E8';
-const PAPER_EDGE = '#E7E0D2';
-const INK = '#16161A';
-const MUTED = '#6B6760';
-const BRONZE = '#B8924A';
-const BRONZE_DARK = '#947231';
+// 시안 네이비 잔액 카드 · 골드 · 토스블루
+const NAVY_TOP = '#20304F';
+const NAVY_MID = '#16233C';
+const GOLD = '#CBA15E';
+const GOLD_SOFT = '#DDB877';
+const CARD_LABEL = '#AEBBD6';
+const CARD_TITLE = '#F2ECDE';
 const BLUE = '#3182F6';
-const PIP_COUNT = 10;
+const ON_BG_MUTED = '#9A8F77';
 
 export interface TicketBalanceVoucherProps {
   ticketCount: number;
@@ -24,38 +32,35 @@ export function TicketBalanceVoucher({
   exchanging,
   onExchange,
 }: TicketBalanceVoucherProps) {
-  const filledPips = Math.min(ticketCount, PIP_COUNT);
-  const remainingTickets = Math.max(ticketsPerExchange - ticketCount, 0);
-  const canExchange = ticketCount >= ticketsPerExchange;
-  const buttonLabel = canExchange
-    ? (exchanging ? '교환하고 있어요' : '토스포인트로 바꾸기')
-    : `${remainingTickets}장 더 모으기`;
+  const per = ticketsPerExchange > 0 ? ticketsPerExchange : 10;
+  const exchangeableTimes = Math.floor(ticketCount / per);
+  const canExchange = exchangeableTimes >= 1;
+  const remainingTickets = Math.max(per - (ticketCount % per), 0);
+
+  const helpLine = canExchange
+    ? `${per}티켓 = 토스포인트 교환 · 지금 ${exchangeableTimes}번 바꿀 수 있어요`
+    : `${per}티켓 = 토스포인트 교환 · ${remainingTickets}장만 더 모으면 돼요`;
+
+  const buttonLabel = exchanging
+    ? '바꾸고 있어요'
+    : canExchange
+      ? '토스포인트로 바꾸기'
+      : `${remainingTickets}장 더 모으기`;
 
   return (
-    <View style={styles.card}>
-      <Text style={styles.label}>모은 티켓</Text>
-      <View style={styles.balanceRow}>
-        <Text style={styles.balanceNumber}>{ticketCount}</Text>
-        <Text style={styles.balanceUnit}>/ {ticketsPerExchange} 티켓</Text>
+    <View>
+      {/* 큰 잔액 카드(네이비) */}
+      <View style={styles.balanceCard}>
+        <View style={styles.balanceHighlight} pointerEvents="none" />
+        <Text style={styles.balanceLabel}>내가 모은 문화 티켓</Text>
+        <View style={styles.balanceRow}>
+          <Text style={styles.balanceNumber} allowFontScaling={false}>{ticketCount}</Text>
+          <Text style={styles.balanceUnit}>티켓</Text>
+        </View>
+        <Text style={styles.balanceHelp}>{helpLine}</Text>
       </View>
 
-      <View style={styles.pipRow}>
-        {Array.from({ length: PIP_COUNT }, (_, index) => (
-          <View key={index} style={[styles.pip, index < filledPips && styles.pipFilled]} />
-        ))}
-      </View>
-
-      <Text style={styles.helpText}>
-        {canExchange
-          ? '지금 토스포인트로 바꿀 수 있어요.'
-          : `${remainingTickets}장만 더 모으면 토스포인트로 바꿀 수 있어요.`}
-      </Text>
-
-      <View style={styles.perforation}>
-        <View style={styles.punchLeft} />
-        <View style={styles.punchRight} />
-      </View>
-
+      {/* 토스포인트로 바꾸기 */}
       <Button
         type="primary"
         size="big"
@@ -67,108 +72,79 @@ export function TicketBalanceVoucher({
       </Button>
 
       <Text style={styles.exchangeInfo}>
-        10티켓 = <Text style={styles.exchangeStrong}>토스포인트 교환</Text>
+        티켓 {per}장이 <Text style={styles.exchangeStrong}>토스포인트</Text>로 지급돼요 · 실제 돈처럼 써요
       </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    marginTop: 18,
-    borderRadius: 22,
+  balanceCard: {
+    position: 'relative',
+    borderRadius: 20,
     overflow: 'hidden',
-    backgroundColor: PAPER,
+    backgroundColor: NAVY_MID,
     borderWidth: 1,
-    borderColor: PAPER_EDGE,
-    paddingHorizontal: 22,
-    paddingTop: 22,
-    paddingBottom: 20,
+    borderColor: 'rgba(203,161,94,0.30)',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 18,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.24,
-    shadowRadius: 24,
-    elevation: 7,
+    shadowOpacity: 0.4,
+    shadowRadius: 28,
+    elevation: 9,
   },
-  label: {
-    color: BRONZE_DARK,
-    fontSize: 12,
-    fontWeight: '900',
-    letterSpacing: 1,
+  balanceHighlight: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '58%',
+    backgroundColor: NAVY_TOP,
+    opacity: 0.9,
+  },
+  balanceLabel: {
+    color: CARD_LABEL,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
   },
   balanceRow: {
-    marginTop: 8,
+    marginTop: 6,
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: 8,
   },
   balanceNumber: {
-    color: INK,
-    fontSize: 46,
-    lineHeight: 52,
+    color: CARD_TITLE,
+    fontSize: 44,
+    lineHeight: 50,
     fontWeight: '900',
+    letterSpacing: -1,
     fontFamily: 'Noto Serif KR',
   },
   balanceUnit: {
-    color: MUTED,
-    fontSize: 16,
+    color: GOLD_SOFT,
+    fontSize: 18,
     fontWeight: '800',
   },
-  pipRow: {
-    marginTop: 18,
-    flexDirection: 'row',
-    gap: 5,
-  },
-  pip: {
-    flex: 1,
-    height: 10,
-    borderRadius: 3,
-    backgroundColor: '#E2DAC8',
-  },
-  pipFilled: {
-    backgroundColor: BRONZE,
-  },
-  helpText: {
-    marginTop: 14,
-    color: '#54504A',
-    fontSize: 13,
-    lineHeight: 19,
+  balanceHelp: {
+    marginTop: 12,
+    color: GOLD,
+    fontSize: 12.5,
+    lineHeight: 18,
     fontWeight: '700',
-  },
-  perforation: {
-    position: 'relative',
-    marginHorizontal: -22,
-    marginTop: 18,
-    borderTopWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: '#CFC6B2',
-  },
-  punchLeft: {
-    position: 'absolute',
-    left: -11,
-    top: -12,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: INK,
-  },
-  punchRight: {
-    position: 'absolute',
-    right: -11,
-    top: -12,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: INK,
   },
   button: {
     width: '100%',
-    marginTop: 18,
+    marginTop: 16,
   },
   exchangeInfo: {
-    marginTop: 11,
-    color: MUTED,
+    marginTop: 12,
+    color: ON_BG_MUTED,
     fontSize: 12,
+    lineHeight: 17,
     textAlign: 'center',
     fontWeight: '700',
   },

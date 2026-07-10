@@ -4,20 +4,20 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Loader, useDialog } from '@toss/tds-react-native';
 import { BottomTabBar } from '../components/BottomTabBar';
-import { PassportCover } from '../components/passport/PassportCover';
-import { StampGrid } from '../components/passport/StampGrid';
 import { TicketBalanceVoucher } from '../components/passport/TicketBalanceVoucher';
 import { TicketHistoryList } from '../components/passport/TicketHistoryList';
 import { TAG_TOKENS } from '../components/culture-card/tagKit';
-import { getPassport, type PassportResponse } from '../services/passportService';
 import {
   exchangeTickets,
+  getLastKnownTicketCount,
   getTicketHistory,
   getTickets,
+  subscribeTicketCount,
   TICKETS_PER_EXCHANGE,
   type TicketHistoryResponse,
   type TicketInfo,
 } from '../services/ticketService';
+import { loadPointDashboard, resolveTicketCount, type PointDashboardLoadResult } from './pointsLogic';
 
 export const Route = createRoute('/points', {
   component: PointsPage,
@@ -27,15 +27,6 @@ const BG = TAG_TOKENS.bg;
 const ON_BG = TAG_TOKENS.headText;
 const ON_BG_MUTED = TAG_TOKENS.navSub;
 const ERROR_BG = '#2A2222';
-
-// stamps(내림차순)에서 가장 오래된 방문 월 → "2026.3부터" 라벨
-function deriveSinceLabel(stamps: PassportResponse['stamps']): string | null {
-  const oldest = stamps[stamps.length - 1];
-  if (!oldest) return null;
-  const date = new Date(oldest.visitedAt);
-  if (Number.isNaN(date.getTime())) return null;
-  return `${date.getFullYear()}.${date.getMonth() + 1}부터`;
-}
 
 function createStyles() {
   return StyleSheet.create({
@@ -56,31 +47,7 @@ function createStyles() {
       lineHeight: 31,
       fontWeight: '800',
       fontFamily: 'Noto Serif KR',
-      marginBottom: 14,
-    },
-    sectionLabel: {
-      marginTop: 20,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
-    sectionLabelText: {
-      color: ON_BG_MUTED,
-      fontSize: 12,
-      fontWeight: '700',
-      letterSpacing: 2,
-    },
-    sectionLabelCount: {
-      color: ON_BG_MUTED,
-      fontSize: 11.5,
-      fontWeight: '700',
-    },
-    exchangeLabel: {
-      marginTop: 26,
-      color: ON_BG_MUTED,
-      fontSize: 12,
-      fontWeight: '700',
-      letterSpacing: 2,
+      marginBottom: 16,
     },
     loadingBox: {
       minHeight: 240,
@@ -119,39 +86,44 @@ function createStyles() {
 
 function PointsPage() {
   const { top } = useSafeAreaInsets();
-  const navigation = Route.useNavigation();
   const styles = useMemo(createStyles, []);
   const dialog = useDialog();
 
-  const [passport, setPassport] = useState<PassportResponse | null>(null);
   const [tickets, setTickets] = useState<TicketInfo | null>(null);
   const [ticketHistory, setTicketHistory] = useState<TicketHistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [exchanging, setExchanging] = useState(false);
-  const [loadError, setLoadError] = useState(false);
+  const [balanceLoadError, setBalanceLoadError] = useState(false);
+  const [historyLoadError, setHistoryLoadError] = useState(false);
+  const [lastKnownTicketCount, setLastKnownTicketCount] = useState<number | null>(() => getLastKnownTicketCount());
+
+  const applyDashboard = useCallback((result: PointDashboardLoadResult) => {
+    if (result.tickets) setTickets(result.tickets);
+    if (result.history) setTicketHistory(result.history);
+    if (result.historyLoadFailed) setTicketHistory(null);
+    setBalanceLoadError(result.balanceLoadFailed);
+    setHistoryLoadError(result.historyLoadFailed);
+  }, []);
 
   const load = useCallback(async () => {
     try {
-      setLoadError(false);
-      const [nextPassport, nextTickets, nextHistory] = await Promise.all([
-        getPassport(),
-        getTickets(),
-        getTicketHistory(),
-      ]);
-      setPassport(nextPassport);
-      setTickets(nextTickets);
-      setTicketHistory(nextHistory);
+      setBalanceLoadError(false);
+      setHistoryLoadError(false);
+      const result = await loadPointDashboard(getTickets, getTicketHistory);
+      applyDashboard(result);
     } catch {
-      setLoadError(true);
+      setBalanceLoadError(true);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applyDashboard]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => subscribeTicketCount(setLastKnownTicketCount), []);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -162,12 +134,8 @@ function PointsPage() {
     }
   }, [load]);
 
-  const handleStampPress = useCallback((eventId: string) => {
-    navigation.navigate('/events/:id', { id: eventId });
-  }, [navigation]);
-
   const handleExchange = useCallback(async () => {
-    const currentTicketCount = tickets?.ticketCount ?? ticketHistory?.ticketCount ?? 0;
+    const currentTicketCount = resolveTicketCount(tickets, ticketHistory, lastKnownTicketCount);
     const ticketsPerExchange = tickets?.ticketsPerExchange ?? TICKETS_PER_EXCHANGE;
 
     if (exchanging || currentTicketCount < ticketsPerExchange) return;
@@ -189,11 +157,10 @@ function PointsPage() {
           });
 
       try {
-        const [nextTickets, nextHistory] = await Promise.all([getTickets(), getTicketHistory()]);
-        setTickets(nextTickets);
-        setTicketHistory(nextHistory);
+        const nextDashboard = await loadPointDashboard(getTickets, getTicketHistory);
+        applyDashboard(nextDashboard);
       } catch {
-        setLoadError(true);
+        setBalanceLoadError(true);
       }
 
       await dialog.openAlert({
@@ -208,16 +175,12 @@ function PointsPage() {
     } finally {
       setExchanging(false);
     }
-  }, [dialog, exchanging, ticketHistory?.ticketCount, tickets?.ticketCount, tickets?.ticketsPerExchange]);
+  }, [applyDashboard, dialog, exchanging, lastKnownTicketCount, ticketHistory, tickets]);
 
-  const ticketCount = tickets?.ticketCount ?? ticketHistory?.ticketCount ?? 0;
+  const ticketCount = resolveTicketCount(tickets, ticketHistory, lastKnownTicketCount);
   const ticketsPerExchange = tickets?.ticketsPerExchange ?? TICKETS_PER_EXCHANGE;
   const historyItems = ticketHistory?.history ?? [];
-  const showInitialLoading = loading && !passport && !tickets && !ticketHistory;
-
-  const stamps = passport?.stamps ?? [];
-  const visitedCount = passport?.visitedCount ?? 0;
-  const sinceLabel = useMemo(() => deriveSinceLabel(stamps), [stamps]);
+  const showInitialLoading = loading && !tickets && !ticketHistory;
 
   return (
     <View style={styles.container}>
@@ -235,38 +198,29 @@ function PointsPage() {
       >
         <ScrollViewInertialBackground topColor={BG} bottomColor={BG} />
 
-        <Text style={styles.navTitle}>내 문화</Text>
+        <Text style={styles.navTitle}>포인트</Text>
 
         {showInitialLoading ? (
           <View style={styles.loadingBox}>
             <Loader size="small" customStrokeColor={ON_BG_MUTED} />
-            <Text style={styles.loadingText}>내 문화 정보를 불러오고 있어요</Text>
+            <Text style={styles.loadingText}>포인트 정보를 불러오고 있어요</Text>
           </View>
         ) : (
           <>
-            {loadError ? (
+            {balanceLoadError ? (
               <View style={styles.errorBox}>
-                <Text style={styles.errorTitle}>내 문화 정보를 불러오지 못했어요</Text>
-                <Text style={styles.errorDescription}>잠시 후 여권과 티켓 잔액을 다시 확인해 주세요.</Text>
+                <Text style={styles.errorTitle}>포인트 정보를 불러오지 못했어요</Text>
+                <Text style={styles.errorDescription}>잠시 후 티켓 잔액과 내역을 다시 확인해 주세요.</Text>
               </View>
             ) : null}
 
-            <PassportCover visitedCount={visitedCount} sinceLabel={sinceLabel} />
-
-            <View style={styles.sectionLabel}>
-              <Text style={styles.sectionLabelText}>STAMPS · 다녀온 문화</Text>
-              <Text style={styles.sectionLabelCount}>{visitedCount}개</Text>
-            </View>
-            <StampGrid stamps={stamps} onPressStamp={handleStampPress} />
-
-            <Text style={styles.exchangeLabel}>티켓 교환</Text>
             <TicketBalanceVoucher
               ticketCount={ticketCount}
               ticketsPerExchange={ticketsPerExchange}
               exchanging={exchanging}
               onExchange={handleExchange}
             />
-            <TicketHistoryList items={historyItems} loading={loading} />
+            <TicketHistoryList items={historyItems} loading={loading} error={historyLoadError} />
           </>
         )}
       </ScrollView>

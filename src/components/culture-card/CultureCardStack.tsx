@@ -1,8 +1,7 @@
 import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Icon } from '@toss/tds-react-native';
 import type { Card } from '../../services/cardsService';
-import type { TodayCardProgress } from './homeLogic';
 import {
   CondensedDisplay,
   FieldRow,
@@ -22,7 +21,6 @@ const {
   manila: MANILA,
   headText: HEAD_TEXT,
   navSub: NAV_SUB,
-  segOff: SEG_OFF,
   ringLine: RING_LINE,
   ctaDisabledBg: CTA_DISABLED_BG,
   ctaDisabledText: CTA_DISABLED_TEXT,
@@ -31,15 +29,12 @@ const {
 interface CultureCardStackProps {
   cards: Card[];
   activeCard: Card | null;
-  progress: TodayCardProgress;
   dailyEarned: number;
   dailyLimit: number;
   loading: boolean;
   disabled: boolean;
   actionLabel: string;
   onOpen: () => void;
-  bonusMode: boolean;
-  openedCards: Card[];
   userRegion: string | null;
 }
 
@@ -89,30 +84,6 @@ function createStyles() {
       lineHeight: 27,
       fontWeight: '800',
       letterSpacing: -0.6,
-    },
-    prog: {
-      alignItems: 'flex-end',
-      gap: 6,
-      paddingBottom: 3,
-    },
-    progText: {
-      color: NAV_SUB,
-      fontSize: 12,
-      lineHeight: 16,
-      fontWeight: '700',
-    },
-    segs: {
-      flexDirection: 'row',
-      gap: 4,
-    },
-    seg: {
-      width: 16,
-      height: 3,
-      borderRadius: 2,
-      backgroundColor: SEG_OFF,
-    },
-    segOn: {
-      backgroundColor: MANILA,
     },
     locPill: {
       marginTop: 10,
@@ -228,92 +199,6 @@ function createStyles() {
     ctaHookPin: {
       color: MANILA,
     },
-    // 보너스 컬렉션(오늘 연 카드)
-    collect: {
-      marginTop: 4,
-      marginBottom: 4,
-    },
-    collectHead: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: 10,
-    },
-    collectTitle: {
-      color: HEAD_TEXT,
-      fontSize: 13,
-      lineHeight: 18,
-      fontWeight: '800',
-    },
-    collectSub: {
-      color: NAV_SUB,
-      fontSize: 11.5,
-      lineHeight: 16,
-      fontWeight: '700',
-    },
-    thumbs: {
-      flexDirection: 'row',
-      gap: 9,
-    },
-    thumb: {
-      flex: 1,
-      height: 104,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: '#3A3122',
-      backgroundColor: '#1C1710',
-      overflow: 'hidden',
-    },
-    thumbImage: {
-      ...StyleSheet.absoluteFillObject,
-      width: undefined,
-      height: undefined,
-    },
-    thumbDuotone: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: NAVY,
-      opacity: 0.32,
-    },
-    thumbScrim: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: 0,
-      height: 50,
-      backgroundColor: 'rgba(10,8,5,0.66)',
-    },
-    thumbCheck: {
-      position: 'absolute',
-      top: 6,
-      right: 6,
-      width: 18,
-      height: 18,
-      borderRadius: 9,
-      backgroundColor: 'rgba(10,8,5,0.72)',
-      borderWidth: 1,
-      borderColor: 'rgba(168,51,31,0.7)',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    thumbCheckText: {
-      color: '#E9BFA6',
-      fontSize: 10,
-      lineHeight: 12,
-      fontWeight: '800',
-    },
-    thumbCaption: {
-      position: 'absolute',
-      left: 8,
-      right: 8,
-      bottom: 7,
-      color: '#F4ECDB',
-      fontSize: 10,
-      lineHeight: 12,
-      fontWeight: '800',
-      textShadowColor: 'rgba(0,0,0,0.7)',
-      textShadowOffset: { width: 0, height: 1 },
-      textShadowRadius: 5,
-    },
   });
 }
 
@@ -349,68 +234,17 @@ function SealedTag() {
   );
 }
 
-function BonusTag({ openedCards }: { openedCards: Card[] }) {
-  const styles = React.useMemo(() => createStyles(), []);
-  const { ref } = React.useMemo(() => todayTicketNo(), []);
-
-  return (
-    <TagBody>
-      <TagHeader printedTop="BONUS DRAW" printedBottom={`SEOUL · ${ref}`} />
-      <Rule />
-      <Text style={styles.lbl}>BONUS · 보너스</Text>
-      <CondensedDisplay color={NAVY} size={48}>ENCORE</CondensedDisplay>
-      <Text style={styles.destKo}>오늘의 3장 완료</Text>
-      <Rule variant="thin" />
-      <View style={styles.collect}>
-        <View style={styles.collectHead}>
-          <Text style={styles.collectTitle}>오늘 연 문화</Text>
-        </View>
-        <View style={styles.thumbs}>
-          {openedCards.slice(0, 3).map((opened) => (
-            <View key={opened.eventId} style={styles.thumb}>
-              {opened.imageUrl ? (
-                <Image source={{ uri: opened.imageUrl }} style={styles.thumbImage} resizeMode="cover" />
-              ) : null}
-              <View style={styles.thumbDuotone} />
-              <View style={styles.thumbScrim} />
-              <View style={styles.thumbCheck}>
-                <Text style={styles.thumbCheckText}>✓</Text>
-              </View>
-              <Text style={styles.thumbCaption} numberOfLines={2}>{opened.title}</Text>
-            </View>
-          ))}
-        </View>
-      </View>
-      <Rule />
-      <Text style={styles.sealMsg}>
-        광고를 한 번 더 보면 보너스 카드가 열려요.{'\n'}오늘 담을 문화 한 장이 더 남아 있어요.
-      </Text>
-      <View style={styles.sealBottom}>
-        <View style={styles.stampWrap}>
-          <RubberStamp right={16} bottom={4} topText="BONUS" bottomText="+1" />
-        </View>
-        <Rule variant="dash" />
-        <FinePrint>Bonus draw · Today only · 컬처카드</FinePrint>
-      </View>
-    </TagBody>
-  );
-}
-
 export function CultureCardStack({
-  activeCard,
-  progress,
   dailyEarned,
   dailyLimit,
   loading,
   disabled,
   actionLabel,
   onOpen,
-  bonusMode,
-  openedCards,
+  activeCard,
   userRegion,
 }: CultureCardStackProps) {
   const styles = React.useMemo(() => createStyles(), []);
-  const openedCount = bonusMode ? 3 : progress.opened;
   const locationHook = buildLocationHook(activeCard);
 
   return (
@@ -419,14 +253,6 @@ export function CultureCardStack({
         <View>
           <Text style={styles.eyebrow}>{"TODAY'S CULTURE"}</Text>
           <Text style={styles.title}>오늘의 문화 카드</Text>
-        </View>
-        <View style={styles.prog}>
-          <Text style={styles.progText}>오늘 {openedCount} / 3</Text>
-          <View style={styles.segs}>
-            {[0, 1, 2].map((index) => (
-              <View key={index} style={[styles.seg, index < openedCount && styles.segOn]} />
-            ))}
-          </View>
         </View>
       </View>
 
@@ -438,11 +264,7 @@ export function CultureCardStack({
       ) : null}
 
       <View style={styles.tagArea}>
-        {bonusMode ? (
-          <BonusTag openedCards={openedCards} />
-        ) : (
-          <SealedTag />
-        )}
+        <SealedTag />
       </View>
 
       <Pressable
@@ -457,9 +279,9 @@ export function CultureCardStack({
       </Pressable>
 
       <Text style={styles.ctaHint}>
-        {bonusMode ? '오늘 3장을 다 열었어요 · 내일이면 티켓 한도가 초기화돼요' : '하루 3장 · 다 보면 보너스 카드가 열려요'}
+        광고 1번 = 카드 1장 · 티켓 적립
       </Text>
-      {!bonusMode && locationHook ? (
+      {locationHook ? (
         <Text style={styles.ctaHint}>
           <Text style={styles.ctaHookPin}>◉</Text> {locationHook}
         </Text>

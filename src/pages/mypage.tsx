@@ -5,7 +5,6 @@ import { ScrollView, StyleSheet, View, Text, TouchableOpacity, RefreshControl, P
 import { Loader, Icon, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import { useAuth } from '../hooks/useAuth';
-import { BottomTabBar } from '../components/BottomTabBar';
 import {
   getLikesV2,
   getRecentV2,
@@ -511,8 +510,6 @@ const [likeEvents, setLikeEvents] = useState<EventCardData[]>([]);
 
         <View style={{ height: 100 }} />
       </ScrollView>
-
-      <BottomTabBar currentTab="mypage" />
     </View>
   );
 }

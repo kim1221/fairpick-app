@@ -305,7 +305,7 @@ export function CultureCardReveal({ openedCard, onDetail, onNext, onSave }: Cult
       </View>
 
       <Pressable style={styles.next} onPress={onNext}>
-        <Text style={styles.nextText}>다음 카드 열기 ›</Text>
+        <Text style={styles.nextText}>다른 카드 열기 ›</Text>
       </Pressable>
     </View>
   );

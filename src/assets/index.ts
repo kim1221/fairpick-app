@@ -2,4 +2,5 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 export const eventPlaceholder = require('./images/event-placeholder.png');
 export const manilaTagTexture = require('./textures/manila-tag-texture.jpg');
+export const culturecardAppIcon = require('./images/branding/culturecard-app-icon.png');
 /* eslint-enable @typescript-eslint/no-require-imports */

@@ -64,13 +64,20 @@ let _configCache: TicketConfig | null = null;
 // Context/이벤트버스 없이 서비스 모듈 레벨에서 완결
 type TicketCountListener = (ticketCount: number) => void;
 const _ticketListeners = new Set<TicketCountListener>();
+let _lastKnownTicketCount: number | null = null;
 
 export function subscribeTicketCount(fn: TicketCountListener): () => void {
   _ticketListeners.add(fn);
   return () => _ticketListeners.delete(fn);
 }
 
-function _notifyTicketCount(ticketCount: number) {
+export function getLastKnownTicketCount(): number | null {
+  return _lastKnownTicketCount;
+}
+
+function rememberTicketCount(ticketCount: number) {
+  if (!Number.isFinite(ticketCount)) return;
+  _lastKnownTicketCount = ticketCount;
   _ticketListeners.forEach((fn) => fn(ticketCount));
 }
 
@@ -83,11 +90,13 @@ export async function getTicketConfig(): Promise<TicketConfig> {
 
 export async function getTickets(): Promise<TicketInfo> {
   const { data } = await http.get<TicketInfo>('/api/tickets');
+  rememberTicketCount(data.ticketCount);
   return data;
 }
 
 export async function getTicketHistory(): Promise<TicketHistoryResponse> {
   const { data } = await http.get<TicketHistoryResponse>('/api/tickets/history');
+  rememberTicketCount(data.ticketCount);
   return data;
 }
 
@@ -115,7 +124,7 @@ export async function earnTickets(eventId: string, adAttemptId?: string): Promis
   dailyLimit: number;
 }> {
   const { data } = await http.post('/api/tickets/earn', { eventId, adAttemptId });
-  _notifyTicketCount(data.ticketCount);
+  rememberTicketCount(data.ticketCount);
   return data;
 }
 
@@ -162,5 +171,6 @@ export async function exchangeTickets(): Promise<{ success: boolean; ticketCount
     grantResultKey,
   });
 
+  rememberTicketCount(data.ticketCount);
   return data;
 }
