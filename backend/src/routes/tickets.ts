@@ -13,6 +13,7 @@ import express, { Request, Response } from 'express';
 import { pool } from '../db';
 import { requireAuth } from '../middleware/requireAuth';
 import {
+  DAILY_OPEN_LIMIT,
   DAILY_TICKET_LIMIT,
   grantTicketsForEvent,
   TicketGrantError,
@@ -23,12 +24,12 @@ const router = express.Router();
 const TICKETS_PER_EXCHANGE = 10;
 /**
  * [정책 확정]
- * DAILY_LIMIT: 유저당 하루 최대 적립 조각 수 (KST 자정 기준 리셋)
+ * DAILY_LIMIT: 50회 × 최대 3티켓을 모두 지급하기 위한 안전 상한 (KST 자정 기준 리셋)
  * - 광고 fill rate 부족(failedToShow)과 정책 한도 도달은 의미가 다르므로 별도 처리
  * - DAILY_LIMIT_REACHED 응답 시에만 "오늘 티켓을 모두 모았어요" 문구 사용
  * - 광고 없음/오류는 "지금은 광고를 불러올 수 없어요" 문구로 분리
  *
- * DAILY_LIMIT clamp 정책:
+ * DAILY_LIMIT clamp 정책(정상 v2 흐름에서는 50회 제한이 먼저 적용됨):
  * - remaining=1일 때 randomTickets()=3이면 1조각 지급 (0장보다 나은 UX)
  * - 광고를 끝까지 본 사용자가 0장 받는 경험을 방지
  * - 정책 상한(30개)은 절대 초과하지 않음
@@ -145,6 +146,7 @@ router.get('/config', requireAuth, (_req: Request, res: Response) => {
     promotionCode,
     ticketsPerExchange: TICKETS_PER_EXCHANGE,
     dailyLimit: DAILY_LIMIT,
+    dailyOpenLimit: DAILY_OPEN_LIMIT,
   });
 });
 
@@ -344,7 +346,7 @@ router.post('/earn', requireAuth, async (req: Request, res: Response) => {
       adAttemptId: normalizedAdAttemptId,
     });
     await client.query('COMMIT');
-    console.log(`[Tickets] 🎟 earn: user=${userId} event=${eventId} earned=${result.earned} daily=${result.dailyEarned}/${DAILY_LIMIT}`);
+    console.log(`[Tickets] 🎟 earn: user=${userId} event=${eventId} earned=${result.earned} opens=${result.dailyOpenCount}/${result.dailyOpenLimit}`);
     return res.json(result);
   } catch (err) {
     await client.query('ROLLBACK');

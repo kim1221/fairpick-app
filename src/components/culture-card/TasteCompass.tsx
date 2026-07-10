@@ -2,13 +2,12 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { PersonalizationProfile } from '../../services/cardsService';
 import { getPersonalizationCopy } from './homeLogic';
-import { TAG_TOKENS } from './tagKit';
 
-const SURFACE = '#151A27';
-const LINE = 'rgba(117,139,186,0.28)';
-const TEXT = TAG_TOKENS.headText;
-const MUTED = TAG_TOKENS.navSub;
-const GOLD = '#CBA15E';
+const SURFACE = '#EEF1FF';
+const LINE = '#CBD3F2';
+const TEXT = '#171717';
+const MUTED = '#656B7B';
+const GOLD = '#3157D5';
 
 export function TasteCompass({ profile }: { profile: PersonalizationProfile }) {
   const copy = getPersonalizationCopy(profile);
@@ -57,7 +56,7 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 30,
     borderWidth: 1.5,
-    borderColor: 'rgba(203,161,94,0.55)',
+    borderColor: 'rgba(49,87,213,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
     transform: [{ rotate: '-8deg' }],
@@ -70,7 +69,7 @@ const styles = StyleSheet.create({
     bottom: 5,
     borderRadius: 25,
     borderWidth: 0.7,
-    borderColor: 'rgba(203,161,94,0.34)',
+    borderColor: 'rgba(49,87,213,0.30)',
   },
   compassMark: {
     position: 'absolute',
@@ -118,13 +117,13 @@ const styles = StyleSheet.create({
   chip: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(203,161,94,0.28)',
-    backgroundColor: 'rgba(203,161,94,0.09)',
+    borderColor: 'rgba(49,87,213,0.24)',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
   chipText: {
-    color: '#DDB877',
+    color: '#3157D5',
     fontSize: 10,
     lineHeight: 13,
     fontWeight: '800',

@@ -4,16 +4,21 @@ import { requireAuth } from '../middleware/requireAuth';
 import { calculateBoundingBox, getHaversineDistanceSQL } from '../utils/geo';
 import { reverseGeocodeRegion } from '../lib/geocode';
 import { openLockedCard, sealLockedCard } from '../services/cardToken';
-import { grantTicketsForEvent, TicketGrantError } from '../services/ticketGrant';
+import {
+  DAILY_OPEN_LIMIT,
+  DAILY_TICKET_LIMIT,
+  grantTicketsForEvent,
+  TicketGrantError,
+} from '../services/ticketGrant';
 
 const router = express.Router();
 
-const DAILY_LIMIT = 30;
+const DAILY_LIMIT = DAILY_TICKET_LIMIT;
 const TODAY_CARD_COUNT = 3;
 const WEEKLY_CARD_COUNT = 3;
 const CARD_POOL_LIMIT = 12;           // 최종 노출(오늘+더보기) 상한
-const CANDIDATE_LIMIT = 80;           // JS 재랭킹용 후보 풀(회전 여유)
-const MIN_ROTATION_POOL = 24;         // 이만큼 모이면 반경 확장 중단(회전 풀 확보)
+const CANDIDATE_LIMIT = 300;          // 헤비 유저도 하루 50장을 열 수 있는 회전 여유
+const MIN_ROTATION_POOL = 60;         // 이만큼 모이면 반경 확장 중단(회전 풀 확보)
 const RECENT_OPEN_COOLDOWN_DAYS = 14; // 연(광고 본) 카드 재등장 방지
 const IMPRESSION_COOLDOWN_DAYS = 7;   // 최근 보여준 카드 소프트 제외(매일 새 발견)
 const FRESHNESS_WINDOW_DAYS = 60;     // created_at 신선도 감쇠 창
@@ -51,7 +56,7 @@ type EventRow = {
 type TasteRow = { category: string | null; n: number | string; signal_count?: number | string };
 type ImpressionRow = { event_id: string };
 type TasteMap = Map<string, number>;
-type WeeklyOpenedEventRow = EventRow & { earn_date: string | Date | null };
+type WeeklyOpenedEventRow = EventRow & { earn_date: string | Date | null; total_count?: number | string };
 
 type OpenedEventRow = {
   event_id: string;
@@ -195,10 +200,16 @@ function dailySeed(userId: string, today: string): number {
 
 function weekKeyKst(today: string): string {
   const [year, month, day] = today.split('-').map(Number);
-  const date = new Date(Date.UTC(year, (month ?? 1) - 1, day ?? 1));
+  const date = new Date(Date.UTC(year ?? 1970, (month ?? 1) - 1, day ?? 1));
   const dayOfWeek = date.getUTCDay();
   const daysSinceMonday = (dayOfWeek + 6) % 7;
   date.setUTCDate(date.getUTCDate() - daysSinceMonday);
+  return date.toISOString().slice(0, 10);
+}
+
+function dateKeyDaysBefore(dateKey: string, days: number): string {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - days);
   return date.toISOString().slice(0, 10);
 }
 
@@ -480,7 +491,105 @@ function lockedTimingLabel(dday: number | null): string {
   return '일정 여유가 있어요';
 }
 
-function toLockedPreview(card: ReturnType<typeof toCard>, userId: string, today: string) {
+type CardNewsPalette = {
+  background: string;
+  foreground: string;
+  accent: string;
+};
+
+const CARD_NEWS_PALETTES: Record<string, CardNewsPalette[]> = {
+  전시: [
+    { background: '#3157D5', foreground: '#FFF8E8', accent: '#FFD65A' },
+    { background: '#EF684F', foreground: '#201A17', accent: '#FFE7A8' },
+  ],
+  공연: [
+    { background: '#7657D8', foreground: '#FFF9ED', accent: '#C9F36A' },
+    { background: '#E94F72', foreground: '#FFF8ED', accent: '#FFD45E' },
+  ],
+  팝업: [
+    { background: '#C9EF58', foreground: '#172017', accent: '#3157D5' },
+    { background: '#FF8E3C', foreground: '#251A13', accent: '#FFF0B8' },
+  ],
+  축제: [
+    { background: '#35A7E8', foreground: '#10202A', accent: '#FFE05F' },
+    { background: '#FFB83E', foreground: '#251B0F', accent: '#E94F72' },
+  ],
+  기타: [
+    { background: '#38B99A', foreground: '#10221E', accent: '#FFF0A6' },
+    { background: '#F1C8DD', foreground: '#2A1922', accent: '#7657D8' },
+  ],
+};
+
+function chooseStable<T>(items: T[], seed: number): T {
+  if (items.length === 0) throw new Error('EMPTY_STABLE_CHOICE');
+  return items[Math.abs(seed) % items.length]!;
+}
+
+function buildTeaserCopy(
+  card: ReturnType<typeof toCard>,
+  isRevisit: boolean,
+  seed: number,
+): { eyebrow: string; headline: string; palette: CardNewsPalette } {
+  const category = card.category || '기타';
+  const palettes = CARD_NEWS_PALETTES[category] ?? CARD_NEWS_PALETTES.기타!;
+  const palette = chooseStable(palettes, seed);
+  const hooks: Array<{ eyebrow: string; headline: string }> = [];
+  const hasTasteReason = card.reasonTags.some((reason) => reason.startsWith('취향 '));
+  const isFresh = card.reasonTags.includes('새로 등록');
+
+  if (isRevisit) {
+    hooks.push(
+      { eyebrow: '다시 추천', headline: `지금 다시 떠오른\n${category} 한 곳` },
+      { eyebrow: '놓치기 아까워서', headline: `한 번 더 골라본\n가까운 ${category}` },
+    );
+  }
+  if (card.dday != null && card.dday >= 0 && card.dday <= 7) {
+    hooks.push(
+      { eyebrow: `${card.dday === 0 ? '오늘' : `${card.dday}일 안에`} 마감`, headline: `이번 주가 지나기 전에\n열어볼 ${category}` },
+      { eyebrow: '곧 마감', headline: `지금 놓치기 아까운\n${category} 한 곳` },
+    );
+  }
+  if (card.walkMinutes != null && card.walkMinutes <= 40) {
+    hooks.push(
+      { eyebrow: `도보 ${card.walkMinutes}분`, headline: `산책 끝에 만나는\n가까운 ${category}` },
+      { eyebrow: '내 주변 발견', headline: `익숙한 동네에서\n열어볼 ${category}` },
+    );
+  }
+  if (hasTasteReason) {
+    hooks.push(
+      { eyebrow: `${category} 취향을 따라`, headline: `요즘의 관심사로 고른\n오늘의 한 곳` },
+      { eyebrow: '취향 추천', headline: `당신의 반응에서 찾은\n새로운 ${category}` },
+    );
+  }
+  if (isFresh) {
+    hooks.push(
+      { eyebrow: '이번 주 새로 발견', headline: `지금 처음 꺼내보는\n새로운 ${category}` },
+      { eyebrow: '새로 등록', headline: `오늘의 목록에 더해진\n${category} 한 곳` },
+    );
+  }
+
+  const fallbackByCategory: Record<string, string[]> = {
+    전시: ['오늘의 시선을 바꿔줄\n전시 한 곳', '평범한 하루에 더해볼\n새로운 장면'],
+    공연: ['오늘의 리듬을 바꿔줄\n가까운 무대', '직접 마주하고 싶은\n공연 한 편'],
+    팝업: ['잠깐 열려 있을 때\n들러볼 공간', '새로운 취향을 만나는\n팝업 한 곳'],
+    축제: ['하루의 온도를 바꿔줄\n가까운 축제', '이번 주에 더해볼\n활기찬 장면'],
+    기타: ['오늘 가볍게 열어볼\n문화 한 곳', '평범한 하루에 더해볼\n새로운 발견'],
+  };
+  const fallbacks = fallbackByCategory[category] ?? fallbackByCategory.기타!;
+  hooks.push(...fallbacks.map((headline) => ({ eyebrow: '오늘의 큐레이션', headline })));
+
+  const hook = chooseStable(hooks, seed ^ hashStr(card.eventId));
+  return { ...hook, palette };
+}
+
+function toLockedPreview(
+  card: ReturnType<typeof toCard>,
+  userId: string,
+  today: string,
+  isRevisit: boolean,
+  variant: number,
+) {
+  const teaser = buildTeaserCopy(card, isRevisit, hashStr(`${card.eventId}|${today}|${variant}`));
   return {
     cardToken: sealLockedCard({
       userId,
@@ -494,6 +603,10 @@ function toLockedPreview(card: ReturnType<typeof toCard>, userId: string, today:
     distanceLabel: card.walkMinutes == null ? null : `도보 ${card.walkMinutes}분`,
     timingLabel: lockedTimingLabel(card.dday),
     reasonTags: card.reasonTags,
+    teaserEyebrow: teaser.eyebrow,
+    teaserHeadline: teaser.headline,
+    palette: teaser.palette,
+    isRevisit,
   };
 }
 
@@ -526,7 +639,7 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
          LIMIT 1`,
         [userId],
       ),
-      // 한 번 공개한 canonical 이벤트는 다시 잠긴 카드로 만들지 않는다.
+      // 미발견을 최우선으로 고르고, 공급이 부족할 때만 오래된 발견을 다시 추천한다.
       pool.query<OpenedEventRow>(
         `SELECT el.event_id,
                 el.earn_date,
@@ -565,7 +678,8 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
         `SELECT ce.id, ce.title, ce.display_title, ce.content_key, ce.canonical_key,
                 ce.main_category, ce.region, ce.start_at, ce.end_at, ce.image_url,
                 ce.venue, ce.overview, ce.lat, ce.lng, ce.buzz_score, ce.created_at,
-                MAX(el.earn_date) AS earn_date
+                MAX(el.earn_date) AS earn_date,
+                COUNT(*) OVER()::int AS total_count
          FROM user_ticket_earn_log el
          JOIN canonical_events ce ON ce.id::text = el.event_id::text
          WHERE el.user_id = $1
@@ -582,9 +696,35 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
     const discoveredDedupeKeys = new Set(
       discoveredResult.rows.map((row) => row.dedupe_key).filter((key): key is string => !!key),
     );
-    const rows = location
-      ? await getNearbyEvents(today, location, discoveredEventIds, discoveredDedupeKeys)
-      : await getFallbackEvents(today, discoveredEventIds, discoveredDedupeKeys);
+    const todayOpenedRows = discoveredResult.rows.filter((row) => dateOnly(row.earn_date) === today);
+    const recentCutoff = dateKeyDaysBefore(today, RECENT_OPEN_COOLDOWN_DAYS - 1);
+    const recentOpenedRows = discoveredResult.rows.filter((row) => {
+      const openedOn = dateOnly(row.earn_date);
+      return openedOn != null && openedOn >= recentCutoff;
+    });
+    const setsFor = (openedRows: OpenedEventRow[]) => ({
+      ids: new Set(openedRows.map((row) => String(row.event_id))),
+      keys: new Set(openedRows.map((row) => row.dedupe_key).filter((key): key is string => !!key)),
+    });
+    const todayOpened = setsFor(todayOpenedRows);
+    const recentOpened = setsFor(recentOpenedRows);
+    const loadRows = (ids: Set<string>, keys: Set<string>) => (
+      location ? getNearbyEvents(today, location, ids, keys) : getFallbackEvents(today, ids, keys)
+    );
+
+    // 1) 평생 미발견 우선 → 2) 14일 지난 발견 허용 → 3) 오늘만 제외해 빈 화면 방지.
+    let rows = await loadRows(discoveredEventIds, discoveredDedupeKeys);
+    if (rows.length < TODAY_CARD_COUNT) {
+      rows = mergeRows(rows, await loadRows(recentOpened.ids, recentOpened.keys));
+    }
+    if (rows.length < TODAY_CARD_COUNT) {
+      rows = mergeRows(rows, await loadRows(todayOpened.ids, todayOpened.keys));
+    }
+    const revisitEventIds = new Set(rows
+      .filter((row) => (
+        discoveredEventIds.has(String(row.id)) || discoveredDedupeKeys.has(getEventDedupeKey(row))
+      ))
+      .map((row) => String(row.id)));
     const seed = dailySeed(userId, today);
     const taste = buildTasteMap(tasteResult.rows);
     const scoreById = new Map<string, number>();
@@ -596,7 +736,8 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
     const scored = (freshCards.length >= TODAY_CARD_COUNT ? freshCards : cards)
       .slice()
       .sort((a, b) => (scoreById.get(b.eventId) ?? 0) - (scoreById.get(a.eventId) ?? 0));
-    const selected = pickDiverseTodayCards(scored);
+    const dailyOpenCount = todayOpenedRows.length;
+    const selected = dailyOpenCount >= DAILY_OPEN_LIMIT ? [] : pickDiverseTodayCards(scored);
 
     const shownIds = selected.map((card) => card.eventId);
     if (shownIds.length > 0) {
@@ -617,17 +758,26 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
     const weeklyOpenedIds = new Set(weeklyOpenedResult.rows.map((row) => String(row.id)));
     const weeklyItems = dedupeRows(weeklyOpenedResult.rows)
       .map((row) => toCard(row, weeklyOpenedIds, location, taste));
+    const weeklyOpenedCount = Number(weeklyOpenedResult.rows[0]?.total_count ?? weeklyItems.length);
 
     return res.json({
-      lockedCards: selected.map((card) => toLockedPreview(card, userId, today)),
+      lockedCards: selected.map((card, index) => toLockedPreview(
+        card,
+        userId,
+        today,
+        revisitEventIds.has(card.eventId),
+        index,
+      )),
       ticketCount: ticketRow.ticket_count ?? 0,
       dailyEarned: dailyEarnedDate === today ? (ticketRow.daily_earned ?? 0) : 0,
       dailyLimit: DAILY_LIMIT,
+      dailyOpenCount,
+      dailyOpenLimit: DAILY_OPEN_LIMIT,
       userRegion: await userRegionPromise,
       weeklyDiscovery: {
         weekKey,
-        openedCount: weeklyItems.length,
-        goal: 7,
+        openedCount: weeklyOpenedCount,
+        goal: DAILY_OPEN_LIMIT,
         items: weeklyItems,
       },
       personalization: buildPersonalization(tasteResult.rows, taste),
@@ -692,7 +842,7 @@ router.post('/v2/open', requireAuth, async (req: Request, res: Response) => {
     });
     await client.query('COMMIT');
 
-    const fullCard = toCard(eventResult.rows[0], new Set([tokenPayload.eventId]), null, new Map());
+    const fullCard = toCard(eventResult.rows[0]!, new Set([tokenPayload.eventId]), null, new Map());
     fullCard.walkMinutes = tokenPayload.walkMinutes;
     fullCard.reasonTags = tokenPayload.reasonTags;
     return res.json({ card: fullCard, ...reward });

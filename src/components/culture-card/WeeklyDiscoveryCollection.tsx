@@ -9,8 +9,6 @@ export function WeeklyDiscoveryCollection({
   discovery: WeeklyDiscovery;
   onPressCard: (eventId: string) => void;
 }) {
-  const ratio = Math.min(1, discovery.openedCount / Math.max(1, discovery.goal));
-
   return (
     <View style={styles.section}>
       <View style={styles.header}>
@@ -22,11 +20,9 @@ export function WeeklyDiscoveryCollection({
               : '첫 문화를 발견해 보세요'}
           </Text>
         </View>
-        <Text style={styles.count}>{discovery.openedCount}/{discovery.goal}</Text>
-      </View>
-
-      <View style={styles.track}>
-        <View style={[styles.fill, { width: `${Math.round(ratio * 100)}%` }]} />
+        <View style={styles.countBadge}>
+          <Text style={styles.count}>{discovery.openedCount}</Text>
+        </View>
       </View>
       <Text style={styles.description}>
         광고로 공개한 이벤트만 이곳에 쌓여요. 열린 카드는 언제든 다시 볼 수 있어요.
@@ -63,9 +59,9 @@ const styles = StyleSheet.create({
     marginHorizontal: 22,
     marginTop: 26,
     borderRadius: 20,
-    backgroundColor: '#171512',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.09)',
+    borderColor: '#DDD8CE',
     padding: 18,
   },
   header: {
@@ -78,40 +74,36 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   eyebrow: {
-    color: '#D8B26A',
+    color: '#3157D5',
     fontSize: 11.5,
     lineHeight: 16,
     fontWeight: '800',
   },
   title: {
     marginTop: 4,
-    color: '#F5F1E9',
+    color: '#171717',
     fontSize: 18,
     lineHeight: 25,
     fontWeight: '900',
     letterSpacing: -0.4,
   },
+  countBadge: {
+    minWidth: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#EEF1FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   count: {
-    color: '#D8B26A',
+    color: '#3157D5',
     fontSize: 14,
     lineHeight: 20,
     fontWeight: '900',
   },
-  track: {
-    marginTop: 15,
-    height: 5,
-    borderRadius: 3,
-    overflow: 'hidden',
-    backgroundColor: '#302D28',
-  },
-  fill: {
-    height: '100%',
-    borderRadius: 3,
-    backgroundColor: '#D8B26A',
-  },
   description: {
-    marginTop: 10,
-    color: '#9A948B',
+    marginTop: 9,
+    color: '#6F6B65',
     fontSize: 12,
     lineHeight: 18,
     fontWeight: '600',
@@ -123,7 +115,7 @@ const styles = StyleSheet.create({
     minHeight: 66,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.07)',
+    borderTopColor: '#ECE8E0',
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -135,28 +127,28 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   category: {
-    color: '#C7A567',
+    color: '#3157D5',
     fontSize: 10.5,
     lineHeight: 15,
     fontWeight: '800',
   },
   cardTitle: {
     marginTop: 2,
-    color: '#F5F1E9',
+    color: '#171717',
     fontSize: 14,
     lineHeight: 20,
     fontWeight: '800',
   },
   meta: {
     marginTop: 1,
-    color: '#8F8980',
+    color: '#817C74',
     fontSize: 11,
     lineHeight: 16,
     fontWeight: '600',
   },
   chevron: {
     marginLeft: 10,
-    color: '#8F8980',
+    color: '#817C74',
     fontSize: 20,
     lineHeight: 24,
   },

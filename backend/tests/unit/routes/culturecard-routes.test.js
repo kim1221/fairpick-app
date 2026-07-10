@@ -95,7 +95,7 @@ test('GET /api/cards/today returns three unopened cards, morePool, and ticket to
     }
     if (text.includes('FROM canonical_events')) {
       canonicalSql.push(text);
-      assert.deepEqual(params.slice(-1), [80]);
+      assert.deepEqual(params.slice(-1), [300]);
       return {
         rows: [
           { id: 'event-1', title: '전시 하나', main_category: '전시', venue: 'A관', region: '서울', start_at: isoDaysFromNow(-2), end_at: isoDaysFromNow(2), image_url: 'https://img/1.jpg', overview: '첫 줄 소개\n둘째 줄', buzz_score: 50 },
@@ -123,7 +123,7 @@ test('GET /api/cards/today returns three unopened cards, morePool, and ticket to
   assert.equal(body.morePool.every((card) => card.opened === false), true);
   assert.equal(body.ticketCount, 7);
   assert.equal(body.dailyEarned, 4);
-  assert.equal(body.dailyLimit, 30);
+  assert.equal(body.dailyLimit, 150);
   assert.match(body.weeklyCuration.weekKey, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(body.weeklyCuration.title, '이번 주 문화 3선');
   assert.equal(body.weeklyCuration.items.length, 3);
@@ -183,12 +183,18 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
     assert.equal('title' in preview, false);
     assert.equal('venue' in preview, false);
     assert.equal('imageUrl' in preview, false);
+    assert.equal(typeof preview.teaserEyebrow, 'string');
+    assert.equal(typeof preview.teaserHeadline, 'string');
+    assert.equal(typeof preview.palette.background, 'string');
   }
+  assert.equal(todayResponse.body.dailyOpenCount, 1);
+  assert.equal(todayResponse.body.dailyOpenLimit, 50);
   assert.equal(todayResponse.body.weeklyDiscovery.items.length, 1);
   assert.equal(todayResponse.body.weeklyDiscovery.items[0].eventId, opened.id);
 
   await new Promise((resolve) => setImmediate(resolve));
   const token = todayResponse.body.lockedCards.find((card) => card.category === '전시').cardToken;
+  let grantOpenCount = 1;
   const client = {
     async query(sql) {
       const text = String(sql);
@@ -205,6 +211,9 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
       if (text.includes('INSERT INTO user_tickets')) return { rows: [], rowCount: 1 };
       if (text.includes('FROM user_tickets') && text.includes('FOR UPDATE')) {
         return { rows: [{ ticket_count: 4, daily_earned: 2, daily_earned_date: todayKst() }], rowCount: 1 };
+      }
+      if (text.includes('COUNT(*)::int AS count') && text.includes('user_ticket_earn_log')) {
+        return { rows: [{ count: grantOpenCount }], rowCount: 1 };
       }
       if (text.includes('UPDATE user_tickets')) {
         return { rows: [{ ticket_count: 5, total_earned: 5 }], rowCount: 1 };
@@ -226,6 +235,17 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
   assert.equal(openedResponse.body.card.title, '비밀 전시');
   assert.equal(openedResponse.body.card.opened, true);
   assert.ok(openedResponse.body.earned >= 1 && openedResponse.body.earned <= 3);
+  assert.equal(openedResponse.body.dailyOpenCount, 1);
+  assert.equal(openedResponse.body.dailyOpenLimit, 50);
+
+  grantOpenCount = 51;
+  const cappedResponse = await request(makeApp(cardsRouter), 'POST', '/v2/open', {
+    cardToken: token,
+    adAttemptId: 'attempt-v2-cap',
+  });
+  assert.equal(cappedResponse.status, 429);
+  assert.equal(cappedResponse.body.error, 'DAILY_OPEN_LIMIT_REACHED');
+  assert.equal(cappedResponse.body.dailyOpenLimit, 50);
 });
 
 test('GET /api/cards/today explains weighted taste personalization', async () => {

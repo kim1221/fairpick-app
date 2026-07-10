@@ -60,6 +60,14 @@ export type LockedCardPreview = {
   distanceLabel: string | null;
   timingLabel: string;
   reasonTags: string[];
+  teaserEyebrow: string;
+  teaserHeadline: string;
+  palette: {
+    background: string;
+    foreground: string;
+    accent: string;
+  };
+  isRevisit: boolean;
 };
 
 export type WeeklyDiscovery = {
@@ -74,6 +82,8 @@ export type CardsTodayV2Response = {
   ticketCount: number;
   dailyEarned: number;
   dailyLimit: number;
+  dailyOpenCount: number;
+  dailyOpenLimit: number;
   userRegion: string | null;
   weeklyDiscovery: WeeklyDiscovery;
   personalization: PersonalizationProfile;
@@ -87,6 +97,8 @@ export type OpenCultureCardResponse = {
   canExchange: boolean;
   dailyEarned: number;
   dailyLimit: number;
+  dailyOpenCount: number;
+  dailyOpenLimit: number;
 };
 
 export type CardLocation = {

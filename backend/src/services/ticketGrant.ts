@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 
-export const DAILY_TICKET_LIMIT = 30;
+export const DAILY_OPEN_LIMIT = 50;
+export const DAILY_TICKET_LIMIT = DAILY_OPEN_LIMIT * 3;
 
 export type TicketGrantResult = {
   earned: number;
@@ -9,11 +10,16 @@ export type TicketGrantResult = {
   canExchange: boolean;
   dailyEarned: number;
   dailyLimit: number;
+  dailyOpenCount: number;
+  dailyOpenLimit: number;
 };
 
 export class TicketGrantError extends Error {
   constructor(
-    public readonly code: 'EVENT_ALREADY_EARNED_TODAY' | 'DAILY_LIMIT_REACHED',
+    public readonly code:
+      | 'EVENT_ALREADY_EARNED_TODAY'
+      | 'DAILY_LIMIT_REACHED'
+      | 'DAILY_OPEN_LIMIT_REACHED',
     public readonly status: 409 | 429,
     public readonly details: Record<string, unknown> = {},
   ) {
@@ -67,6 +73,20 @@ export async function grantTicketsForEvent(
     [userId],
   );
   const row = lockRows[0];
+  const { rows: openCountRows } = await client.query(
+    `SELECT COUNT(*)::int AS count
+     FROM user_ticket_earn_log
+     WHERE user_id = $1 AND earn_date = $2::date`,
+    [userId, today],
+  );
+  const dailyOpenCount = Number(openCountRows[0]?.count ?? 0);
+  if (dailyOpenCount > DAILY_OPEN_LIMIT) {
+    throw new TicketGrantError('DAILY_OPEN_LIMIT_REACHED', 429, {
+      dailyOpenCount: dailyOpenCount - 1,
+      dailyOpenLimit: DAILY_OPEN_LIMIT,
+    });
+  }
+
   const isNewDay = !row.daily_earned_date || String(row.daily_earned_date).slice(0, 10) !== today;
   const currentDailyEarned = isNewDay ? 0 : (row.daily_earned ?? 0);
   const remaining = DAILY_TICKET_LIMIT - currentDailyEarned;
@@ -122,5 +142,7 @@ export async function grantTicketsForEvent(
     canExchange: updated[0].ticket_count >= 10,
     dailyEarned: newDailyEarned,
     dailyLimit: DAILY_TICKET_LIMIT,
+    dailyOpenCount,
+    dailyOpenLimit: DAILY_OPEN_LIMIT,
   };
 }

@@ -27,8 +27,8 @@ export const AD_SHOW_TERMINAL_TIMEOUT_MS = 240_000;
 const REWARD_AD_PROGRESS_EVENTS = new Set(['requested', 'show', 'impression', 'clicked']);
 
 const DAILY_LIMIT_COPY: HomeCopy = {
-  title: '오늘 티켓을 다 모았어요',
-  description: '내일 다시 새로운 문화카드를 열 수 있어요.',
+  title: '오늘 컬처카드 50장을 모두 열었어요',
+  description: '공개한 카드는 여권에서 다시 보고, 내일 새로운 카드를 열 수 있어요.',
 };
 
 const EARN_FAILED_COPY: HomeCopy = {
@@ -55,7 +55,10 @@ function getServerStatus(error: unknown): number | undefined {
 }
 
 export function isDailyLimitReachedError(error: unknown): boolean {
-  return getServerStatus(error) === 429 || getServerErrorCode(error) === 'DAILY_LIMIT_REACHED';
+  const code = getServerErrorCode(error);
+  return getServerStatus(error) === 429
+    || code === 'DAILY_LIMIT_REACHED'
+    || code === 'DAILY_OPEN_LIMIT_REACHED';
 }
 
 export function getEarnFailureCopy(error: unknown): HomeCopy {
@@ -81,9 +84,15 @@ export function getTodayCardProgress(data: CardsTodayResponse | null): TodayCard
 }
 
 export function hasReachedDailyLimit(
-  data: Pick<CardsTodayResponse, 'dailyLimit' | 'dailyEarned'> | null,
+  data: (Pick<CardsTodayResponse, 'dailyLimit' | 'dailyEarned'> & {
+    dailyOpenCount?: number;
+    dailyOpenLimit?: number;
+  }) | null,
 ): boolean {
   if (!data) return false;
+  if (typeof data.dailyOpenCount === 'number' && typeof data.dailyOpenLimit === 'number') {
+    return data.dailyOpenLimit > 0 && data.dailyOpenCount >= data.dailyOpenLimit;
+  }
   return data.dailyLimit > 0 && data.dailyEarned >= data.dailyLimit;
 }
 

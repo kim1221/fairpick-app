@@ -34,6 +34,7 @@ export interface TicketConfig {
   promotionCode: string;
   ticketsPerExchange: number;
   dailyLimit: number;
+  dailyOpenLimit?: number;
 }
 
 export type RewardAdEventType =
@@ -122,6 +123,8 @@ export async function earnTickets(eventId: string, adAttemptId?: string): Promis
   canExchange: boolean;
   dailyEarned: number;
   dailyLimit: number;
+  dailyOpenCount?: number;
+  dailyOpenLimit?: number;
 }> {
   const { data } = await http.post('/api/tickets/earn', { eventId, adAttemptId });
   rememberTicketCount(data.ticketCount);

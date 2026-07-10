@@ -3,13 +3,13 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Icon } from '@toss/tds-react-native';
 import type { Card } from '../../services/cardsService';
 
-const SURFACE = '#F3EEE3';
+const SURFACE = '#FFFFFF';
 const INK = '#211F1B';
 const SUB = '#69645B';
-const GOLD = '#B88735';
+const GOLD = '#3157D5';
 const RED = '#B43A27';
 const LINE = 'rgba(33,31,27,0.14)';
-const DARK_TEXT = '#F4EFE6';
+const DARK_TEXT = '#171717';
 
 export interface RevealedCultureCard {
   card: Card;
@@ -133,12 +133,12 @@ const styles = StyleSheet.create({
   },
   rewardPill: {
     borderRadius: 999,
-    backgroundColor: 'rgba(216,178,106,0.16)',
+    backgroundColor: '#E9EDFF',
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   rewardPillText: {
-    color: '#E4BD74',
+    color: '#3157D5',
     fontSize: 11.5,
     lineHeight: 16,
     fontWeight: '900',
@@ -147,6 +147,8 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     overflow: 'hidden',
     backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: '#DDD8CE',
   },
   copy: {
     paddingHorizontal: 20,
@@ -263,7 +265,7 @@ const styles = StyleSheet.create({
     flex: 1.7,
     height: 52,
     borderRadius: 15,
-    backgroundColor: '#E3C98F',
+    backgroundColor: '#3157D5',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -272,14 +274,15 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: 15,
     borderWidth: 1,
-    borderColor: 'rgba(244,239,230,0.24)',
+    borderColor: '#D8D2C7',
+    backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
   },
   primaryText: {
-    color: INK,
+    color: '#FFFFFF',
     fontSize: 14.5,
     lineHeight: 20,
     fontWeight: '900',
@@ -295,7 +298,7 @@ const styles = StyleSheet.create({
     paddingVertical: 17,
   },
   nextText: {
-    color: '#A7A095',
+    color: '#6F6B65',
     fontSize: 12.5,
     lineHeight: 18,
     fontWeight: '700',

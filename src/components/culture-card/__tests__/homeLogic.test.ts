@@ -7,6 +7,7 @@ import {
   getNextOpenableCard,
   getPersonalizationCopy,
   getTodayCardProgress,
+  hasReachedDailyLimit,
   isRewardAdProgressEvent,
   markCardOpened,
 } from '../homeLogic';
@@ -60,6 +61,21 @@ describe('culture-card home logic', () => {
     expect(next).toBeNull();
   });
 
+  test('uses the 50-card open count when v2 limit fields are present', () => {
+    expect(hasReachedDailyLimit({
+      dailyEarned: 40,
+      dailyLimit: 150,
+      dailyOpenCount: 50,
+      dailyOpenLimit: 50,
+    })).toBe(true);
+    expect(hasReachedDailyLimit({
+      dailyEarned: 40,
+      dailyLimit: 150,
+      dailyOpenCount: 49,
+      dailyOpenLimit: 50,
+    })).toBe(false);
+  });
+
   test('counts progress from exactly three today cards', () => {
     expect(getTodayCardProgress(response({
       today: [card('a', true), card('b'), card('c'), card('d')],
@@ -74,7 +90,7 @@ describe('culture-card home logic', () => {
     const limitError = { response: { status: 429, data: { error: 'DAILY_LIMIT_REACHED' } } };
     const networkError = new Error('network');
 
-    expect(getEarnFailureCopy(limitError).title).toBe('오늘 티켓을 다 모았어요');
+    expect(getEarnFailureCopy(limitError).title).toContain('50장');
     expect(getEarnFailureCopy(networkError).title).toBe('티켓 적립에 실패했어요');
   });
 

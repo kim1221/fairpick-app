@@ -10,13 +10,12 @@ interface CultureCardStatePanelProps {
   onAction?: () => void;
 }
 
-// 워엄 다크 · 마닐라 토큰(컬처카드 태그 방향)
-const MANILA = '#D9C7A0';
-const INK = '#2C2A22';
-const WARM_TEXT = '#EDE6D6';
-const WARM_SUB = '#9A8F77';
-const WARM_SURFACE = '#1A140D';
-const WARM_LINE = '#4A3F2C';
+const MANILA = '#3157D5';
+const INK = '#FFFFFF';
+const WARM_TEXT = '#171717';
+const WARM_SUB = '#6F6B65';
+const WARM_SURFACE = '#FFFFFF';
+const WARM_LINE = '#DDD8CE';
 
 function createStyles() {
   return StyleSheet.create({
@@ -84,16 +83,16 @@ function createStyles() {
       fontWeight: '800',
     },
     secondaryButtonText: {
-      color: WARM_TEXT,
+      color: '#3157D5',
     },
   });
 }
 
 const toneColors = {
-  neutral: { backgroundColor: 'rgba(217,199,160,0.14)', color: '#C9B688', mark: '-' },
-  danger: { backgroundColor: 'rgba(168,51,31,0.18)', color: '#C9614B', mark: '!' },
-  success: { backgroundColor: 'rgba(217,199,160,0.18)', color: MANILA, mark: '+' },
-  blue: { backgroundColor: 'rgba(217,199,160,0.18)', color: MANILA, mark: 'T' },
+  neutral: { backgroundColor: '#F0EDE7', color: '#6F6B65', mark: '-' },
+  danger: { backgroundColor: '#FCE9E5', color: '#C44732', mark: '!' },
+  success: { backgroundColor: '#E8F6EE', color: '#218653', mark: '+' },
+  blue: { backgroundColor: '#E9EDFF', color: MANILA, mark: 'T' },
 } as const;
 
 export function CultureCardStatePanel({

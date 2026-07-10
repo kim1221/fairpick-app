@@ -53,15 +53,15 @@ export const Route = createRoute('/', {
 
 const REWARDED_AD_ID = 'ait.v2.live.b50cf7d900884c5b';
 const AD_LOAD_TIMEOUT_MS = 15_000;
-// 워엄 다크 배경 + 마닐라 워엄톤 크롬 (컬처카드 태그 방향)
-const INK = '#100D09';
-const INK_BOTTOM = '#0A0805';
-const SURFACE = '#1A140D';
-const LINE = '#4A3F2C';
-const GOLD = '#D9C7A0';
-const TEXT = '#EDE6D6';
-const MUTED = '#9A8F77';
-const MUTED_2 = '#7A6E58';
+// 카드뉴스의 색이 살아나도록 따뜻한 밝은 캔버스를 사용한다.
+const INK = '#F7F5EF';
+const INK_BOTTOM = '#EFECE4';
+const SURFACE = '#FFFFFF';
+const LINE = '#DDD8CE';
+const GOLD = '#3157D5';
+const TEXT = '#171717';
+const MUTED = '#6F6B65';
+const MUTED_2 = '#817C74';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
 type HomeStatus = 'loading' | 'ready' | 'ad_loading' | 'ad_failed' | 'earn_failed' | 'daily_limit' | 'revealed' | 'empty';
@@ -105,7 +105,7 @@ function createStyles(a: Adaptive) {
       justifyContent: 'center',
     },
     markText: {
-      color: '#2C2A22',
+      color: '#FFFFFF',
       fontSize: 13,
       lineHeight: 18,
       fontWeight: '900',
@@ -121,8 +121,8 @@ function createStyles(a: Adaptive) {
       borderRadius: 999,
       paddingHorizontal: 12,
       borderWidth: 1,
-      borderColor: 'rgba(203,161,94,0.45)',
-      backgroundColor: 'rgba(203,161,94,0.14)',
+      borderColor: '#D8D2C7',
+      backgroundColor: '#FFFFFF',
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
@@ -143,7 +143,7 @@ function createStyles(a: Adaptive) {
     ticketChipDivider: {
       width: 1,
       height: 13,
-      backgroundColor: 'rgba(203,161,94,0.4)',
+      backgroundColor: '#D8D2C7',
       marginHorizontal: 2,
     },
     ticketChipCta: {
@@ -304,7 +304,7 @@ function HomePageInner() {
         : (data.lockedCards[0]?.cardToken ?? null)
     ));
     if (hasReachedDailyLimit(data)) {
-      setStatusCopy(getEarnFailureCopy({ response: { status: 429, data: { error: 'DAILY_LIMIT_REACHED' } } }));
+      setStatusCopy(getEarnFailureCopy({ response: { status: 429, data: { error: 'DAILY_OPEN_LIMIT_REACHED' } } }));
       setStatus('daily_limit');
       return;
     }
@@ -347,8 +347,8 @@ function HomePageInner() {
   }, [cardsData?.lockedCards, selectedToken]);
   const dailyLimitReached = hasReachedDailyLimit(cardsData);
   const ticketCount = cardsData?.ticketCount ?? 0;
-  const dailyEarned = cardsData?.dailyEarned ?? 0;
-  const dailyLimit = cardsData?.dailyLimit ?? 30;
+  const dailyOpenCount = cardsData?.dailyOpenCount ?? 0;
+  const dailyOpenLimit = cardsData?.dailyOpenLimit ?? 50;
 
   const handleRefresh = useCallback(async () => {
     if (!isLoggedIn) return;
@@ -393,7 +393,7 @@ function HomePageInner() {
       return;
     }
     if (dailyLimitReached) {
-      const copy = getEarnFailureCopy({ response: { status: 429, data: { error: 'DAILY_LIMIT_REACHED' } } });
+      const copy = getEarnFailureCopy({ response: { status: 429, data: { error: 'DAILY_OPEN_LIMIT_REACHED' } } });
       setStatusCopy(copy);
       setStatus('daily_limit');
       openAlert(copy);
@@ -501,6 +501,8 @@ function HomePageInner() {
               ticketCount: result.ticketCount,
               dailyEarned: result.dailyEarned,
               dailyLimit: result.dailyLimit,
+              dailyOpenCount: result.dailyOpenCount,
+              dailyOpenLimit: result.dailyOpenLimit,
             } : prev);
             setOpenedCard({
               card: result.card,
@@ -623,7 +625,7 @@ function HomePageInner() {
   const actionLabel = !isLoggedIn && !authLoading
     ? '로그인하고 열기'
     : dailyLimitReached
-      ? '오늘 티켓 완료'
+      ? '오늘 50장 공개 완료'
       : '광고 보고 열기';
   const stackDisabled = (
     authLoading
@@ -672,8 +674,8 @@ function HomePageInner() {
             <CultureCardStack
               cards={cardsData?.lockedCards ?? []}
               selectedToken={activeCard?.cardToken ?? null}
-              dailyEarned={dailyEarned}
-              dailyLimit={dailyLimit}
+              dailyOpenCount={dailyOpenCount}
+              dailyOpenLimit={dailyOpenLimit}
               loading={status === 'ad_loading' || adLoadStatus === 'loading'}
               disabled={stackDisabled}
               actionLabel={actionLabel}
@@ -722,8 +724,8 @@ function HomePageInner() {
             {status === 'daily_limit' ? (
               <CultureCardStatePanel
                 label="오늘 완료"
-                title={statusCopy?.title ?? '오늘 티켓을 다 모았어요'}
-                description={statusCopy?.description ?? '내일 다시 새로운 문화카드를 열 수 있어요.'}
+                title={statusCopy?.title ?? '오늘 컬처카드 50장을 모두 열었어요'}
+                description={statusCopy?.description ?? '공개한 카드는 여권에서 다시 볼 수 있어요.'}
                 tone="success"
               />
             ) : null}
