@@ -21,6 +21,25 @@ export type Card = {
   walkMinutes: number | null;
   blurb: string | null; // 짧은 소개(overview 1줄)
   opened: boolean; // 오늘 이 event에서 이미 earn했는지
+  reasonTags?: string[]; // 내 주변·취향·신선도 등 추천 이유(구버전 서버 호환 optional)
+};
+
+export type WeeklyCuration = {
+  weekKey: string; // KST 월요일 YYYY-MM-DD
+  region: string | null;
+  title: string;
+  subtitle: string;
+  items: Card[];
+};
+
+export type PersonalizationProfile = {
+  level: 'cold' | 'growing' | 'established';
+  signalCount: number;
+  topCategories: Array<{
+    category: string;
+    score: number;
+    signals: number;
+  }>;
 };
 
 export type CardsTodayResponse = {
@@ -30,6 +49,8 @@ export type CardsTodayResponse = {
   dailyEarned: number;
   dailyLimit: number; // 30
   userRegion: string | null; // 내 위치 동네명(역지오코딩), 좌표 없거나 실패 시 null
+  weeklyCuration?: WeeklyCuration;
+  personalization?: PersonalizationProfile;
 };
 
 export type CardLocation = {

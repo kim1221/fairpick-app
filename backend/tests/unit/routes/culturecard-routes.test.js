@@ -124,7 +124,61 @@ test('GET /api/cards/today returns three unopened cards, morePool, and ticket to
   assert.equal(body.ticketCount, 7);
   assert.equal(body.dailyEarned, 4);
   assert.equal(body.dailyLimit, 30);
+  assert.match(body.weeklyCuration.weekKey, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(body.weeklyCuration.title, '이번 주 문화 3선');
+  assert.equal(body.weeklyCuration.items.length, 3);
+  assert.deepEqual(body.personalization, {
+    level: 'cold',
+    signalCount: 0,
+    topCategories: [],
+  });
+  assert.equal(Array.isArray(body.today[0].reasonTags), true);
   assert.match(canonicalSql[0], /is_deleted\s*=\s*false/i);
+});
+
+test('GET /api/cards/today explains weighted taste personalization', async () => {
+  pool.query = async (sql) => {
+    const text = String(sql);
+    if (text.includes('user_card_impressions')) return { rows: [] };
+    if (text.includes('user_likes')) {
+      assert.match(text, /3::int AS weight/);
+      assert.match(text, /4::int AS weight/);
+      assert.match(text, /FROM user_visit_log/);
+      return {
+        rows: [
+          { category: '전시', n: '8', signal_count: '6' },
+          { category: '공연', n: '2', signal_count: '2' },
+        ],
+      };
+    }
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 3, daily_earned: 1, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('FROM user_ticket_earn_log')) return { rows: [] };
+    if (text.includes('FROM canonical_events')) {
+      return {
+        rows: [
+          { id: 'taste-exhibition', title: '취향 전시', main_category: '전시', venue: 'A관', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(20), image_url: null, overview: null, buzz_score: 30 },
+          { id: 'taste-performance', title: '취향 공연', main_category: '공연', venue: 'B홀', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(20), image_url: null, overview: null, buzz_score: 20 },
+          { id: 'explore-popup', title: '탐색 팝업', main_category: '팝업', venue: 'C존', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(20), image_url: null, overview: null, buzz_score: 10 },
+        ],
+      };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(cardsRouter), 'GET', '/today');
+
+  assert.equal(status, 200);
+  assert.equal(body.personalization.level, 'established');
+  assert.equal(body.personalization.signalCount, 8);
+  assert.deepEqual(body.personalization.topCategories.map((item) => item.category), ['전시', '공연']);
+  assert.equal(
+    [...body.today, ...body.morePool]
+      .find((card) => card.eventId === 'taste-exhibition')
+      .reasonTags.includes('취향 전시'),
+    true,
+  );
 });
 
 test('GET /api/cards/today expands nearby radius, excludes opened events, diversifies categories, and fills walkMinutes', async () => {

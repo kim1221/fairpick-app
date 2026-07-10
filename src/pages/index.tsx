@@ -18,6 +18,8 @@ import { BottomTabBar } from '../components/BottomTabBar';
 import { CultureCardReveal, type RevealedCultureCard } from '../components/culture-card/CultureCardReveal';
 import { CultureCardStack } from '../components/culture-card/CultureCardStack';
 import { CultureCardStatePanel } from '../components/culture-card/CultureCardStatePanel';
+import { TasteCompass } from '../components/culture-card/TasteCompass';
+import { WeeklyCultureCollection } from '../components/culture-card/WeeklyCultureCollection';
 import {
   AD_LOAD_FAILED_COPY,
   AD_LOADING_COPY,
@@ -719,6 +721,17 @@ function HomePageInner() {
             ) : null}
           </>
         )}
+
+        {cardsData?.weeklyCuration ? (
+          <WeeklyCultureCollection
+            curation={cardsData.weeklyCuration}
+            onPressCard={(eventId) => navigation.navigate('/events/:id', { id: eventId })}
+          />
+        ) : null}
+
+        {cardsData?.personalization ? (
+          <TasteCompass profile={cardsData.personalization} />
+        ) : null}
 
         {!isLoggedIn && !authLoading ? (
           <View style={styles.loginBox}>

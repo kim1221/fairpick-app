@@ -5,8 +5,10 @@ import {
   AD_SHOW_TERMINAL_TIMEOUT_MS,
   getEarnFailureCopy,
   getNextOpenableCard,
+  getPersonalizationCopy,
   getTodayCardProgress,
   isRewardAdProgressEvent,
+  markCardOpened,
 } from '../homeLogic';
 
 function card(eventId: string, opened = false): Card {
@@ -85,5 +87,48 @@ describe('culture-card home logic', () => {
     expect(isRewardAdProgressEvent('dismissed')).toBe(false);
     expect(isRewardAdProgressEvent('failedToShow')).toBe(false);
     expect(AD_SHOW_TERMINAL_TIMEOUT_MS).toBeGreaterThan(AD_SHOW_REQUEST_TIMEOUT_MS);
+  });
+
+  test('explains growing and established taste profiles', () => {
+    expect(getPersonalizationCopy({
+      level: 'growing',
+      signalCount: 3,
+      topCategories: [{ category: '전시', score: 1, signals: 4 }],
+    }).title).toBe('전시 취향이 보여요');
+
+    expect(getPersonalizationCopy({
+      level: 'established',
+      signalCount: 8,
+      topCategories: [
+        { category: '전시', score: 1, signals: 8 },
+        { category: '공연', score: 0.6, signals: 5 },
+      ],
+    }).description).toContain('새로운 장르');
+  });
+
+  test('preserves weekly curation and personalization after opening a card', () => {
+    const data = response({
+      weeklyCuration: {
+        weekKey: '2026-07-06',
+        region: '성동구',
+        title: '성동구 이번 주 문화 3선',
+        subtitle: '월요일마다 새로 골라요',
+        items: [card('weekly')],
+      },
+      personalization: {
+        level: 'growing',
+        signalCount: 2,
+        topCategories: [{ category: '전시', score: 1, signals: 2 }],
+      },
+    });
+
+    const next = markCardOpened(data, 'b', {
+      ticketCount: 9,
+      dailyEarned: 14,
+      dailyLimit: 30,
+    });
+
+    expect(next.weeklyCuration?.weekKey).toBe('2026-07-06');
+    expect(next.personalization?.topCategories[0]?.category).toBe('전시');
   });
 });

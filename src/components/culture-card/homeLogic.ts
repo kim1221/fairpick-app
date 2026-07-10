@@ -1,4 +1,4 @@
-import type { Card, CardsTodayResponse } from '../../services/cardsService';
+import type { Card, CardsTodayResponse, PersonalizationProfile } from '../../services/cardsService';
 
 export type HomeCopy = {
   title: string;
@@ -102,11 +102,31 @@ export function markCardOpened(data: CardsTodayResponse, eventId: string, ticket
   );
 
   return {
+    ...data,
     today: data.today.map(mark),
     morePool: data.morePool.map(mark).filter((card) => card.eventId !== eventId),
     ticketCount: ticketResult.ticketCount,
     dailyEarned: ticketResult.dailyEarned,
     dailyLimit: ticketResult.dailyLimit,
-    userRegion: data.userRegion,
+  };
+}
+
+export function getPersonalizationCopy(profile: PersonalizationProfile): HomeCopy {
+  const top = profile.topCategories.map((item) => item.category).slice(0, 2);
+  if (profile.level === 'cold' || top.length === 0) {
+    return {
+      title: '취향을 탐색하고 있어요',
+      description: '카드를 열고 저장하거나 도장을 남기면 추천이 선명해져요.',
+    };
+  }
+  if (profile.level === 'growing') {
+    return {
+      title: `${top.join(' · ')} 취향이 보여요`,
+      description: '반응이 쌓일수록 가까운 문화 중 취향에 맞는 순서를 더 잘 골라요.',
+    };
+  }
+  return {
+    title: `${top.join(' · ')} 중심으로 골랐어요`,
+    description: '익숙한 취향과 새로운 장르를 섞어 한쪽으로만 좁아지지 않게 추천해요.',
   };
 }

@@ -110,6 +110,26 @@ function createStyles() {
       fontWeight: '700',
       letterSpacing: -0.2,
     },
+    reasonRow: {
+      marginTop: 9,
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    reasonPill: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: 'rgba(203,161,94,0.28)',
+      backgroundColor: 'rgba(203,161,94,0.08)',
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+    },
+    reasonText: {
+      color: MANILA,
+      fontSize: 10.5,
+      lineHeight: 14,
+      fontWeight: '800',
+    },
     tagArea: {
       marginTop: 14,
     },
@@ -260,6 +280,16 @@ export function CultureCardStack({
         <View style={styles.locPill}>
           <Text style={styles.locPin}>◉</Text>
           <Text style={styles.locText}>내 위치 · {userRegion}</Text>
+        </View>
+      ) : null}
+
+      {(activeCard?.reasonTags ?? []).length > 0 ? (
+        <View style={styles.reasonRow}>
+          {(activeCard?.reasonTags ?? []).map((reason) => (
+            <View key={reason} style={styles.reasonPill}>
+              <Text style={styles.reasonText}>{reason}</Text>
+            </View>
+          ))}
         </View>
       ) : null}
 

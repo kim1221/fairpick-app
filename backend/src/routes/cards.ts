@@ -8,6 +8,7 @@ const router = express.Router();
 
 const DAILY_LIMIT = 30;
 const TODAY_CARD_COUNT = 3;
+const WEEKLY_CARD_COUNT = 3;
 const CARD_POOL_LIMIT = 12;           // 최종 노출(오늘+더보기) 상한
 const CANDIDATE_LIMIT = 80;           // JS 재랭킹용 후보 풀(회전 여유)
 const MIN_ROTATION_POOL = 24;         // 이만큼 모이면 반경 확장 중단(회전 풀 확보)
@@ -45,7 +46,7 @@ type EventRow = {
   created_at?: string | Date | null;
 };
 
-type TasteRow = { category: string | null; n: number | string };
+type TasteRow = { category: string | null; n: number | string; signal_count?: number | string };
 type ImpressionRow = { event_id: string };
 type TasteMap = Map<string, number>;
 
@@ -189,6 +190,19 @@ function dailySeed(userId: string, today: string): number {
   return hashStr(`${userId}|${today}`);
 }
 
+function weekKeyKst(today: string): string {
+  const [year, month, day] = today.split('-').map(Number);
+  const date = new Date(Date.UTC(year, (month ?? 1) - 1, day ?? 1));
+  const dayOfWeek = date.getUTCDay();
+  const daysSinceMonday = (dayOfWeek + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - daysSinceMonday);
+  return date.toISOString().slice(0, 10);
+}
+
+function weeklySeed(userId: string, weekKey: string): number {
+  return hashStr(`${userId}|week|${weekKey}`);
+}
+
 function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value;
 }
@@ -223,21 +237,64 @@ function scoreRow(row: EventRow, ctx: { location: LocationQuery | null; taste: T
   );
 }
 
-// 취향맵: (연 이벤트 90일 + 좋아요) 카테고리 빈도를 0..1로 정규화
-function buildTasteMap(rows: TasteRow[]): TasteMap {
+function buildTasteCounts(rows: TasteRow[]): Map<string, number> {
   const counts = new Map<string, number>();
   for (const r of rows) {
     if (!r.category) continue;
     const cat = normalizeCategory(r.category);
     counts.set(cat, (counts.get(cat) ?? 0) + Number(r.n));
   }
+  return counts;
+}
+
+// 취향맵: 카드 열기(1) + 좋아요(3) + 도장(4)의 가중 신호를 0..1로 정규화
+function buildTasteMap(rows: TasteRow[]): TasteMap {
+  const counts = buildTasteCounts(rows);
   const max = Math.max(1, ...counts.values());
   const taste: TasteMap = new Map();
   for (const [cat, n] of counts) taste.set(cat, n / max);
   return taste;
 }
 
-function toCard(row: EventRow, openedEventIds: Set<string>, location?: LocationQuery | null) {
+function buildPersonalization(rows: TasteRow[], taste: TasteMap) {
+  const counts = buildTasteCounts(rows);
+  const signalCount = rows.reduce((sum, row) => sum + Number(row.signal_count ?? row.n ?? 0), 0);
+  const topCategories = Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ko'))
+    .slice(0, 3)
+    .map(([category, signals]) => ({
+      category,
+      score: Number((taste.get(category) ?? 0).toFixed(2)),
+      signals,
+    }));
+
+  return {
+    level: signalCount === 0 ? 'cold' : signalCount < 5 ? 'growing' : 'established',
+    signalCount,
+    topCategories,
+  };
+}
+
+function recommendationReasons(row: EventRow, location: LocationQuery | null, taste: TasteMap): string[] {
+  const reasons: string[] = [];
+  const distanceM = getDistanceMeters(row, location);
+  const category = normalizeCategory(row.main_category);
+  const tasteScore = taste.get(category) ?? 0;
+  const dday = calculateDday(row.end_at);
+
+  if (distanceM != null && distanceM <= 3000) reasons.push('내 주변');
+  if (tasteScore >= 0.5) reasons.push(`취향 ${category}`);
+  if (freshnessScore(row.created_at) >= 0.7) reasons.push('새로 등록');
+  if (dday != null && dday >= 0 && dday <= 7) reasons.push('곧 마감');
+  return reasons.slice(0, 2);
+}
+
+function toCard(
+  row: EventRow,
+  openedEventIds: Set<string>,
+  location: LocationQuery | null,
+  taste: TasteMap,
+) {
   const eventId = String(row.id);
   const distanceM = getDistanceMeters(row, location);
   return {
@@ -253,6 +310,7 @@ function toCard(row: EventRow, openedEventIds: Set<string>, location?: LocationQ
     walkMinutes: distanceM == null ? null : Math.max(1, Math.ceil(distanceM / WALK_METERS_PER_MINUTE)),
     blurb: firstLine(row.overview),
     opened: openedEventIds.has(eventId),
+    reasonTags: recommendationReasons(row, location, taste),
   };
 }
 
@@ -282,7 +340,7 @@ function mergeRows(primary: EventRow[], secondary: EventRow[]): EventRow[] {
   return dedupeRows([...primary, ...secondary]).slice(0, CANDIDATE_LIMIT);
 }
 
-function pickDiverseTodayCards(cards: ReturnType<typeof toCard>[]) {
+function pickDiverseCards(cards: ReturnType<typeof toCard>[], count: number) {
   const selected: ReturnType<typeof toCard>[] = [];
   const selectedIds = new Set<string>();
   const byCategory = new Map<string, ReturnType<typeof toCard>[]>();
@@ -295,16 +353,16 @@ function pickDiverseTodayCards(cards: ReturnType<typeof toCard>[]) {
   }
 
   for (const category of CATEGORY_PRIORITY) {
-    if (selected.length >= TODAY_CARD_COUNT) break;
+    if (selected.length >= count) break;
     const card = byCategory.get(category)?.find((candidate) => !selectedIds.has(candidate.eventId));
     if (!card) continue;
     selected.push(card);
     selectedIds.add(card.eventId);
   }
 
-  if (selected.length < TODAY_CARD_COUNT) {
+  if (selected.length < count) {
     for (const card of cards) {
-      if (selected.length >= TODAY_CARD_COUNT) break;
+      if (selected.length >= count) break;
       if (selectedIds.has(card.eventId)) continue;
       selected.push(card);
       selectedIds.add(card.eventId);
@@ -312,6 +370,10 @@ function pickDiverseTodayCards(cards: ReturnType<typeof toCard>[]) {
   }
 
   return selected;
+}
+
+function pickDiverseTodayCards(cards: ReturnType<typeof toCard>[]) {
+  return pickDiverseCards(cards, TODAY_CARD_COUNT);
 }
 
 async function getFallbackEvents(
@@ -443,14 +505,18 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
            AND el.earn_date >= $2::date - (($3::int - 1) * INTERVAL '1 day')`,
         [userId, today, RECENT_OPEN_COOLDOWN_DAYS]
       ),
-      // 취향 신호: 최근 연 이벤트 + 좋아요의 카테고리 빈도 (테이블 없거나 실패해도 무시)
+      // 취향 신호: 카드 열기(1) + 좋아요(3) + 도장(4). 강한 의도일수록 더 크게 반영한다.
       pool.query<TasteRow>(
-        `SELECT ce.main_category AS category, COUNT(*)::int AS n
+        `SELECT ce.main_category AS category,
+                SUM(src.weight)::int AS n,
+                COUNT(*)::int AS signal_count
          FROM (
-           SELECT event_id FROM user_ticket_earn_log
+           SELECT event_id, 1::int AS weight FROM user_ticket_earn_log
              WHERE user_id = $1 AND earn_date >= $2::date - (($3::int - 1) * INTERVAL '1 day')
            UNION ALL
-           SELECT event_id FROM user_likes WHERE user_id = $1
+           SELECT event_id, 3::int AS weight FROM user_likes WHERE user_id = $1
+           UNION ALL
+           SELECT event_id, 4::int AS weight FROM user_visit_log WHERE user_id = $1
          ) src
          JOIN canonical_events ce ON ce.id::text = src.event_id::text
          WHERE ce.main_category IS NOT NULL
@@ -483,13 +549,15 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
 
     // 점수화 v2: 근접+신선도+일별시드+취향+버즈로 재랭킹 → 매일 다른 순서·새 이벤트 우선
     const seed = dailySeed(userId, today);
+    const weekKey = weekKeyKst(today);
     const taste = buildTasteMap(tasteResult.rows);
+    const personalization = buildPersonalization(tasteResult.rows, taste);
     const recentImpressionIds = new Set(impressionResult.rows.map((row) => String(row.event_id)));
     const scoreById = new Map<string, number>();
     for (const row of rows) scoreById.set(String(row.id), scoreRow(row, { location, taste, seed }));
 
     const cards = rows
-      .map((row) => toCard(row, openedEventIds, location))
+      .map((row) => toCard(row, openedEventIds, location, taste))
       .filter((card) => !card.opened);
 
     // 최근 보여준 카드는 소프트 제외(제외 후 풀이 부족하면 완화해 빈 화면 방지)
@@ -503,6 +571,20 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
     const morePool = scored.filter((card) => !todayIds.has(card.eventId)).slice(0, CARD_POOL_LIMIT);
     const dailyEarnedDate = ticketRow.daily_earned_date ? String(ticketRow.daily_earned_date).slice(0, 10) : null;
     const userRegion = await userRegionPromise;
+    const weeklyScoreById = new Map<string, number>();
+    for (const row of rows) {
+      weeklyScoreById.set(String(row.id), scoreRow(row, {
+        location,
+        taste,
+        seed: weeklySeed(userId, weekKey),
+      }));
+    }
+    const weeklyItems = pickDiverseCards(
+      cards.slice().sort((a, b) => (
+        (weeklyScoreById.get(b.eventId) ?? 0) - (weeklyScoreById.get(a.eventId) ?? 0)
+      )),
+      WEEKLY_CARD_COUNT,
+    );
 
     // 오늘 보여준 카드를 노출 기록(fire-and-forget) — 응답을 막지 않고 실패해도 무시
     const shownIds = todayCards.map((card) => card.eventId);
@@ -526,6 +608,14 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
       dailyEarned: dailyEarnedDate === today ? (ticketRow.daily_earned ?? 0) : 0,
       dailyLimit: DAILY_LIMIT,
       userRegion,
+      weeklyCuration: {
+        weekKey,
+        region: userRegion,
+        title: userRegion ? `${userRegion} 이번 주 문화 3선` : '이번 주 문화 3선',
+        subtitle: '월요일마다 새로 고른 가까운 문화예요',
+        items: weeklyItems,
+      },
+      personalization,
     });
   } catch (err) {
     console.error('[Cards] today error:', err);
