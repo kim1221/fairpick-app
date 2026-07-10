@@ -57,8 +57,8 @@ export type BuildPassportBookPagesInput<TTicket extends TicketLike, TStamp> = {
   stampsPerPage?: number;
 };
 
-export const DISCOVERED_ITEMS_PER_PAGE = 2;
-export const WISHLIST_ITEMS_PER_PAGE = 2;
+export const DISCOVERED_ITEMS_PER_PAGE = 4;
+export const WISHLIST_ITEMS_PER_PAGE = 4;
 export const STAMPS_PER_BOOK_PAGE = 6;
 export const STAMPS_PER_PASSPORT_BOOK = 60;
 

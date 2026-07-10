@@ -8,7 +8,6 @@ import type {
   PassportSectionCopy,
 } from '../../pages/passportLogic';
 import {
-  SavedTicketRow,
   type SavedTicketItem,
   type SaveButtonState,
   type VisitButtonState,
@@ -20,11 +19,81 @@ const INK = '#2C2A22';
 const INK_SUB = '#6E6350';
 const NAVY_STAMP = '#2A386A';
 const RED_STAMP = '#A8331F';
+const COLLECTION_FALLBACKS = ['#28272C', '#6C2D2B', '#4C5147', '#7A6754'] as const;
 
 export type PassportBookmarkItem = {
   section: PassportBookmarkSection;
   label: string;
 };
+
+function CollectionStoryTile({
+  item,
+  index,
+  visitState,
+  saveState,
+  onPress,
+  onDirections,
+  onVisit,
+  onToggleSave,
+}: {
+  item: SavedTicketItem;
+  index: number;
+  visitState: VisitButtonState;
+  saveState: SaveButtonState;
+  onPress: () => void;
+  onDirections: () => void;
+  onVisit: () => void;
+  onToggleSave: () => void;
+}) {
+  const content = (
+    <>
+      <View style={styles.tileShade} />
+      <View style={styles.tileTop}>
+        <Text style={styles.tileCategory}>{item.category ?? '문화'}</Text>
+        <Text style={styles.tileIndex}>0{index + 1}</Text>
+      </View>
+      <View style={styles.tileCopy}>
+        <Text style={styles.tileTitle} numberOfLines={2}>{item.title}</Text>
+        <Text style={styles.tileMeta} numberOfLines={1}>
+          {[item.venue, item.region].filter(Boolean).join(' · ') || '장소 확인 중'}
+        </Text>
+        <View style={styles.tileActions}>
+          <Pressable accessibilityRole="button" onPress={(event) => { event.stopPropagation(); onToggleSave(); }} style={styles.tileAction}>
+            <Text style={styles.tileActionText}>{saveState === 'saved' ? '저장됨' : '저장'}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={(event) => { event.stopPropagation(); onVisit(); }} style={styles.tileAction}>
+            <Text style={styles.tileActionText}>{visitState === 'visited' ? '방문함' : '방문'}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={(event) => { event.stopPropagation(); onDirections(); }} style={styles.tileAction}>
+            <Text style={styles.tileActionText}>길찾기</Text>
+          </Pressable>
+        </View>
+      </View>
+      {visitState === 'visited' ? (
+        <View style={styles.visitedStamp}><Text style={styles.visitedStampText}>VISITED</Text></View>
+      ) : null}
+    </>
+  );
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${item.title} 상세 보기`}
+      onPress={onPress}
+      style={[styles.collectionTile, index % 4 === 0 || index % 4 === 3 ? styles.collectionTileWide : styles.collectionTileNarrow]}
+    >
+      {item.imageUrl ? (
+        <ImageBackground source={{ uri: item.imageUrl }} style={styles.tileImage} resizeMode="cover">
+          {content}
+        </ImageBackground>
+      ) : (
+        <View style={[styles.tileImage, { backgroundColor: COLLECTION_FALLBACKS[index % COLLECTION_FALLBACKS.length] }]}>
+          {content}
+        </View>
+      )}
+    </Pressable>
+  );
+}
 
 export function PassportTicketBookPage({
   width,
@@ -34,7 +103,6 @@ export function PassportTicketBookPage({
   items,
   getVisitState,
   getSaveState,
-  getStampSignal,
   onPressTicket,
   onDirections,
   onVisit,
@@ -47,7 +115,6 @@ export function PassportTicketBookPage({
   items: SavedTicketItem[];
   getVisitState: (id: string) => VisitButtonState;
   getSaveState: (id: string) => SaveButtonState;
-  getStampSignal: (id: string) => number;
   onPressTicket: (item: SavedTicketItem) => void;
   onDirections: (item: SavedTicketItem) => void;
   onVisit: (item: SavedTicketItem) => void;
@@ -81,17 +148,17 @@ export function PassportTicketBookPage({
         <View style={styles.divider} />
 
         <View style={styles.ticketList}>
-          {items.map((item) => (
-            <SavedTicketRow
+          {items.map((item, index) => (
+            <CollectionStoryTile
               key={item.id}
               item={item}
+              index={index}
               visitState={getVisitState(item.id)}
-              stampSignal={getStampSignal(item.id)}
               saveState={getSaveState(item.id)}
-              onPress={onPressTicket}
-              onDirections={onDirections}
-              onVisit={onVisit}
-              onToggleSave={onToggleSave}
+              onPress={() => onPressTicket(item)}
+              onDirections={() => onDirections(item)}
+              onVisit={() => onVisit(item)}
+              onToggleSave={() => onToggleSave(item)}
             />
           ))}
         </View>
@@ -182,7 +249,7 @@ export function PassportIndexRail({
 
 const styles = StyleSheet.create({
   page: {
-    height: 400,
+    height: 430,
     paddingHorizontal: 20,
   },
   paperFace: {
@@ -210,7 +277,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerRow: {
-    minHeight: 82,
+    minHeight: 68,
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
@@ -227,15 +294,15 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   title: {
-    marginTop: 6,
+    marginTop: 3,
     color: INK,
-    fontSize: 24,
-    lineHeight: 31,
+    fontSize: 20,
+    lineHeight: 26,
     fontWeight: '900',
     fontFamily: 'Noto Serif KR',
   },
   description: {
-    marginTop: 4,
+    marginTop: 2,
     color: INK_SUB,
     fontSize: 12.5,
     lineHeight: 18,
@@ -262,8 +329,99 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   ticketList: {
-    gap: 12,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
     paddingBottom: 2,
+  },
+  collectionTile: {
+    height: 139,
+    overflow: 'hidden',
+    borderRadius: 8,
+    backgroundColor: '#2C2B2E',
+  },
+  collectionTileWide: {
+    width: '57.5%',
+  },
+  collectionTileNarrow: {
+    width: '40%',
+  },
+  tileImage: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  tileShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.38)',
+  },
+  tileTop: {
+    paddingHorizontal: 9,
+    paddingTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  tileCategory: {
+    color: '#F0C55F',
+    fontSize: 8.5,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+  tileIndex: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 8,
+    fontWeight: '900',
+  },
+  tileCopy: {
+    padding: 9,
+  },
+  tileTitle: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    lineHeight: 18,
+    fontWeight: '900',
+    fontFamily: 'Noto Serif KR',
+  },
+  tileMeta: {
+    marginTop: 3,
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 8,
+    lineHeight: 11,
+    fontWeight: '700',
+  },
+  tileActions: {
+    marginTop: 7,
+    flexDirection: 'row',
+    gap: 4,
+  },
+  tileAction: {
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    paddingHorizontal: 5,
+    paddingVertical: 3,
+  },
+  tileActionText: {
+    color: '#FFFFFF',
+    fontSize: 7.5,
+    fontWeight: '800',
+  },
+  visitedStamp: {
+    position: 'absolute',
+    right: 7,
+    top: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transform: [{ rotate: '-8deg' }],
+  },
+  visitedStampText: {
+    color: '#FFFFFF',
+    fontSize: 6.5,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
   stateBox: {
     flex: 1,

@@ -90,6 +90,7 @@ function snapshotToTicketItem(item: StoredEventItemV2): SavedTicketItem {
     subCategory: item.snapshot?.subCategory,
     startAt: item.snapshot?.startAt,
     endAt: item.snapshot?.endAt,
+    imageUrl: item.snapshot?.imageUrl,
     lastKnownStatus: item.lastKnownStatus,
   };
 }
@@ -108,6 +109,7 @@ function eventToTicketItem(event: EventWithWalk): SavedTicketItem {
     lat: event.lat,
     lng: event.lng,
     detailLink: event.detailLink,
+    imageUrl: event.imageUrl,
     lastKnownStatus: 'active',
   };
 }
@@ -121,6 +123,7 @@ function discoveredToTicketItem(card: PassportDiscoveredCard): SavedTicketItem {
     category: card.category,
     startAt: card.startAt,
     endAt: card.endAt,
+    imageUrl: card.imageUrl,
     lat: card.lat,
     lng: card.lng,
     lastKnownStatus: 'active',
@@ -217,7 +220,6 @@ function PassportPage() {
   const [savedError, setSavedError] = useState(false);
   const [visitedIds, setVisitedIds] = useState<Set<string>>(() => new Set());
   const [markingIds, setMarkingIds] = useState<Set<string>>(() => new Set());
-  const [stampSignals, setStampSignals] = useState<Record<string, number>>({});
 
   const [refreshing, setRefreshing] = useState(false);
   const [toastMessage, setToastMessage] = useState<SavedVisitToastMessage | null>(null);
@@ -487,7 +489,6 @@ function PassportPage() {
       return;
     }
     addId(setVisitedIds, item.id);
-    setStampSignals((prev) => ({ ...prev, [item.id]: (prev[item.id] ?? 0) + 1 }));
     try {
       await markVisited(item.id);
       await loadPassport(1).catch(() => {});
@@ -520,7 +521,6 @@ function PassportPage() {
     return 'idle';
   }, [savedIds, savingIds]);
 
-  const getStampSignal = useCallback((id: string) => stampSignals[id] ?? 0, [stampSignals]);
 
   const visitedCount = passport?.visitedCount ?? stamps.length;
   const stampBookMeta = useMemo(
@@ -726,7 +726,6 @@ function PassportPage() {
           items={item.items}
           getVisitState={getVisitState}
           getSaveState={getSaveState}
-          getStampSignal={getStampSignal}
           onPressTicket={handleTicketPress}
           onDirections={handleDirections}
           onVisit={handleVisit}
@@ -744,7 +743,6 @@ function PassportPage() {
           items={item.items}
           getVisitState={getVisitState}
           getSaveState={getSaveState}
-          getStampSignal={getStampSignal}
           onPressTicket={handleTicketPress}
           onDirections={handleDirections}
           onVisit={handleVisit}
@@ -778,7 +776,6 @@ function PassportPage() {
     discoveredBookPageCount,
     discoveredCount,
     getSaveState,
-    getStampSignal,
     getVisitState,
     handleDirections,
     handlePressStamp,
@@ -814,7 +811,6 @@ function PassportPage() {
         <Text style={styles.navTitle}>나의 컬렉션</Text>
         <Text style={styles.navDescription}>광고로 공개하고, 저장하고, 직접 다녀온 문화를 한곳에 모았어요.</Text>
 
-        <PassportDiscoverySummary passport={passport} />
         <PassportIndexRail
           items={bookmarkItems}
           activeSection={activeBookmark}
@@ -839,6 +835,7 @@ function PassportPage() {
           />
         </View>
         <Text style={styles.bookHint}>탭을 누르거나 옆으로 넘겨 컬렉션을 살펴보세요</Text>
+        <PassportDiscoverySummary passport={passport} />
         {activeBookmark === 'stamps' && stampBookMeta.totalBooks > 1 ? (
           <View style={styles.stampBookPager}>
             <Pressable
@@ -939,7 +936,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   bookStage: {
-    height: 400,
+    height: 430,
     marginHorizontal: -20,
     position: 'relative',
   },

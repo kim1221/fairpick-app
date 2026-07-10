@@ -102,7 +102,7 @@ describe('passport logic', () => {
     ]);
   });
 
-  test('chunks discovered and wishlist tickets into two-card pages', () => {
+  test('chunks discovered and wishlist tickets into four-card collection pages', () => {
     const pages = buildPassportBookPages<TestTicket, TestStamp>({
       discoveredItems: tickets(7),
       wishlistItems: tickets(4),
@@ -117,8 +117,8 @@ describe('passport logic', () => {
     const discoveredPages = pages.filter((page) => page.type === 'discovered');
     const wishlistPages = pages.filter((page) => page.type === 'wishlist');
 
-    expect(discoveredPages.map((page) => page.type === 'discovered' ? page.items.length : 0)).toEqual([2, 2, 2, 1]);
-    expect(wishlistPages.map((page) => page.type === 'wishlist' ? page.items.length : 0)).toEqual([2, 2]);
+    expect(discoveredPages.map((page) => page.type === 'discovered' ? page.items.length : 0)).toEqual([4, 3]);
+    expect(wishlistPages.map((page) => page.type === 'wishlist' ? page.items.length : 0)).toEqual([4]);
   });
 
   test('normalizes invalid page sizes to prevent stalled pagination', () => {
@@ -225,12 +225,12 @@ describe('passport logic', () => {
     expect(getPassportSectionIndexes(pages)).toEqual({
       cover: 0,
       discovered: 2,
-      wishlist: 4,
-      stamps: 5,
+      wishlist: 3,
+      stamps: 4,
     });
     expect(getActivePassportBookmark(pages, 0)).toBe('cover');
-    expect(getActivePassportBookmark(pages, 3)).toBe('discovered');
-    expect(getActivePassportBookmark(pages, 4)).toBe('wishlist');
+    expect(getActivePassportBookmark(pages, 2)).toBe('discovered');
+    expect(getActivePassportBookmark(pages, 3)).toBe('wishlist');
     expect(getActivePassportBookmark(pages, 6)).toBe('stamps');
   });
 

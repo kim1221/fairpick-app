@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  ImageBackground,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Pressable,
@@ -9,7 +10,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { Icon } from '@toss/tds-react-native';
+import { manilaTagTexture } from '../../assets';
 import type { LockedCardPreview } from '../../services/cardsService';
 
 const INK = '#171717';
@@ -98,6 +99,12 @@ export function CultureCardStack({
                 pressed ? styles.newsCardPressed : null,
               ]}
             >
+              <ImageBackground
+                source={manilaTagTexture}
+                style={StyleSheet.absoluteFill}
+                imageStyle={styles.paperTexture}
+                pointerEvents="none"
+              />
               <View
                 pointerEvents="none"
                 style={[styles.shapeLarge, { backgroundColor: palette.accent }]}
@@ -106,12 +113,16 @@ export function CultureCardStack({
                 pointerEvents="none"
                 style={[styles.shapeSmall, { borderColor: palette.accent }]}
               />
-              <Text
-                pointerEvents="none"
-                style={[styles.posterLetter, { color: palette.accent }]}
-              >
-                {card.category?.trim().slice(0, 1) || 'C'}
-              </Text>
+              <View pointerEvents="none" style={styles.collage}>
+                <View style={[styles.collagePanel, { backgroundColor: palette.foreground }]} />
+                <View style={[styles.collageSlash, { backgroundColor: palette.accent }]} />
+                <View style={[styles.collageDisc, { borderColor: palette.foreground }]} />
+                <View style={styles.collageFigure}>
+                  <View style={[styles.figureHead, { backgroundColor: palette.foreground }]} />
+                  <View style={[styles.figureBody, { backgroundColor: palette.foreground }]} />
+                </View>
+                <Text style={[styles.collageType, { color: palette.foreground }]}>CITY{`\n`}SCENE{`\n`}0{index + 1}</Text>
+              </View>
 
               <View style={styles.cardTop}>
                 <Text style={[styles.cardSerial, { color: palette.foreground }]}>VOL. 01 / NO. {String(index + 1).padStart(2, '0')}</Text>
@@ -146,6 +157,19 @@ export function CultureCardStack({
                   {card.isRevisit ? '다시 만난 장면 · 광고 후 전체 공개' : '행사명과 장소는 광고 뒤에 공개돼요'}
                 </Text>
               </View>
+              {selected ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={(event) => { event.stopPropagation(); onOpen(); }}
+                  disabled={disabled}
+                  style={[styles.cardCta, disabled ? styles.cardCtaDisabled : null]}
+                >
+                  <Text style={[styles.cardCtaText, disabled ? styles.cardCtaTextDisabled : null]}>
+                    {loading ? '광고 준비 중' : actionLabel}
+                  </Text>
+                  <Text style={[styles.cardCtaReward, disabled ? styles.cardCtaTextDisabled : null]}>+3 티켓</Text>
+                </Pressable>
+              ) : null}
             </Pressable>
           );
         })}
@@ -160,20 +184,33 @@ export function CultureCardStack({
         ))}
       </View>
 
-      <Pressable
-        accessibilityRole="button"
-        style={[styles.cta, disabled ? styles.ctaDisabled : null]}
-        onPress={onOpen}
-        disabled={disabled}
-      >
-        <View style={styles.ctaIcon}>
-          <Icon name="icon-play-mono" size={15} color={disabled ? '#A39F98' : '#171717'} />
-        </View>
-        <Text style={[styles.ctaText, disabled ? styles.ctaTextDisabled : null]}>
-          {loading ? '광고 준비 중' : actionLabel}
-        </Text>
-      </Pressable>
       <Text style={styles.hint}>광고가 끝나면 행사 전체 정보와 문화 티켓을 함께 받아요</Text>
+
+      <View style={styles.topicSection}>
+        <View style={styles.topicHeader}>
+          <Text style={styles.topicTitle}>THIS WEEK</Text>
+          <Text style={styles.topicCount}>{cards.length} CURATED STORIES</Text>
+        </View>
+        <View style={styles.topicRow}>
+          {cards.slice(0, 3).map((card, index) => {
+            const palette = card.palette ?? FALLBACK_PALETTE;
+            return (
+              <Pressable
+                key={`topic-${card.cardToken}`}
+                accessibilityRole="button"
+                onPress={() => onSelect(card.cardToken)}
+                style={[styles.topicCard, { backgroundColor: palette.background }]}
+              >
+                <View style={[styles.topicStripe, { backgroundColor: palette.accent }]} />
+                <Text style={[styles.topicIndex, { color: palette.foreground }]}>0{index + 1}</Text>
+                <Text style={[styles.topicCopy, { color: palette.foreground }]} numberOfLines={3}>
+                  {(card.teaserHeadline ?? `${card.category} 한 곳`).replace('\n', ' ')}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
     </View>
   );
 }
@@ -209,8 +246,8 @@ const styles = StyleSheet.create({
   title: {
     marginTop: 5,
     color: INK,
-    fontSize: 30,
-    lineHeight: 38,
+    fontSize: 27,
+    lineHeight: 34,
     fontWeight: '900',
     letterSpacing: -1.2,
     fontFamily: 'Noto Serif KR',
@@ -229,7 +266,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   newsCard: {
-    height: 396,
+    height: 320,
     borderRadius: 2,
     padding: 18,
     overflow: 'hidden',
@@ -259,12 +296,12 @@ const styles = StyleSheet.create({
   },
   shapeSmall: {
     position: 'absolute',
-    width: 104,
-    height: 150,
+    width: 94,
+    height: 136,
     borderRadius: 0,
     borderWidth: 1,
     right: 18,
-    top: 70,
+    top: 62,
     opacity: 0.52,
   },
   cardTop: {
@@ -280,15 +317,76 @@ const styles = StyleSheet.create({
     letterSpacing: 1.4,
     opacity: 0.8,
   },
-  posterLetter: {
+  paperTexture: {
+    opacity: 0.16,
+  },
+  collage: {
     position: 'absolute',
-    right: -5,
+    left: 58,
+    right: 0,
     top: 42,
-    fontSize: 210,
-    lineHeight: 228,
+    height: 158,
+    overflow: 'hidden',
+  },
+  collagePanel: {
+    position: 'absolute',
+    width: 76,
+    height: 130,
+    right: 24,
+    top: 16,
+    opacity: 0.15,
+    transform: [{ rotate: '8deg' }],
+  },
+  collageSlash: {
+    position: 'absolute',
+    width: 52,
+    height: 164,
+    left: 76,
+    top: -14,
+    opacity: 0.7,
+    transform: [{ rotate: '32deg' }],
+  },
+  collageDisc: {
+    position: 'absolute',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 18,
+    left: 18,
+    top: 24,
+    opacity: 0.16,
+  },
+  collageFigure: {
+    position: 'absolute',
+    right: 74,
+    top: 24,
+    width: 70,
+    height: 150,
+    alignItems: 'center',
+  },
+  figureHead: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    opacity: 0.82,
+  },
+  figureBody: {
+    marginTop: -2,
+    width: 66,
+    height: 92,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    opacity: 0.82,
+  },
+  collageType: {
+    position: 'absolute',
+    left: 12,
+    bottom: 8,
+    fontSize: 10,
+    lineHeight: 12,
     fontWeight: '900',
-    opacity: 0.18,
-    fontFamily: 'Noto Serif KR',
+    letterSpacing: 1.5,
+    opacity: 0.72,
   },
   selectionLabel: {
     flexDirection: 'row',
@@ -308,9 +406,9 @@ const styles = StyleSheet.create({
   },
   cardCopy: {
     marginTop: 'auto',
-    marginBottom: 24,
+    marginBottom: 10,
     marginLeft: 52,
-    maxWidth: '78%',
+    maxWidth: '82%',
   },
   cardEyebrow: {
     fontSize: 10,
@@ -319,14 +417,14 @@ const styles = StyleSheet.create({
   },
   cardHeadline: {
     marginTop: 9,
-    fontSize: 29,
-    lineHeight: 37,
+    fontSize: 25,
+    lineHeight: 32,
     fontWeight: '900',
     letterSpacing: -1.1,
     fontFamily: 'Noto Serif KR',
   },
   cardFooter: {
-    paddingTop: 10,
+    paddingTop: 8,
     borderTopWidth: 1,
     marginLeft: 52,
   },
@@ -341,6 +439,32 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     fontWeight: '600',
     opacity: 0.76,
+  },
+  cardCta: {
+    marginTop: 10,
+    marginLeft: 52,
+    minHeight: 44,
+    backgroundColor: '#A52822',
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cardCtaDisabled: {
+    backgroundColor: '#CAC5BB',
+  },
+  cardCtaText: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '900',
+  },
+  cardCtaReward: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  cardCtaTextDisabled: {
+    color: '#827E77',
   },
   pager: {
     height: 18,
@@ -359,37 +483,6 @@ const styles = StyleSheet.create({
     width: 52,
     backgroundColor: BLUE,
   },
-  cta: {
-    marginHorizontal: 22,
-    marginTop: 13,
-    height: 58,
-    borderRadius: 2,
-    backgroundColor: '#171717',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  ctaDisabled: {
-    backgroundColor: '#E5E1D8',
-  },
-  ctaText: {
-    color: '#FFFFFF',
-    fontSize: 15.5,
-    lineHeight: 21,
-    fontWeight: '900',
-  },
-  ctaIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#EFE9D8',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ctaTextDisabled: {
-    color: '#A39F98',
-  },
   hint: {
     marginTop: 10,
     textAlign: 'center',
@@ -397,5 +490,62 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     lineHeight: 17,
     fontWeight: '600',
+  },
+  topicSection: {
+    marginHorizontal: 22,
+    marginTop: 24,
+  },
+  topicHeader: {
+    paddingBottom: 7,
+    borderBottomWidth: 1,
+    borderBottomColor: '#171717',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  topicTitle: {
+    color: '#171717',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1.3,
+  },
+  topicCount: {
+    color: '#6F6B65',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+  topicRow: {
+    marginTop: 9,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  topicCard: {
+    flex: 1,
+    height: 118,
+    position: 'relative',
+    overflow: 'hidden',
+    padding: 10,
+    justifyContent: 'space-between',
+  },
+  topicStripe: {
+    position: 'absolute',
+    right: -15,
+    top: -12,
+    width: 36,
+    height: 150,
+    opacity: 0.72,
+    transform: [{ rotate: '18deg' }],
+  },
+  topicIndex: {
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  topicCopy: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '900',
+    fontFamily: 'Noto Serif KR',
   },
 });

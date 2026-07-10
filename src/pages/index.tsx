@@ -87,7 +87,7 @@ function createStyles(a: Adaptive) {
     },
     nav: {
       flexDirection: 'row',
-      alignItems: 'flex-end',
+      alignItems: 'center',
       justifyContent: 'space-between',
       paddingBottom: 9,
       borderBottomWidth: 2,
@@ -107,11 +107,10 @@ function createStyles(a: Adaptive) {
     },
     name: {
       color: TEXT,
-      fontSize: 32,
-      lineHeight: 30,
+      fontSize: 18,
+      lineHeight: 22,
       fontWeight: '900',
-      letterSpacing: -1.8,
-      fontFamily: 'Noto Serif KR',
+      letterSpacing: 0.2,
     },
     issue: {
       marginTop: 7,
@@ -650,7 +649,7 @@ function HomePageInner() {
         <View style={[styles.header, { paddingTop: 14 }]}>
           <View style={styles.nav}>
             <View style={styles.brand}>
-              <Text style={styles.name}>CULTURE{`\n`}CARD</Text>
+              <Text style={styles.name}>CULTURE CARD</Text>
               <Text style={styles.issue}>SEOUL · DAILY EDITION · 07.11.2026</Text>
             </View>
             <Pressable style={styles.ticketChip} onPress={() => navigation.navigate('/points' as never)}>

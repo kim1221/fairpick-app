@@ -44,8 +44,12 @@ export function TicketBalanceVoucher({
     <View>
       {/* 큰 잔액 카드(네이비) */}
       <View style={styles.balanceCard}>
-        <View style={styles.balanceAccent} pointerEvents="none" />
-        <Text style={styles.balanceWatermark} pointerEvents="none">TICKET</Text>
+        <View style={styles.ticketStub} pointerEvents="none">
+          <Text style={styles.ticketStubText}>CULTURE CARD</Text>
+        </View>
+        <View style={[styles.ticketNotch, styles.ticketNotchTop]} pointerEvents="none" />
+        <View style={[styles.ticketNotch, styles.ticketNotchBottom]} pointerEvents="none" />
+        <Text style={styles.balanceWatermark} pointerEvents="none">CC</Text>
         <View style={styles.balanceHeader}>
           <Text style={styles.balanceLabel}>내 문화 티켓</Text>
           <View style={styles.exchangeBadge}>
@@ -95,10 +99,12 @@ const styles = StyleSheet.create({
     position: 'relative',
     borderRadius: 0,
     overflow: 'hidden',
-    backgroundColor: '#171717',
+    backgroundColor: '#F1ECDE',
     borderWidth: 1,
-    borderColor: '#171717',
-    paddingHorizontal: 20,
+    borderColor: '#D8D0C0',
+    borderRadius: 13,
+    paddingLeft: 92,
+    paddingRight: 20,
     paddingTop: 18,
     paddingBottom: 18,
     shadowColor: '#000000',
@@ -107,19 +113,45 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 4,
   },
-  balanceAccent: {
+  ticketStub: {
     position: 'absolute',
     top: 0,
     left: 0,
-    width: 10,
+    width: 68,
     bottom: 0,
     backgroundColor: '#A52822',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ticketStubText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '900',
+    letterSpacing: 1.5,
+    transform: [{ rotate: '-90deg' }],
+    width: 120,
+    textAlign: 'center',
+  },
+  ticketNotch: {
+    position: 'absolute',
+    right: -10,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#F7F5EF',
+  },
+  ticketNotchTop: {
+    top: -10,
+  },
+  ticketNotchBottom: {
+    bottom: -10,
   },
   balanceWatermark: {
     position: 'absolute',
     right: -12,
     top: 50,
-    color: 'rgba(255,255,255,0.06)',
+    color: 'rgba(165,40,34,0.06)',
     fontSize: 78,
     lineHeight: 84,
     fontWeight: '900',
@@ -131,7 +163,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   balanceLabel: {
-    color: '#DCE5FF',
+    color: '#6F6B65',
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '700',
@@ -143,27 +175,27 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   balanceNumber: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontSize: 44,
     lineHeight: 50,
     fontWeight: '900',
     letterSpacing: -1,
   },
   balanceUnit: {
-    color: '#F6D45D',
+    color: '#A52822',
     fontSize: 18,
     fontWeight: '800',
   },
   balanceHelp: {
     marginTop: 10,
-    color: '#DCE5FF',
+    color: '#6F6B65',
     fontSize: 12.5,
     lineHeight: 18,
     fontWeight: '700',
   },
   exchangeBadge: {
     borderRadius: 0,
-    backgroundColor: '#F5EDDA',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -179,12 +211,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   nextRewardText: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontSize: 12.5,
     fontWeight: '800',
   },
   nextRewardCount: {
-    color: '#F6D45D',
+    color: '#A52822',
     fontSize: 12,
     fontWeight: '900',
   },
@@ -197,7 +229,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 9,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.24)',
+    backgroundColor: '#D5D0C7',
   },
   ticketDotFilled: {
     backgroundColor: '#A52822',

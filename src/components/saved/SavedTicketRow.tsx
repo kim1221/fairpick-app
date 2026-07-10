@@ -39,6 +39,7 @@ export interface SavedTicketItem {
   lat?: number | null;
   lng?: number | null;
   detailLink?: string | null;
+  imageUrl?: string | null;
   lastKnownStatus?: 'active' | 'ended' | 'deleted';
 }
 

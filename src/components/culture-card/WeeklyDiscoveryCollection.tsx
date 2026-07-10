@@ -38,6 +38,8 @@ export function WeeklyDiscoveryCollection({
   const items = discovery.items.slice(0, 4);
   const featured = items[0];
   const secondary = items.slice(1, 3);
+  const moreStories = discovery.items.slice(3, 7);
+  const endingSoon = discovery.items.filter((card) => card.dday != null && card.dday >= 0 && card.dday <= 7).slice(0, 3);
 
   return (
     <View style={styles.section}>
@@ -92,6 +94,43 @@ export function WeeklyDiscoveryCollection({
           </View>
         </View>
       )}
+
+      {moreStories.length > 0 ? (
+        <View style={styles.moreGrid}>
+          {moreStories.map((card, index) => (
+            <Pressable
+              key={`more-${card.eventId}`}
+              accessibilityRole="button"
+              onPress={() => onPressCard(card.eventId)}
+              style={({ pressed }) => [styles.moreStory, pressed ? styles.pressed : null]}
+            >
+              <StoryImage card={card} compact />
+              <Text style={styles.moreIndex}>0{index + 4}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      {endingSoon.length > 0 ? (
+        <View style={styles.endingSection}>
+          <View style={styles.endingHeader}>
+            <Text style={styles.endingTitle}>ENDING SOON</Text>
+            <Text style={styles.endingCaption}>놓치기 전에 다시 확인하세요</Text>
+          </View>
+          {endingSoon.map((card) => (
+            <Pressable
+              key={`ending-${card.eventId}`}
+              accessibilityRole="button"
+              onPress={() => onPressCard(card.eventId)}
+              style={styles.endingRow}
+            >
+              <Text style={styles.endingDday}>{card.dday === 0 ? 'TODAY' : `D-${card.dday}`}</Text>
+              <Text style={styles.endingName} numberOfLines={1}>{card.title}</Text>
+              <Text style={styles.endingArrow}>→</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -268,6 +307,75 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
     fontWeight: '600',
+  },
+  moreGrid: {
+    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  moreStory: {
+    width: '48.7%',
+    height: 138,
+    borderWidth: 1,
+    borderColor: '#171717',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  moreIndex: {
+    position: 'absolute',
+    top: 7,
+    right: 8,
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  endingSection: {
+    marginTop: 26,
+    borderTopWidth: 3,
+    borderTopColor: '#171717',
+  },
+  endingHeader: {
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#171717',
+  },
+  endingTitle: {
+    color: '#A52822',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1.3,
+  },
+  endingCaption: {
+    color: '#6F6B65',
+    fontSize: 9.5,
+    fontWeight: '700',
+  },
+  endingRow: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#BDB7AD',
+  },
+  endingDday: {
+    width: 54,
+    color: '#A52822',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  endingName: {
+    flex: 1,
+    color: '#171717',
+    fontSize: 12.5,
+    fontWeight: '800',
+  },
+  endingArrow: {
+    color: '#171717',
+    fontSize: 15,
   },
   pressed: {
     opacity: 0.78,
