@@ -399,6 +399,7 @@ test('GET /api/visits/ids returns the visited event id set', async () => {
 
 test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp summary', async () => {
   const seenParams = [];
+  const monthVisitedParams = [];
   const stampParams = [];
   pool.query = async (sql, params) => {
     const text = String(sql);
@@ -406,18 +407,44 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
       return { rows: [{ count: '5' }] };
     }
     if (text.includes('COUNT(DISTINCT event_id)') && text.includes('FROM user_visit_log')) {
-      return { rows: [{ count: '2' }] };
+      return { rows: [{ count: '3' }] };
     }
     if (text.includes('earn_date >=') && text.includes('FROM user_ticket_earn_log')) {
       seenParams.push(params);
       assert.match(params[1], /^\d{4}-\d{2}-01$/);
       return { rows: [{ count: '3' }] };
     }
+    if (text.includes('COUNT(DISTINCT ce.region)') && text.includes('FROM user_ticket_earn_log el')) {
+      return { rows: [{ count: '3' }] };
+    }
+    if (text.includes('SELECT DISTINCT ce.main_category AS category') && text.includes('FROM user_ticket_earn_log el')) {
+      return { rows: [{ category: '전시회' }, { category: '미디어 전시' }, { category: '뮤지컬' }, { category: '클래스' }] };
+    }
+    if (text.includes('COUNT(DISTINCT ce.region)') && text.includes('FROM user_visit_log vl')) {
+      return { rows: [{ count: '2' }] };
+    }
+    if (text.includes('COUNT(DISTINCT vl.event_id)') && text.includes('vl.visited_at')) {
+      monthVisitedParams.push(params);
+      assert.match(params[1], /^\d{4}-\d{2}-01$/);
+      return { rows: [{ count: '2' }] };
+    }
+    if (text.includes('SELECT ce.region, COUNT(DISTINCT vl.event_id)::int AS count')) {
+      return { rows: [{ region: '성동구', count: '2' }, { region: '용산구', count: '1' }] };
+    }
+    if (text.includes('ORDER BY vl.visited_at ASC, vl.event_id ASC')) {
+      return {
+        rows: [
+          { event_id: 'event-1', category: '전시', region: '성동구', visited_at: '2026-06-30T03:00:00.000Z' },
+          { event_id: 'event-4', category: '미디어 전시', region: '성동구', visited_at: '2026-07-02T03:00:00.000Z' },
+          { event_id: 'event-2', category: '공연', region: '용산구', visited_at: '2026-07-01T03:00:00.000Z' },
+        ],
+      };
+    }
     if (text.includes('GROUP BY') && text.includes('canonical_events')) {
       return { rows: [{ category: '전시' }, { category: '팝업' }, { category: '기타' }] };
     }
     if (text.includes('SELECT DISTINCT event_id') && text.includes('FROM user_visit_log')) {
-      return { rows: [{ event_id: 'event-1' }, { event_id: 'event-2' }, { event_id: 'event-old' }] };
+      return { rows: [{ event_id: 'event-1' }, { event_id: 'event-2' }, { event_id: 'event-4' }, { event_id: 'event-old' }] };
     }
     if (text.includes('FROM user_ticket_earn_log el') && text.includes('DISTINCT ON')) {
       return {
@@ -442,6 +469,7 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
       stampParams.push(params);
       return {
         rows: [
+          { event_id: 'event-4', title: '전시 넷', category: '미디어 전시', region: '성동구', venue: '언더스탠드에비뉴', image_url: null, visited_at: '2026-07-02T03:00:00.000Z' },
           { event_id: 'event-2', title: '공연 둘', category: '공연', region: '용산구', venue: '노들섬', image_url: 'http://img/2.jpg', visited_at: '2026-07-01T03:00:00.000Z' },
           { event_id: 'event-1', title: '전시 하나', category: '전시', region: '성동구', venue: '성수 코사이어티', image_url: null, visited_at: '2026-06-30T03:00:00.000Z' },
         ],
@@ -455,14 +483,23 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
   assert.equal(status, 200);
   assert.match(body.passportNo, /^\d{4}$/);
   assert.equal(body.discoveredCount, 5);
-  assert.equal(body.visitedCount, 2);
+  assert.equal(body.visitedCount, 3);
   assert.equal(body.monthDiscovered, 3);
+  assert.equal(body.regionsDiscovered, 3);
+  assert.equal(body.categoriesDiscovered, 3);
+  assert.equal(body.regionsVisited, 2);
+  assert.equal(body.monthVisited, 2);
+  assert.deepEqual(body.topRegions, [
+    { region: '성동구', count: 2 },
+    { region: '용산구', count: 1 },
+  ]);
   assert.deepEqual(body.tasteCategories, ['전시', '팝업', '기타']);
   assert.deepEqual(body.stamps, [
-    { eventId: 'event-2', title: '공연 둘', category: '공연', region: '용산구', venue: '노들섬', imageUrl: 'http://img/2.jpg', visitedAt: '2026-07-01T03:00:00.000Z' },
-    { eventId: 'event-1', title: '전시 하나', category: '전시', region: '성동구', venue: '성수 코사이어티', imageUrl: null, visitedAt: '2026-06-30T03:00:00.000Z' },
+    { eventId: 'event-4', title: '전시 넷', category: '전시', region: '성동구', venue: '언더스탠드에비뉴', imageUrl: null, visitedAt: '2026-07-02T03:00:00.000Z', isFirstInRegion: false, isFirstInCategory: false },
+    { eventId: 'event-2', title: '공연 둘', category: '공연', region: '용산구', venue: '노들섬', imageUrl: 'http://img/2.jpg', visitedAt: '2026-07-01T03:00:00.000Z', isFirstInRegion: true, isFirstInCategory: true },
+    { eventId: 'event-1', title: '전시 하나', category: '전시', region: '성동구', venue: '성수 코사이어티', imageUrl: null, visitedAt: '2026-06-30T03:00:00.000Z', isFirstInRegion: true, isFirstInCategory: true },
   ]);
-  assert.deepEqual(body.visitedEventIds, ['event-1', 'event-2', 'event-old']);
+  assert.deepEqual(body.visitedEventIds, ['event-1', 'event-2', 'event-4', 'event-old']);
   assert.equal(body.stampBook, 1);
   assert.equal(body.stampBookCount, 1);
   assert.equal(body.stampBookSize, 60);
@@ -483,6 +520,7 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
     },
   ]);
   assert.equal(seenParams.length, 1);
+  assert.equal(monthVisitedParams.length, 1);
 });
 
 test('GET /api/passport loads older stamp books by query', async () => {
@@ -497,6 +535,33 @@ test('GET /api/passport loads older stamp books by query', async () => {
     }
     if (text.includes('earn_date >=') && text.includes('FROM user_ticket_earn_log')) {
       return { rows: [{ count: '0' }] };
+    }
+    if (text.includes('COUNT(DISTINCT ce.region)') && text.includes('FROM user_ticket_earn_log el')) {
+      return { rows: [{ count: '0' }] };
+    }
+    if (text.includes('SELECT DISTINCT ce.main_category AS category') && text.includes('FROM user_ticket_earn_log el')) {
+      return { rows: [] };
+    }
+    if (text.includes('COUNT(DISTINCT ce.region)') && text.includes('FROM user_visit_log vl')) {
+      return { rows: [{ count: '1' }] };
+    }
+    if (text.includes('COUNT(DISTINCT vl.event_id)') && text.includes('vl.visited_at')) {
+      return { rows: [{ count: '0' }] };
+    }
+    if (text.includes('SELECT ce.region, COUNT(DISTINCT vl.event_id)::int AS count')) {
+      return { rows: [{ region: '서울', count: '72' }] };
+    }
+    if (text.includes('ORDER BY vl.visited_at ASC, vl.event_id ASC')) {
+      return {
+        rows: [
+          {
+            event_id: 'event-old',
+            category: '전시',
+            region: '서울',
+            visited_at: '2026-01-01T03:00:00.000Z',
+          },
+        ],
+      };
     }
     if (text.includes('GROUP BY') && text.includes('canonical_events')) {
       return { rows: [] };

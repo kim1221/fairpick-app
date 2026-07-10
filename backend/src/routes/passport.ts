@@ -65,6 +65,12 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       discoveredResult,
       visitedResult,
       monthDiscoveredResult,
+      regionsDiscoveredResult,
+      categoriesDiscoveredResult,
+      regionsVisitedResult,
+      monthVisitedResult,
+      topRegionsResult,
+      allVisitedStampsResult,
       tasteResult,
       stampResult,
       visitedIdsResult,
@@ -89,6 +95,63 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
            AND earn_date >= $2::date
            AND earn_date < ($2::date + INTERVAL '1 month')`,
         [userId, monthStart]
+      ),
+      pool.query<{ count: string | number }>(
+        `SELECT COUNT(DISTINCT ce.region)::int AS count
+         FROM user_ticket_earn_log el
+         JOIN canonical_events ce ON ce.id::text = el.event_id
+         WHERE el.user_id = $1
+           AND ce.is_deleted = false
+           AND ce.region IS NOT NULL`,
+        [userId]
+      ),
+      pool.query<{ category: string | null }>(
+        `SELECT DISTINCT ce.main_category AS category
+         FROM user_ticket_earn_log el
+         JOIN canonical_events ce ON ce.id::text = el.event_id
+         WHERE el.user_id = $1
+           AND ce.is_deleted = false`,
+        [userId]
+      ),
+      pool.query<{ count: string | number }>(
+        `SELECT COUNT(DISTINCT ce.region)::int AS count
+         FROM user_visit_log vl
+         JOIN canonical_events ce ON ce.id::text = vl.event_id
+         WHERE vl.user_id = $1
+           AND ce.is_deleted = false
+           AND ce.region IS NOT NULL`,
+        [userId]
+      ),
+      pool.query<{ count: string | number }>(
+        `SELECT COUNT(DISTINCT vl.event_id)::int AS count
+         FROM user_visit_log vl
+         JOIN canonical_events ce ON ce.id::text = vl.event_id
+         WHERE vl.user_id = $1
+           AND ce.is_deleted = false
+           AND vl.visited_at >= ($2::date AT TIME ZONE 'Asia/Seoul')
+           AND vl.visited_at < (($2::date + INTERVAL '1 month') AT TIME ZONE 'Asia/Seoul')`,
+        [userId, monthStart]
+      ),
+      pool.query<{ region: string; count: string | number }>(
+        `SELECT ce.region, COUNT(DISTINCT vl.event_id)::int AS count
+         FROM user_visit_log vl
+         JOIN canonical_events ce ON ce.id::text = vl.event_id
+         WHERE vl.user_id = $1
+           AND ce.is_deleted = false
+           AND ce.region IS NOT NULL
+         GROUP BY ce.region
+         ORDER BY count DESC, ce.region ASC
+         LIMIT 5`,
+        [userId]
+      ),
+      pool.query<{ event_id: string; category: string | null; region: string | null; visited_at: string | Date }>(
+        `SELECT vl.event_id, ce.region, ce.main_category AS category, vl.visited_at
+         FROM user_visit_log vl
+         JOIN canonical_events ce ON ce.id::text = vl.event_id
+         WHERE vl.user_id = $1
+           AND ce.is_deleted = false
+         ORDER BY vl.visited_at ASC, vl.event_id ASC`,
+        [userId]
       ),
       pool.query<{ category: string | null }>(
         `SELECT ce.main_category AS category
@@ -160,11 +223,39 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     ]);
 
     const visitedCount = countFrom(visitedResult.rows[0]);
+    const discoveredCategories = new Set(categoriesDiscoveredResult.rows.map((row) => normalizeCategory(row.category)));
+    const firstInRegion = new Set<string>();
+    const firstInCategory = new Set<string>();
+    const seenRegions = new Set<string>();
+    const seenCategories = new Set<string>();
+
+    for (const row of allVisitedStampsResult.rows) {
+      const eventId = String(row.event_id);
+      if (row.region !== null && !seenRegions.has(row.region)) {
+        seenRegions.add(row.region);
+        firstInRegion.add(eventId);
+      }
+
+      const category = normalizeCategory(row.category);
+      if (!seenCategories.has(category)) {
+        seenCategories.add(category);
+        firstInCategory.add(eventId);
+      }
+    }
+
     return res.json({
       passportNo: passportNo(userId),
       discoveredCount: countFrom(discoveredResult.rows[0]),
       visitedCount,
       monthDiscovered: countFrom(monthDiscoveredResult.rows[0]),
+      regionsDiscovered: countFrom(regionsDiscoveredResult.rows[0]),
+      categoriesDiscovered: discoveredCategories.size,
+      regionsVisited: countFrom(regionsVisitedResult.rows[0]),
+      monthVisited: countFrom(monthVisitedResult.rows[0]),
+      topRegions: topRegionsResult.rows.map((row) => ({
+        region: row.region,
+        count: Number(row.count),
+      })),
       stampBook,
       stampBookCount: Math.max(1, Math.ceil(visitedCount / STAMP_BOOK_SIZE)),
       stampBookSize: STAMP_BOOK_SIZE,
@@ -177,6 +268,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         venue: row.venue,
         imageUrl: row.image_url,
         visitedAt: isoString(row.visited_at),
+        isFirstInRegion: firstInRegion.has(String(row.event_id)),
+        isFirstInCategory: firstInCategory.has(String(row.event_id)),
       })),
       visitedEventIds: visitedIdsResult.rows.map((row) => String(row.event_id)),
       discoveredCards: discoveredCardsResult.rows.map((row) => ({
