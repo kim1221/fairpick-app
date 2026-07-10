@@ -32,6 +32,9 @@ function ProgressRow({ label, value, goal, progress }: {
 }
 
 export function PassportDiscoverySummary({ passport }: { passport: PassportResponse | null }) {
+  // 백엔드 선배포 전 구버전 응답에서는 잘못된 0 통계를 보여주지 않는다.
+  if (!passport || typeof passport.regionsDiscovered !== 'number') return null;
+
   const summary = getPassportDiscoverySummary(passport);
   const favoriteCopy = summary.favoriteRegion
     ? `가장 자주 찾은 곳은 ${summary.favoriteRegion}이에요`
