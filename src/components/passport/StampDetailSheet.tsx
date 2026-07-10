@@ -110,6 +110,20 @@ export function StampDetailSheet({
               <Text style={styles.place} numberOfLines={1}>
                 {[stamp.venue?.trim(), stamp.region?.trim()].filter(Boolean).join(' · ') || '장소 정보 준비 중'}
               </Text>
+              {stamp.isFirstInRegion || stamp.isFirstInCategory ? (
+                <View style={styles.discoveryBadges}>
+                  {stamp.isFirstInRegion ? (
+                    <View style={styles.discoveryBadge}>
+                      <Text style={styles.discoveryBadgeText}>✦ 첫 지역 도장</Text>
+                    </View>
+                  ) : null}
+                  {stamp.isFirstInCategory ? (
+                    <View style={styles.discoveryBadge}>
+                      <Text style={styles.discoveryBadgeText}>✦ 첫 장르 도장</Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
 
               {/* 다녀옴 씰 배지 + N번째 도장 */}
               <View style={styles.doneBadge}>
@@ -270,6 +284,25 @@ const styles = StyleSheet.create({
     color: INK_SUB,
     fontSize: 13,
     fontWeight: '700',
+  },
+  discoveryBadges: {
+    marginTop: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
+  },
+  discoveryBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(42,56,106,0.28)',
+    backgroundColor: 'rgba(42,56,106,0.08)',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  discoveryBadgeText: {
+    color: NAVY,
+    fontSize: 11,
+    fontWeight: '900',
   },
   doneBadge: {
     marginTop: 16,

@@ -29,6 +29,7 @@ import {
   PassportStampPage,
 } from '../components/passport/PassportPages';
 import { StampDetailSheet } from '../components/passport/StampDetailSheet';
+import { PassportDiscoverySummary } from '../components/passport/PassportDiscoverySummary';
 import type { SavedTicketItem, SaveButtonState, VisitButtonState } from '../components/saved/SavedTicketRow';
 import { SavedVisitToast, SavedVisitToastMessage } from '../components/saved/SavedVisitToast';
 import { TAG_TOKENS } from '../components/culture-card/tagKit';
@@ -831,6 +832,7 @@ function PassportPage() {
           />
         </View>
         <Text style={styles.bookHint}>책갈피를 누르거나 옆으로 넘겨요</Text>
+        <PassportDiscoverySummary passport={passport} />
         {activeBookmark === 'stamps' && stampBookMeta.totalBooks > 1 ? (
           <View style={styles.stampBookPager}>
             <Pressable

@@ -309,6 +309,13 @@ export function PassportStampPage({
                 <Text style={[styles.stampAdmit, { color }]} allowFontScaling={false}>
                   ADMIT · {stamp.category || '문화'}
                 </Text>
+                {stamp.isFirstInRegion || stamp.isFirstInCategory ? (
+                  <Text style={[styles.stampFirst, { color }]} numberOfLines={1} allowFontScaling={false}>
+                    {[stamp.isFirstInRegion ? '첫 지역' : null, stamp.isFirstInCategory ? '첫 장르' : null]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Text>
+                ) : null}
                 <Text style={[styles.stampName, { color }]} numberOfLines={1} allowFontScaling={false}>
                   {stamp.title}
                 </Text>
@@ -625,6 +632,14 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
     fontFamily: 'Noto Serif KR',
     maxWidth: '100%',
+  },
+  stampFirst: {
+    alignSelf: 'flex-start',
+    marginBottom: 3,
+    fontSize: 8.5,
+    lineHeight: 11,
+    letterSpacing: 0.6,
+    fontWeight: '900',
   },
   stampMeta: {
     marginTop: 3,

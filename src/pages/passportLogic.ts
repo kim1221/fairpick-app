@@ -62,6 +62,58 @@ export const WISHLIST_ITEMS_PER_PAGE = 2;
 export const STAMPS_PER_BOOK_PAGE = 6;
 export const STAMPS_PER_PASSPORT_BOOK = 60;
 
+export const PASSPORT_CATEGORY_GOAL = 5;
+const REGION_MILESTONES = [3, 5, 10, 15, 25] as const;
+
+export type PassportDiscoverySummary = {
+  monthDiscovered: number;
+  monthVisited: number;
+  regionsDiscovered: number;
+  categoriesDiscovered: number;
+  regionsVisited: number;
+  regionGoal: number;
+  categoryGoal: number;
+  regionProgress: number;
+  categoryProgress: number;
+  favoriteRegion: string | null;
+};
+
+function progressRatio(value: number, goal: number): number {
+  if (goal <= 0) return 0;
+  return Math.max(0, Math.min(1, value / goal));
+}
+
+function nextRegionMilestone(value: number): number {
+  return REGION_MILESTONES.find((milestone) => value < milestone)
+    ?? REGION_MILESTONES[REGION_MILESTONES.length - 1];
+}
+
+export function getPassportDiscoverySummary(input: {
+  monthDiscovered?: number;
+  monthVisited?: number;
+  regionsDiscovered?: number;
+  categoriesDiscovered?: number;
+  regionsVisited?: number;
+  topRegions?: { region: string; count: number }[];
+} | null): PassportDiscoverySummary {
+  const regionsDiscovered = Math.max(0, input?.regionsDiscovered ?? 0);
+  const categoriesDiscovered = Math.max(0, input?.categoriesDiscovered ?? 0);
+  const regionGoal = nextRegionMilestone(regionsDiscovered);
+
+  return {
+    monthDiscovered: Math.max(0, input?.monthDiscovered ?? 0),
+    monthVisited: Math.max(0, input?.monthVisited ?? 0),
+    regionsDiscovered,
+    categoriesDiscovered,
+    regionsVisited: Math.max(0, input?.regionsVisited ?? 0),
+    regionGoal,
+    categoryGoal: PASSPORT_CATEGORY_GOAL,
+    regionProgress: progressRatio(regionsDiscovered, regionGoal),
+    categoryProgress: progressRatio(categoriesDiscovered, PASSPORT_CATEGORY_GOAL),
+    favoriteRegion: input?.topRegions?.[0]?.region ?? null,
+  };
+}
+
 const SECTION_COPY: Record<PassportSegment, PassportSectionCopy> = {
   discovered: {
     eyebrow: 'ENTRY CARDS',

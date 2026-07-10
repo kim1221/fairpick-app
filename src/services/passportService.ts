@@ -16,6 +16,15 @@ export type PassportStamp = {
   venue: string | null;
   imageUrl: string | null;
   visitedAt: string;
+  /** 이 사용자의 해당 지역 첫 도장. 구버전 서버 호환을 위해 optional. */
+  isFirstInRegion?: boolean;
+  /** 이 사용자의 해당 카테고리 첫 도장. 구버전 서버 호환을 위해 optional. */
+  isFirstInCategory?: boolean;
+};
+
+export type PassportTopRegion = {
+  region: string;
+  count: number;
 };
 
 export type PassportDiscoveredCard = {
@@ -37,6 +46,11 @@ export type PassportResponse = {
   discoveredCount: number; // earn_log distinct event (평생)
   visitedCount: number; // user_visit_log distinct
   monthDiscovered: number; // 이번달(KST) 발견 수
+  regionsDiscovered?: number; // 발견 카드가 채운 고유 지역 수
+  categoriesDiscovered?: number; // 정규화한 발견 카테고리 수
+  regionsVisited?: number; // 도장을 남긴 고유 지역 수
+  monthVisited?: number; // 이번달(KST) 도장 수
+  topRegions?: PassportTopRegion[]; // 도장이 많은 지역 상위 5개
   stampBook: number; // 1 = 최신 도장권
   stampBookCount: number; // 전체 도장권 수
   stampBookSize: number; // 도장권당 도장 수

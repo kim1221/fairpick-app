@@ -5,6 +5,7 @@ import {
   getPassportSectionCopy,
   getPassportSectionIndexes,
   getPassportTabLabel,
+  getPassportDiscoverySummary,
   getStampBookMeta,
 } from '../passportLogic';
 
@@ -46,6 +47,38 @@ describe('passport logic', () => {
     expect(getPassportTabLabel('discovered', 67)).toBe('발견한 카드 67');
     expect(getPassportTabLabel('visited', 2)).toBe('다녀왔어요 2');
     expect(getPassportTabLabel('wishlist', 3)).toBe('가고 싶어요 3');
+  });
+
+  test('builds discovery progress with the next region milestone', () => {
+    expect(getPassportDiscoverySummary({
+      monthDiscovered: 4,
+      monthVisited: 2,
+      regionsDiscovered: 6,
+      categoriesDiscovered: 3,
+      regionsVisited: 2,
+      topRegions: [{ region: '성동구', count: 3 }],
+    })).toEqual({
+      monthDiscovered: 4,
+      monthVisited: 2,
+      regionsDiscovered: 6,
+      categoriesDiscovered: 3,
+      regionsVisited: 2,
+      regionGoal: 10,
+      categoryGoal: 5,
+      regionProgress: 0.6,
+      categoryProgress: 0.6,
+      favoriteRegion: '성동구',
+    });
+  });
+
+  test('keeps discovery summary compatible with the previous passport response', () => {
+    expect(getPassportDiscoverySummary({ monthDiscovered: 2 })).toMatchObject({
+      monthDiscovered: 2,
+      monthVisited: 0,
+      regionsDiscovered: 0,
+      categoriesDiscovered: 0,
+      regionGoal: 3,
+    });
   });
 
   test('builds one passport book in story order', () => {
