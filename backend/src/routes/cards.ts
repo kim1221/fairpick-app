@@ -598,6 +598,9 @@ function toLockedPreview(
       walkMinutes: card.walkMinutes,
       reasonTags: card.reasonTags,
     }),
+    // 카드 토큰은 매 응답마다 IV가 달라진다. 이벤트 ID를 노출하지 않는 안정적인 키로
+    // 같은 날 같은 추천의 티켓 스킨과 인쇄 일련번호를 고정한다.
+    visualSeed: String(hashStr(`${card.eventId}|${today}`)),
     category: card.category,
     areaLabel: card.region,
     distanceLabel: card.walkMinutes == null ? null : `도보 ${card.walkMinutes}분`,

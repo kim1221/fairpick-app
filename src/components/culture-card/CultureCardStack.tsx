@@ -1,22 +1,21 @@
 import React from 'react';
 import {
-  ImageBackground,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
+  Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from 'react-native';
-import { manilaTagTexture } from '../../assets';
 import type { LockedCardPreview } from '../../services/cardsService';
+import { getTicketSerial, getTicketSkin, stableTicketHash } from './ticketSkins';
 
 const INK = '#171717';
 const MUTED = '#6F6B65';
-const BLUE = '#A52822';
-const FALLBACK_PALETTE = { background: '#EFE9D8', foreground: '#171717', accent: '#A52822' };
+const RED = '#A52822';
+const PAPER = '#F7F5EF';
+const TICKET_PAPER = '#FFFDF7';
+const LINE = '#D8D2C7';
 
 interface CultureCardStackProps {
   cards: LockedCardPreview[];
@@ -26,9 +25,21 @@ interface CultureCardStackProps {
   loading: boolean;
   disabled: boolean;
   actionLabel: string;
-  onSelect: (cardToken: string) => void;
   onOpen: () => void;
   userRegion: string | null;
+}
+
+const GENERIC_HEADLINES = [
+  '가까운 곳에 숨은\n새로운 문화',
+  '오늘의 한 장을\n열어보세요',
+  '이번 주가 지나기 전에\n만나볼 문화',
+  '평범한 하루에 더할\n새로운 발견',
+] as const;
+
+function mysteryHeadline(card: LockedCardPreview): string {
+  if (card.isRevisit) return '다시 눈에 들어온\n오늘의 문화';
+  const visualKey = card.visualSeed ?? card.cardToken;
+  return GENERIC_HEADLINES[stableTicketHash(visualKey) % GENERIC_HEADLINES.length]!;
 }
 
 export function CultureCardStack({
@@ -39,179 +50,115 @@ export function CultureCardStack({
   loading,
   disabled,
   actionLabel,
-  onSelect,
   onOpen,
   userRegion,
 }: CultureCardStackProps) {
   const { width, height } = useWindowDimensions();
-  const cardWidth = width - 44;
+  const card = cards.find((candidate) => candidate.cardToken === selectedToken) ?? cards[0] ?? null;
   const isCompactHeight = height <= 700;
-  const cardHeight = isCompactHeight ? 286 : 320;
-  const selectedIndex = Math.max(0, cards.findIndex((card) => card.cardToken === selectedToken));
-  const handleMomentumEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const nextIndex = Math.max(
-      0,
-      Math.min(cards.length - 1, Math.round(event.nativeEvent.contentOffset.x / (cardWidth + 12))),
-    );
-    const nextCard = cards[nextIndex];
-    if (nextCard && nextCard.cardToken !== selectedToken) onSelect(nextCard.cardToken);
-  };
+  const ticketWidth = Math.min(width - 44, 430);
+  const progress = dailyOpenLimit > 0 ? Math.min(1, dailyOpenCount / dailyOpenLimit) : 0;
+  const remaining = Math.max(0, dailyOpenLimit - dailyOpenCount);
+  const visualKey = card ? (card.visualSeed ?? card.cardToken) : '';
+  const clues = card
+    ? [card.distanceLabel, card.timingLabel].filter((value): value is string => Boolean(value)).slice(0, 2)
+    : [];
 
   return (
     <View style={[styles.section, isCompactHeight ? styles.sectionCompact : null]}>
       <View style={styles.heading}>
         <View style={styles.headingTop}>
-          <Text style={styles.eyebrow}>THE COVER STORY</Text>
-          <Text style={styles.dailyPillText}>{dailyOpenCount} / {dailyOpenLimit} OPENED</Text>
+          <Text style={styles.eyebrow}>TODAY&apos;S CULTURE TICKET</Text>
+          <Text style={styles.dailyCount}>오늘 {dailyOpenCount}장 공개</Text>
         </View>
-        <Text style={[styles.title, isCompactHeight ? styles.titleCompact : null]}>오늘의 표지</Text>
+        <Text style={[styles.title, isCompactHeight ? styles.titleCompact : null]}>
+          오늘의 문화 티켓이 도착했어요
+        </Text>
         <Text style={[styles.subtitle, isCompactHeight ? styles.subtitleCompact : null]} numberOfLines={2}>
           {userRegion
-            ? `${userRegion} 근처에서 고른 세 장입니다. 표지를 넘기고 한 장을 열어보세요.`
-            : '오늘의 편집부가 고른 세 장입니다. 표지를 넘기고 한 장을 열어보세요.'}
+            ? `${userRegion} 근처에서 당신에게 맞춰 고른 한 장이에요.`
+            : '겉표지는 랜덤, 오늘의 문화는 당신에게 맞춰 골랐어요.'}
         </Text>
-      </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        decelerationRate="fast"
-        snapToInterval={cardWidth + 12}
-        snapToAlignment="start"
-        onMomentumScrollEnd={handleMomentumEnd}
-        contentContainerStyle={[styles.cardRail, isCompactHeight ? styles.cardRailCompact : null]}
-      >
-        {cards.map((card, index) => {
-          const selected = card.cardToken === selectedToken;
-          const palette = card.palette ?? FALLBACK_PALETTE;
-          const teaserEyebrow = card.teaserEyebrow ?? card.reasonTags?.[0] ?? '오늘의 큐레이션';
-          const teaserHeadline = card.teaserHeadline ?? `오늘 가볍게 열어볼\n${card.category} 한 곳`;
-          const meta = [card.category, card.distanceLabel, card.timingLabel].filter(Boolean).join(' · ');
-          return (
-            <Pressable
-              key={card.cardToken}
-              accessibilityRole="radio"
-              accessibilityState={{ checked: selected }}
-              accessibilityLabel={`${teaserEyebrow}, ${teaserHeadline.replace('\n', ' ')}`}
-              onPress={() => onSelect(card.cardToken)}
-              style={({ pressed }) => [
-                styles.newsCard,
-                { width: cardWidth, height: cardHeight, backgroundColor: palette.background },
-                selected ? styles.newsCardSelected : null,
-                pressed ? styles.newsCardPressed : null,
-              ]}
-            >
-              <ImageBackground
-                source={manilaTagTexture}
-                style={StyleSheet.absoluteFill}
-                imageStyle={styles.paperTexture}
-                pointerEvents="none"
-              />
-              <View
-                pointerEvents="none"
-                style={[styles.shapeLarge, { backgroundColor: palette.accent }]}
-              />
-              <View
-                pointerEvents="none"
-                style={[styles.shapeSmall, { borderColor: palette.accent }]}
-              />
-              <View pointerEvents="none" style={[styles.collage, isCompactHeight ? styles.collageCompact : null]}>
-                <View style={[styles.collagePanel, { backgroundColor: palette.foreground }]} />
-                <View style={[styles.collageSlash, { backgroundColor: palette.accent }]} />
-                <View style={[styles.collageDisc, { borderColor: palette.foreground }]} />
-                <View style={styles.collageFigure}>
-                  <View style={[styles.figureHead, { backgroundColor: palette.foreground }]} />
-                  <View style={[styles.figureBody, { backgroundColor: palette.foreground }]} />
-                </View>
-                <Text style={[styles.collageType, { color: palette.foreground }]}>CITY{`\n`}SCENE{`\n`}0{index + 1}</Text>
-              </View>
-
-              <View style={styles.cardTop}>
-                <Text style={[styles.cardSerial, { color: palette.foreground }]}>VOL. 01 / NO. {String(index + 1).padStart(2, '0')}</Text>
-                <View style={styles.selectionLabel}>
-                    <Text style={[styles.selectionText, { color: palette.foreground }]}>
-                    {selected ? 'SELECTED' : 'SWIPE'}
-                  </Text>
-                  <View style={[
-                    styles.selectionDot,
-                    {
-                      borderColor: palette.foreground,
-                      backgroundColor: selected ? palette.foreground : 'transparent',
-                    },
-                  ]} />
-                </View>
-              </View>
-
-              <View style={[styles.cardCopy, isCompactHeight ? styles.cardCopyCompact : null]}>
-                <Text style={[styles.cardEyebrow, { color: palette.accent }]}>
-                  {teaserEyebrow}
-                </Text>
-                <Text style={[styles.cardHeadline, isCompactHeight ? styles.cardHeadlineCompact : null, { color: palette.foreground }]}>
-                  {teaserHeadline}
-                </Text>
-              </View>
-
-              <View style={[styles.cardFooter, { borderTopColor: `${palette.foreground}30` }]}>
-                <Text style={[styles.cardMeta, { color: palette.foreground }]} numberOfLines={1}>
-                  {meta}
-                </Text>
-                <Text style={[styles.lockedCopy, { color: palette.foreground }]}>
-                  {card.isRevisit ? '다시 만난 장면 · 광고 후 전체 공개' : '행사명과 장소는 광고 뒤에 공개돼요'}
-                </Text>
-              </View>
-              {selected ? (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={(event) => { event.stopPropagation(); onOpen(); }}
-                  disabled={disabled}
-                  style={[styles.cardCta, disabled ? styles.cardCtaDisabled : null]}
-                >
-                  <Text style={[styles.cardCtaText, disabled ? styles.cardCtaTextDisabled : null]}>
-                    {loading ? '광고 준비 중' : actionLabel}
-                  </Text>
-                  <Text style={[styles.cardCtaReward, disabled ? styles.cardCtaTextDisabled : null]}>+3 티켓</Text>
-                </Pressable>
-              ) : null}
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-
-      <View style={styles.pager} accessibilityLabel={`${selectedIndex + 1}번째 카드 선택됨`}>
-        {cards.map((card, index) => (
-          <View
-            key={`page-${card.cardToken}`}
-            style={[styles.pageDot, index === selectedIndex ? styles.pageDotActive : null]}
-          />
-        ))}
-      </View>
-
-      <Text style={styles.hint}>광고가 끝나면 행사 전체 정보와 문화 티켓을 함께 받아요</Text>
-
-      <View style={styles.topicSection}>
-        <View style={styles.topicHeader}>
-          <Text style={styles.topicTitle}>THIS WEEK</Text>
-          <Text style={styles.topicCount}>{cards.length} CURATED STORIES</Text>
+        <View style={styles.progressHeader}>
+          <Text style={styles.progressCopy}>열어본 티켓 {dailyOpenCount}</Text>
+          <Text style={styles.progressLimit}>최대 {dailyOpenLimit}장</Text>
         </View>
-        <View style={styles.topicRow}>
-          {cards.slice(0, 3).map((card, index) => {
-            const palette = card.palette ?? FALLBACK_PALETTE;
-            return (
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+        </View>
+      </View>
+
+      {card ? (
+        <View style={[styles.ticketDeck, { width: ticketWidth }]}>
+          <View pointerEvents="none" style={[styles.backTicket, styles.backTicketSecond]} />
+          <View pointerEvents="none" style={[styles.backTicket, styles.backTicketFirst]} />
+          <View style={[styles.ticket, isCompactHeight ? styles.ticketCompact : null]}>
+            <View style={styles.ticketMain}>
+              <View style={styles.ticketHeader}>
+                <Text style={styles.ticketBrand}>CULTURE TICKET</Text>
+                <Text style={styles.ticketSerial}>NO. {getTicketSerial(visualKey)}</Text>
+              </View>
+
+              <View style={styles.ticketBody}>
+                <Image
+                  source={getTicketSkin(visualKey)}
+                  style={styles.ticketArt}
+                  resizeMode="cover"
+                  accessibilityIgnoresInvertColors
+                />
+                <View style={styles.ticketCopyPanel}>
+                  <View style={styles.clueRow}>
+                    {(clues.length > 0 ? clues : ['오늘의 추천']).map((clue) => (
+                      <View key={clue} style={styles.cluePill}>
+                        <Text style={styles.clueText}>{clue}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <Text style={[styles.ticketHeadline, isCompactHeight ? styles.ticketHeadlineCompact : null]}>
+                    {mysteryHeadline(card)}
+                  </Text>
+                  <Text style={styles.lockedCopy} numberOfLines={1}>
+                    행사명과 장소는 광고 뒤에 공개돼요
+                  </Text>
+                </View>
+              </View>
+
               <Pressable
-                key={`topic-${card.cardToken}`}
                 accessibilityRole="button"
-                onPress={() => onSelect(card.cardToken)}
-                style={[styles.topicCard, { backgroundColor: palette.background }]}
+                accessibilityLabel={`${actionLabel}, 광고가 끝나면 행사 정보가 공개돼요`}
+                onPress={onOpen}
+                disabled={disabled}
+                style={({ pressed }) => [
+                  styles.cardCta,
+                  disabled ? styles.cardCtaDisabled : null,
+                  pressed && !disabled ? styles.cardCtaPressed : null,
+                ]}
               >
-                <View style={[styles.topicStripe, { backgroundColor: palette.accent }]} />
-                <Text style={[styles.topicIndex, { color: palette.foreground }]}>0{index + 1}</Text>
-                <Text style={[styles.topicCopy, { color: palette.foreground }]} numberOfLines={3}>
-                  {(card.teaserHeadline ?? `${card.category} 한 곳`).replace('\n', ' ')}
+                <Text style={[styles.cardCtaText, disabled ? styles.cardCtaTextDisabled : null]}>
+                  {loading ? '광고 준비 중' : actionLabel}
                 </Text>
+                <Text style={[styles.cardCtaArrow, disabled ? styles.cardCtaTextDisabled : null]}>→</Text>
               </Pressable>
-            );
-          })}
+            </View>
+
+            <View style={styles.rewardStub}>
+              <View style={styles.perforation} />
+              <Text style={styles.rewardLabel}>REWARD</Text>
+              <View style={styles.rewardCopy}>
+                <Text style={styles.rewardAmount}>+2~3</Text>
+                <Text style={styles.rewardUnit}>티켓</Text>
+              </View>
+              <Text style={styles.stubSerial}>{getTicketSerial(visualKey).slice(-3)}</Text>
+            </View>
+            <View pointerEvents="none" style={[styles.notch, styles.notchTop]} />
+            <View pointerEvents="none" style={[styles.notch, styles.notchBottom]} />
+          </View>
         </View>
+      ) : null}
+
+      <View style={styles.afterTicket}>
+        <Text style={styles.remainingCopy}>오늘 남은 티켓 {remaining}장</Text>
+        <Text style={styles.hint}>한 장을 열면 다음 추천 티켓이 이어져요</Text>
       </View>
     </View>
   );
@@ -228,42 +175,42 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
   },
   headingTop: {
+    paddingBottom: 7,
+    borderBottomWidth: 1,
+    borderBottomColor: INK,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: 7,
-    borderBottomWidth: 1,
-    borderBottomColor: '#171717',
   },
   eyebrow: {
-    color: '#A52822',
-    fontSize: 11,
+    color: RED,
+    fontSize: 10.5,
     lineHeight: 18,
     fontWeight: '900',
-    letterSpacing: 1.6,
+    letterSpacing: 1.3,
   },
-  dailyPillText: {
-    color: '#171717',
-    fontSize: 9.5,
+  dailyCount: {
+    color: INK,
+    fontSize: 10,
+    lineHeight: 16,
     fontWeight: '800',
-    letterSpacing: 1,
   },
   title: {
-    marginTop: 5,
+    marginTop: 9,
     color: INK,
     fontSize: 27,
-    lineHeight: 34,
+    lineHeight: 35,
     fontWeight: '900',
-    letterSpacing: -1.2,
+    letterSpacing: -1.25,
     fontFamily: 'Noto Serif KR',
   },
   titleCompact: {
-    marginTop: 3,
-    fontSize: 24,
+    marginTop: 6,
+    fontSize: 23,
     lineHeight: 30,
   },
   subtitle: {
-    marginTop: 6,
+    marginTop: 5,
     color: MUTED,
     fontSize: 12,
     lineHeight: 18,
@@ -274,208 +221,166 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
   },
-  cardRail: {
-    paddingHorizontal: 22,
-    paddingTop: 12,
-    paddingBottom: 8,
-    gap: 12,
-  },
-  cardRailCompact: {
-    paddingTop: 7,
-    paddingBottom: 4,
-  },
-  newsCard: {
-    borderRadius: 2,
-    padding: 18,
-    overflow: 'hidden',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#171717',
-    shadowColor: '#1A1712',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  newsCardSelected: {
-    borderWidth: 3,
-    borderColor: '#171717',
-  },
-  newsCardPressed: {
-    transform: [{ scale: 0.985 }],
-  },
-  shapeLarge: {
-    position: 'absolute',
-    width: 58,
-    top: 0,
-    bottom: 0,
-    left: 0,
-    opacity: 1,
-  },
-  shapeSmall: {
-    position: 'absolute',
-    width: 94,
-    height: 136,
-    borderRadius: 0,
-    borderWidth: 1,
-    right: 18,
-    top: 62,
-    opacity: 0.52,
-  },
-  cardTop: {
+  progressHeader: {
+    marginTop: 13,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginLeft: 52,
   },
-  cardSerial: {
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: '900',
-    letterSpacing: 1.4,
-    opacity: 0.8,
-  },
-  paperTexture: {
-    opacity: 0.16,
-  },
-  collage: {
-    position: 'absolute',
-    left: 58,
-    right: 0,
-    top: 42,
-    height: 158,
-    overflow: 'hidden',
-  },
-  collageCompact: {
-    top: 34,
-    height: 132,
-  },
-  collagePanel: {
-    position: 'absolute',
-    width: 76,
-    height: 130,
-    right: 24,
-    top: 16,
-    opacity: 0.15,
-    transform: [{ rotate: '8deg' }],
-  },
-  collageSlash: {
-    position: 'absolute',
-    width: 52,
-    height: 164,
-    left: 76,
-    top: -14,
-    opacity: 0.7,
-    transform: [{ rotate: '32deg' }],
-  },
-  collageDisc: {
-    position: 'absolute',
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    borderWidth: 18,
-    left: 18,
-    top: 24,
-    opacity: 0.16,
-  },
-  collageFigure: {
-    position: 'absolute',
-    right: 74,
-    top: 24,
-    width: 70,
-    height: 150,
-    alignItems: 'center',
-  },
-  figureHead: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    opacity: 0.82,
-  },
-  figureBody: {
-    marginTop: -2,
-    width: 66,
-    height: 92,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-    opacity: 0.82,
-  },
-  collageType: {
-    position: 'absolute',
-    left: 12,
-    bottom: 8,
-    fontSize: 10,
-    lineHeight: 12,
-    fontWeight: '900',
-    letterSpacing: 1.5,
-    opacity: 0.72,
-  },
-  selectionLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-  },
-  selectionText: {
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: '800',
-  },
-  selectionDot: {
-    width: 17,
-    height: 17,
-    borderRadius: 9,
-    borderWidth: 1.5,
-  },
-  cardCopy: {
-    marginTop: 'auto',
-    marginBottom: 10,
-    marginLeft: 52,
-    maxWidth: '82%',
-  },
-  cardCopyCompact: {
-    marginBottom: 5,
-  },
-  cardEyebrow: {
-    fontSize: 10,
-    lineHeight: 18,
-    fontWeight: '900',
-  },
-  cardHeadline: {
-    marginTop: 9,
-    fontSize: 25,
-    lineHeight: 32,
-    fontWeight: '900',
-    letterSpacing: -1.1,
-    fontFamily: 'Noto Serif KR',
-  },
-  cardHeadlineCompact: {
-    marginTop: 5,
-    fontSize: 21,
-    lineHeight: 27,
-  },
-  cardFooter: {
-    paddingTop: 8,
-    borderTopWidth: 1,
-    marginLeft: 52,
-  },
-  cardMeta: {
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '800',
-  },
-  lockedCopy: {
-    marginTop: 4,
+  progressCopy: {
+    color: INK,
     fontSize: 10.5,
     lineHeight: 15,
+    fontWeight: '800',
+  },
+  progressLimit: {
+    color: MUTED,
+    fontSize: 10.5,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  progressTrack: {
+    marginTop: 6,
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+    backgroundColor: '#DDD8CE',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: RED,
+  },
+  ticketDeck: {
+    alignSelf: 'center',
+    marginTop: 17,
+    paddingTop: 8,
+    paddingBottom: 5,
+  },
+  backTicket: {
+    position: 'absolute',
+    height: 204,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#CFC8BB',
+  },
+  backTicketFirst: {
+    top: 4,
+    left: 9,
+    right: 9,
+    backgroundColor: '#F3B64A',
+    opacity: 0.7,
+  },
+  backTicketSecond: {
+    top: 0,
+    left: 18,
+    right: 18,
+    backgroundColor: '#2D6A66',
+    opacity: 0.5,
+  },
+  ticket: {
+    minHeight: 250,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#C8C1B5',
+    backgroundColor: TICKET_PAPER,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    shadowColor: '#171717',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.13,
+    shadowRadius: 14,
+    elevation: 4,
+  },
+  ticketCompact: {
+    minHeight: 230,
+  },
+  ticketMain: {
+    flex: 1,
+  },
+  ticketHeader: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: LINE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  ticketBrand: {
+    color: INK,
+    fontSize: 9.5,
+    lineHeight: 13,
+    fontWeight: '900',
+    letterSpacing: 1.15,
+  },
+  ticketSerial: {
+    color: MUTED,
+    fontSize: 8,
+    lineHeight: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  ticketBody: {
+    flex: 1,
+    minHeight: 160,
+    flexDirection: 'row',
+  },
+  ticketArt: {
+    width: '41%',
+    height: '100%',
+    backgroundColor: '#EEE8DA',
+  },
+  ticketCopyPanel: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 13,
+    justifyContent: 'center',
+  },
+  clueRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 5,
+  },
+  cluePill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#D6D0C5',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    backgroundColor: '#F7F3EA',
+  },
+  clueText: {
+    color: MUTED,
+    fontSize: 8.5,
+    lineHeight: 11,
+    fontWeight: '800',
+  },
+  ticketHeadline: {
+    marginTop: 10,
+    color: INK,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '900',
+    letterSpacing: -0.55,
+    fontFamily: 'Noto Serif KR',
+  },
+  ticketHeadlineCompact: {
+    marginTop: 7,
+    fontSize: 16,
+    lineHeight: 21,
+  },
+  lockedCopy: {
+    marginTop: 8,
+    color: MUTED,
+    fontSize: 8.5,
+    lineHeight: 12,
     fontWeight: '600',
-    opacity: 0.76,
   },
   cardCta: {
-    marginTop: 10,
-    marginLeft: 52,
-    minHeight: 44,
-    backgroundColor: '#A52822',
+    minHeight: 47,
     paddingHorizontal: 14,
+    backgroundColor: RED,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -483,99 +388,107 @@ const styles = StyleSheet.create({
   cardCtaDisabled: {
     backgroundColor: '#CAC5BB',
   },
+  cardCtaPressed: {
+    opacity: 0.88,
+  },
   cardCtaText: {
     color: '#FFFFFF',
     fontSize: 13.5,
+    lineHeight: 18,
     fontWeight: '900',
   },
-  cardCtaReward: {
+  cardCtaArrow: {
     color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '900',
+    fontSize: 20,
+    lineHeight: 22,
+    fontWeight: '500',
   },
   cardCtaTextDisabled: {
-    color: '#827E77',
+    color: '#817C74',
   },
-  pager: {
-    height: 18,
-    flexDirection: 'row',
+  rewardStub: {
+    width: 66,
+    position: 'relative',
+    backgroundColor: '#F4EFE4',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
+    justifyContent: 'space-between',
+    paddingVertical: 13,
+    paddingHorizontal: 5,
   },
-  pageDot: {
-    width: 28,
-    height: 2,
-    borderRadius: 0,
-    backgroundColor: '#C9C5BC',
+  perforation: {
+    position: 'absolute',
+    left: 0,
+    top: 9,
+    bottom: 9,
+    borderLeftWidth: 1,
+    borderStyle: 'dashed',
+    borderLeftColor: '#9E978B',
   },
-  pageDotActive: {
-    width: 52,
-    backgroundColor: BLUE,
+  rewardLabel: {
+    color: MUTED,
+    fontSize: 7.5,
+    lineHeight: 10,
+    fontWeight: '900',
+    letterSpacing: 1.1,
+    transform: [{ rotate: '90deg' }],
+    marginTop: 22,
+  },
+  rewardCopy: {
+    alignItems: 'center',
+  },
+  rewardAmount: {
+    color: RED,
+    fontSize: 17,
+    lineHeight: 21,
+    fontWeight: '900',
+    letterSpacing: -0.8,
+  },
+  rewardUnit: {
+    marginTop: 1,
+    color: RED,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '900',
+  },
+  stubSerial: {
+    color: MUTED,
+    fontSize: 8,
+    lineHeight: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+  },
+  notch: {
+    position: 'absolute',
+    right: 58,
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    backgroundColor: PAPER,
+    borderWidth: 1,
+    borderColor: '#C8C1B5',
+  },
+  notchTop: {
+    top: -8,
+  },
+  notchBottom: {
+    bottom: -8,
+  },
+  afterTicket: {
+    marginTop: 9,
+    paddingHorizontal: 22,
+    alignItems: 'center',
+  },
+  remainingCopy: {
+    color: INK,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '800',
   },
   hint: {
-    marginTop: 10,
-    textAlign: 'center',
+    marginTop: 4,
     color: MUTED,
-    fontSize: 11.5,
-    lineHeight: 17,
+    fontSize: 10.5,
+    lineHeight: 15,
     fontWeight: '600',
-  },
-  topicSection: {
-    marginHorizontal: 22,
-    marginTop: 24,
-  },
-  topicHeader: {
-    paddingBottom: 7,
-    borderBottomWidth: 1,
-    borderBottomColor: '#171717',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  topicTitle: {
-    color: '#171717',
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 1.3,
-  },
-  topicCount: {
-    color: '#6F6B65',
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.7,
-  },
-  topicRow: {
-    marginTop: 9,
-    flexDirection: 'row',
-    gap: 8,
-  },
-  topicCard: {
-    flex: 1,
-    height: 118,
-    position: 'relative',
-    overflow: 'hidden',
-    padding: 10,
-    justifyContent: 'space-between',
-  },
-  topicStripe: {
-    position: 'absolute',
-    right: -15,
-    top: -12,
-    width: 36,
-    height: 150,
-    opacity: 0.72,
-    transform: [{ rotate: '18deg' }],
-  },
-  topicIndex: {
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 1,
-  },
-  topicCopy: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '900',
-    fontFamily: 'Noto Serif KR',
   },
 });

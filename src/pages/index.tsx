@@ -626,10 +626,10 @@ function HomePageInner() {
   }, [dialog, openedCard]);
 
   const actionLabel = !isLoggedIn && !authLoading
-    ? '로그인하고 열기'
+    ? '로그인하고 공개하기'
     : dailyLimitReached
       ? '오늘 50장 공개 완료'
-      : '광고 보고 열기';
+      : '광고 보고 공개하기';
   const stackDisabled = (
     authLoading
     || loginPending
@@ -680,7 +680,6 @@ function HomePageInner() {
               loading={status === 'ad_loading' || adLoadStatus === 'loading'}
               disabled={stackDisabled}
               actionLabel={actionLabel}
-              onSelect={setSelectedToken}
               onOpen={handleOpenCard}
               userRegion={cardsData?.userRegion ?? null}
             />

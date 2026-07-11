@@ -55,6 +55,7 @@ export type CardsTodayResponse = {
 
 export type LockedCardPreview = {
   cardToken: string;
+  visualSeed?: string; // 같은 날 같은 추천의 잠금 티켓 외형을 고정하는 비식별 키
   category: string;
   areaLabel: string | null;
   distanceLabel: string | null;
