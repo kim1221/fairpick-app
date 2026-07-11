@@ -43,8 +43,10 @@ export function CultureCardStack({
   onOpen,
   userRegion,
 }: CultureCardStackProps) {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const cardWidth = width - 44;
+  const isCompactHeight = height <= 700;
+  const cardHeight = isCompactHeight ? 286 : 320;
   const selectedIndex = Math.max(0, cards.findIndex((card) => card.cardToken === selectedToken));
   const handleMomentumEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const nextIndex = Math.max(
@@ -56,14 +58,14 @@ export function CultureCardStack({
   };
 
   return (
-    <View style={styles.section}>
+    <View style={[styles.section, isCompactHeight ? styles.sectionCompact : null]}>
       <View style={styles.heading}>
         <View style={styles.headingTop}>
           <Text style={styles.eyebrow}>THE COVER STORY</Text>
           <Text style={styles.dailyPillText}>{dailyOpenCount} / {dailyOpenLimit} OPENED</Text>
         </View>
-        <Text style={styles.title}>오늘의 표지</Text>
-        <Text style={styles.subtitle}>
+        <Text style={[styles.title, isCompactHeight ? styles.titleCompact : null]}>오늘의 표지</Text>
+        <Text style={[styles.subtitle, isCompactHeight ? styles.subtitleCompact : null]} numberOfLines={2}>
           {userRegion
             ? `${userRegion} 근처에서 고른 세 장입니다. 표지를 넘기고 한 장을 열어보세요.`
             : '오늘의 편집부가 고른 세 장입니다. 표지를 넘기고 한 장을 열어보세요.'}
@@ -77,7 +79,7 @@ export function CultureCardStack({
         snapToInterval={cardWidth + 12}
         snapToAlignment="start"
         onMomentumScrollEnd={handleMomentumEnd}
-        contentContainerStyle={styles.cardRail}
+        contentContainerStyle={[styles.cardRail, isCompactHeight ? styles.cardRailCompact : null]}
       >
         {cards.map((card, index) => {
           const selected = card.cardToken === selectedToken;
@@ -94,7 +96,7 @@ export function CultureCardStack({
               onPress={() => onSelect(card.cardToken)}
               style={({ pressed }) => [
                 styles.newsCard,
-                { width: cardWidth, backgroundColor: palette.background },
+                { width: cardWidth, height: cardHeight, backgroundColor: palette.background },
                 selected ? styles.newsCardSelected : null,
                 pressed ? styles.newsCardPressed : null,
               ]}
@@ -113,7 +115,7 @@ export function CultureCardStack({
                 pointerEvents="none"
                 style={[styles.shapeSmall, { borderColor: palette.accent }]}
               />
-              <View pointerEvents="none" style={styles.collage}>
+              <View pointerEvents="none" style={[styles.collage, isCompactHeight ? styles.collageCompact : null]}>
                 <View style={[styles.collagePanel, { backgroundColor: palette.foreground }]} />
                 <View style={[styles.collageSlash, { backgroundColor: palette.accent }]} />
                 <View style={[styles.collageDisc, { borderColor: palette.foreground }]} />
@@ -140,11 +142,11 @@ export function CultureCardStack({
                 </View>
               </View>
 
-              <View style={styles.cardCopy}>
+              <View style={[styles.cardCopy, isCompactHeight ? styles.cardCopyCompact : null]}>
                 <Text style={[styles.cardEyebrow, { color: palette.accent }]}>
                   {teaserEyebrow}
                 </Text>
-                <Text style={[styles.cardHeadline, { color: palette.foreground }]}>
+                <Text style={[styles.cardHeadline, isCompactHeight ? styles.cardHeadlineCompact : null, { color: palette.foreground }]}>
                   {teaserHeadline}
                 </Text>
               </View>
@@ -219,6 +221,9 @@ const styles = StyleSheet.create({
   section: {
     paddingTop: 14,
   },
+  sectionCompact: {
+    paddingTop: 7,
+  },
   heading: {
     paddingHorizontal: 22,
   },
@@ -252,6 +257,11 @@ const styles = StyleSheet.create({
     letterSpacing: -1.2,
     fontFamily: 'Noto Serif KR',
   },
+  titleCompact: {
+    marginTop: 3,
+    fontSize: 24,
+    lineHeight: 30,
+  },
   subtitle: {
     marginTop: 6,
     color: MUTED,
@@ -259,14 +269,22 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '600',
   },
+  subtitleCompact: {
+    marginTop: 3,
+    fontSize: 11,
+    lineHeight: 16,
+  },
   cardRail: {
     paddingHorizontal: 22,
     paddingTop: 12,
     paddingBottom: 8,
     gap: 12,
   },
+  cardRailCompact: {
+    paddingTop: 7,
+    paddingBottom: 4,
+  },
   newsCard: {
-    height: 320,
     borderRadius: 2,
     padding: 18,
     overflow: 'hidden',
@@ -327,6 +345,10 @@ const styles = StyleSheet.create({
     top: 42,
     height: 158,
     overflow: 'hidden',
+  },
+  collageCompact: {
+    top: 34,
+    height: 132,
   },
   collagePanel: {
     position: 'absolute',
@@ -410,6 +432,9 @@ const styles = StyleSheet.create({
     marginLeft: 52,
     maxWidth: '82%',
   },
+  cardCopyCompact: {
+    marginBottom: 5,
+  },
   cardEyebrow: {
     fontSize: 10,
     lineHeight: 18,
@@ -422,6 +447,11 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: -1.1,
     fontFamily: 'Noto Serif KR',
+  },
+  cardHeadlineCompact: {
+    marginTop: 5,
+    fontSize: 21,
+    lineHeight: 27,
   },
   cardFooter: {
     paddingTop: 8,
