@@ -1,12 +1,5 @@
 import React from 'react';
-import {
-  Image,
-  Pressable,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ImageBackground, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import type { LockedCardPreview } from '../../services/cardsService';
 import { getTicketSerial, getTicketSkin, stableTicketHash } from './ticketSkins';
 
@@ -100,12 +93,14 @@ export function CultureCardStack({
               </View>
 
               <View style={styles.ticketBody}>
-                <Image
+                <ImageBackground
                   source={getTicketSkin(visualKey)}
-                  style={styles.ticketArt}
+                  style={styles.ticketArtFrame}
+                  imageStyle={styles.ticketArtImage}
                   resizeMode="cover"
-                  accessibilityIgnoresInvertColors
-                />
+                >
+                  <View style={styles.ticketArtWash} />
+                </ImageBackground>
                 <View style={styles.ticketCopyPanel}>
                   <View style={styles.clueRow}>
                     {(clues.length > 0 ? clues : ['오늘의 추천']).map((clue) => (
@@ -323,13 +318,21 @@ const styles = StyleSheet.create({
   },
   ticketBody: {
     flex: 1,
-    minHeight: 160,
+    height: 166,
     flexDirection: 'row',
   },
-  ticketArt: {
+  ticketArtFrame: {
     width: '41%',
-    height: '100%',
     backgroundColor: '#EEE8DA',
+    overflow: 'hidden',
+  },
+  ticketArtImage: {
+    width: '100%',
+    height: '100%',
+  },
+  ticketArtWash: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 253, 247, 0.05)',
   },
   ticketCopyPanel: {
     flex: 1,
