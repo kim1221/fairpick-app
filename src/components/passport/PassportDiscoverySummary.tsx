@@ -48,12 +48,10 @@ export function PassportDiscoverySummary({ passport }: { passport: PassportRespo
           <Text style={styles.metricNumber}>{summary.monthDiscovered}</Text>
           <Text style={styles.metricLabel}>새로 발견</Text>
         </View>
-        <View style={styles.metricDivider} />
         <View style={styles.metric}>
           <Text style={styles.metricNumber}>{summary.monthVisited}</Text>
           <Text style={styles.metricLabel}>이번 달 도장</Text>
         </View>
-        <View style={styles.metricDivider} />
         <View style={styles.metric}>
           <Text style={styles.metricNumber}>{summary.regionsVisited}</Text>
           <Text style={styles.metricLabel}>다녀온 지역</Text>
@@ -74,11 +72,9 @@ const styles = StyleSheet.create({
   section: {
     marginTop: 18,
     marginBottom: 22,
-    borderTopWidth: 3,
-    borderBottomWidth: 1,
-    borderColor: '#171717',
+    borderRadius: 22,
     backgroundColor: '#EFE9D8',
-    paddingVertical: 14,
+    padding: 17,
   },
   headingRow: {
     flexDirection: 'row',
@@ -105,7 +101,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    borderRadius: 0,
+    borderRadius: 999,
     backgroundColor: '#A52822',
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -124,20 +120,16 @@ const styles = StyleSheet.create({
     marginTop: 18,
     flexDirection: 'row',
     alignItems: 'center',
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#171717',
-    backgroundColor: 'transparent',
-    paddingVertical: 13,
+    gap: 8,
   },
   metric: {
     flex: 1,
     alignItems: 'center',
-  },
-  metricDivider: {
-    width: 1,
-    height: 32,
-    backgroundColor: '#171717',
+    minHeight: 70,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.58)',
+    justifyContent: 'center',
+    paddingVertical: 10,
   },
   metricNumber: {
     color: TEXT,
@@ -167,10 +159,8 @@ const styles = StyleSheet.create({
   collectionChip: {
     flex: 1,
     minHeight: 68,
-    borderRadius: 0,
-    borderWidth: 1,
-    borderColor: '#171717',
-    backgroundColor: '#F7F5EF',
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.66)',
     padding: 12,
     justifyContent: 'space-between',
   },

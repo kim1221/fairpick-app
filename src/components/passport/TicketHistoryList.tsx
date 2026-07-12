@@ -112,16 +112,15 @@ const styles = StyleSheet.create({
     fontFamily: 'Noto Serif KR',
   },
   sectionKicker: {
-    paddingTop: 8,
-    borderTopWidth: 3,
-    borderTopColor: '#171717',
     color: '#A52822',
     fontSize: 10.5,
     fontWeight: '900',
     letterSpacing: 1.5,
   },
   list: {
-    paddingHorizontal: 0,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    backgroundColor: '#FBF9F4',
   },
   row: {
     minHeight: 64,
@@ -135,9 +134,7 @@ const styles = StyleSheet.create({
   iconBox: {
     width: 38,
     height: 38,
-    borderRadius: 0,
-    borderWidth: 1,
-    borderColor: '#171717',
+    borderRadius: 14,
     backgroundColor: '#EFE9D8',
     alignItems: 'center',
     justifyContent: 'center',

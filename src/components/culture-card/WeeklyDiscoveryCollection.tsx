@@ -141,8 +141,10 @@ const styles = StyleSheet.create({
     marginTop: 34,
   },
   issueRule: {
-    height: 3,
-    backgroundColor: '#171717',
+    width: 42,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: '#A52822',
   },
   header: {
     paddingTop: 9,
@@ -176,24 +178,21 @@ const styles = StyleSheet.create({
   },
   description: {
     marginTop: 8,
-    paddingBottom: 11,
-    borderBottomWidth: 1,
-    borderBottomColor: '#171717',
+    paddingBottom: 4,
     color: '#6F6B65',
     fontSize: 11.5,
     lineHeight: 17,
     fontWeight: '600',
   },
   spread: {
-    marginTop: 10,
+    marginTop: 14,
     height: 350,
     flexDirection: 'row',
     gap: 8,
   },
   featured: {
     flex: 1.42,
-    borderWidth: 1,
-    borderColor: '#171717',
+    borderRadius: 18,
     overflow: 'hidden',
   },
   secondaryColumn: {
@@ -203,8 +202,7 @@ const styles = StyleSheet.create({
   secondary: {
     flex: 1,
     minHeight: 0,
-    borderWidth: 1,
-    borderColor: '#171717',
+    borderRadius: 16,
     overflow: 'hidden',
   },
   storyImage: {
@@ -253,8 +251,7 @@ const styles = StyleSheet.create({
   archiveNote: {
     flex: 1,
     minHeight: 0,
-    borderWidth: 1,
-    borderColor: '#171717',
+    borderRadius: 16,
     backgroundColor: '#EFE9D8',
     padding: 12,
     justifyContent: 'space-between',
@@ -274,8 +271,8 @@ const styles = StyleSheet.create({
   emptySpread: {
     marginTop: 10,
     minHeight: 150,
-    borderWidth: 1,
-    borderColor: '#171717',
+    borderRadius: 18,
+    overflow: 'hidden',
     backgroundColor: '#EFE9D8',
     flexDirection: 'row',
     alignItems: 'stretch',
@@ -317,8 +314,7 @@ const styles = StyleSheet.create({
   moreStory: {
     width: '48.7%',
     height: 138,
-    borderWidth: 1,
-    borderColor: '#171717',
+    borderRadius: 16,
     overflow: 'hidden',
     position: 'relative',
   },
@@ -332,16 +328,17 @@ const styles = StyleSheet.create({
   },
   endingSection: {
     marginTop: 26,
-    borderTopWidth: 3,
-    borderTopColor: '#171717',
+    padding: 15,
+    borderRadius: 18,
+    backgroundColor: '#EFE9D8',
   },
   endingHeader: {
-    paddingVertical: 9,
+    paddingBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: '#171717',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#C7C0B4',
   },
   endingTitle: {
     color: '#A52822',

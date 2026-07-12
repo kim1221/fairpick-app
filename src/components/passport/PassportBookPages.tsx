@@ -254,13 +254,18 @@ const styles = StyleSheet.create({
   },
   paperFace: {
     flex: 1,
-    borderRadius: 0,
+    borderRadius: 22,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#171717',
+    borderColor: '#DDD6C9',
     paddingHorizontal: 14,
     paddingTop: 18,
     paddingBottom: 16,
+    shadowColor: '#2C2A22',
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 2,
   },
   paperFaceImg: {
     opacity: 0.16,
@@ -311,9 +316,9 @@ const styles = StyleSheet.create({
   pageBadge: {
     minWidth: 42,
     height: 32,
-    borderRadius: 0,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#171717',
+    borderColor: '#CEC5B5',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 8,
@@ -337,7 +342,7 @@ const styles = StyleSheet.create({
   collectionTile: {
     height: 139,
     overflow: 'hidden',
-    borderRadius: 8,
+    borderRadius: 16,
     backgroundColor: '#2C2B2E',
   },
   collectionTileWide: {
@@ -396,8 +401,9 @@ const styles = StyleSheet.create({
   },
   tileAction: {
     backgroundColor: 'rgba(255,255,255,0.16)',
-    paddingHorizontal: 5,
-    paddingVertical: 3,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
   },
   tileActionText: {
     color: '#FFFFFF',

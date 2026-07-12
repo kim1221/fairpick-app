@@ -8,7 +8,6 @@ const MUTED = '#6F6B65';
 const RED = '#A52822';
 const PAPER = '#F7F5EF';
 const TICKET_PAPER = '#FFFDF7';
-const LINE = '#D8D2C7';
 
 interface CultureCardStackProps {
   cards: LockedCardPreview[];
@@ -92,15 +91,13 @@ export function CultureCardStack({
                 <Text style={styles.ticketSerial}>NO. {getTicketSerial(visualKey)}</Text>
               </View>
 
-              <View style={styles.ticketBody}>
-                <ImageBackground
-                  source={getTicketSkin(visualKey)}
-                  style={styles.ticketArtFrame}
-                  imageStyle={styles.ticketArtImage}
-                  resizeMode="cover"
-                >
-                  <View style={styles.ticketArtWash} />
-                </ImageBackground>
+              <ImageBackground
+                source={getTicketSkin(visualKey)}
+                style={styles.ticketBody}
+                imageStyle={styles.ticketArtImage}
+                resizeMode="cover"
+              >
+                <View style={styles.ticketArtWash} pointerEvents="none" />
                 <View style={styles.ticketCopyPanel}>
                   <View style={styles.clueRow}>
                     {(clues.length > 0 ? clues : ['오늘의 추천']).map((clue) => (
@@ -116,7 +113,7 @@ export function CultureCardStack({
                     행사명과 장소는 광고 뒤에 공개돼요
                   </Text>
                 </View>
-              </View>
+              </ImageBackground>
 
               <Pressable
                 accessibilityRole="button"
@@ -171,8 +168,6 @@ const styles = StyleSheet.create({
   },
   headingTop: {
     paddingBottom: 7,
-    borderBottomWidth: 1,
-    borderBottomColor: INK,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -255,9 +250,7 @@ const styles = StyleSheet.create({
   backTicket: {
     position: 'absolute',
     height: 204,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#CFC8BB',
+    borderRadius: 22,
   },
   backTicketFirst: {
     top: 4,
@@ -275,9 +268,9 @@ const styles = StyleSheet.create({
   },
   ticket: {
     minHeight: 250,
-    borderRadius: 18,
+    borderRadius: 22,
     borderWidth: 1,
-    borderColor: '#C8C1B5',
+    borderColor: '#D7D0C4',
     backgroundColor: TICKET_PAPER,
     overflow: 'hidden',
     flexDirection: 'row',
@@ -295,9 +288,9 @@ const styles = StyleSheet.create({
   },
   ticketHeader: {
     minHeight: 36,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     borderBottomWidth: 1,
-    borderBottomColor: LINE,
+    borderBottomColor: '#E5DFD4',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -319,26 +312,31 @@ const styles = StyleSheet.create({
   ticketBody: {
     flex: 1,
     height: 166,
-    flexDirection: 'row',
-  },
-  ticketArtFrame: {
-    width: '41%',
     backgroundColor: '#EEE8DA',
-    overflow: 'hidden',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
   },
   ticketArtImage: {
     width: '100%',
     height: '100%',
   },
   ticketArtWash: {
-    flex: 1,
-    backgroundColor: 'rgba(255, 253, 247, 0.05)',
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(35, 30, 22, 0.05)',
   },
   ticketCopyPanel: {
-    flex: 1,
+    width: '62%',
+    marginRight: 10,
     paddingHorizontal: 12,
-    paddingVertical: 13,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 253, 247, 0.91)',
     justifyContent: 'center',
+    shadowColor: '#171717',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 2,
   },
   clueRow: {
     flexDirection: 'row',
@@ -347,11 +345,9 @@ const styles = StyleSheet.create({
   },
   cluePill: {
     borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#D6D0C5',
     paddingHorizontal: 7,
     paddingVertical: 3,
-    backgroundColor: '#F7F3EA',
+    backgroundColor: 'rgba(237, 231, 218, 0.92)',
   },
   clueText: {
     color: MUTED,
@@ -382,7 +378,7 @@ const styles = StyleSheet.create({
   },
   cardCta: {
     minHeight: 47,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     backgroundColor: RED,
     flexDirection: 'row',
     alignItems: 'center',
@@ -412,7 +408,7 @@ const styles = StyleSheet.create({
   rewardStub: {
     width: 66,
     position: 'relative',
-    backgroundColor: '#F4EFE4',
+    backgroundColor: '#F3EEE3',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 13,
