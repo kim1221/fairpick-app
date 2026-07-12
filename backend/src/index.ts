@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
 import crypto from 'crypto';
+import path from 'path';
 import multer from 'multer';
 import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import rateLimit from 'express-rate-limit';
@@ -261,6 +262,13 @@ app.use((req, res, next) => {
 
 app.use(cors());
 app.use(express.json());
+app.use(
+  '/assets',
+  express.static(path.join(__dirname, '../public/assets'), {
+    immutable: true,
+    maxAge: '30d',
+  }),
+);
 
 // ── 요청 계측 미들웨어 ─────────────────────────────────────────
 app.use((req, res, next) => {
