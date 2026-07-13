@@ -3,6 +3,7 @@ import type { Card, CardsTodayResponse } from '../../../services/cardsService';
 import {
   AD_SHOW_REQUEST_TIMEOUT_MS,
   AD_SHOW_TERMINAL_TIMEOUT_MS,
+  getCardNextAction,
   getEarnFailureCopy,
   getNextOpenableCard,
   getPersonalizationCopy,
@@ -10,6 +11,7 @@ import {
   hasReachedDailyLimit,
   isRewardAdProgressEvent,
   markCardOpened,
+  rankWeeklyActionCards,
 } from '../homeLogic';
 
 function card(eventId: string, opened = false): Card {
@@ -103,6 +105,20 @@ describe('culture-card home logic', () => {
     expect(isRewardAdProgressEvent('dismissed')).toBe(false);
     expect(isRewardAdProgressEvent('failedToShow')).toBe(false);
     expect(AD_SHOW_TERMINAL_TIMEOUT_MS).toBeGreaterThan(AD_SHOW_REQUEST_TIMEOUT_MS);
+  });
+
+  test('keeps the weekly action area to three unique prioritized cards', () => {
+    const ranked = rankWeeklyActionCards([
+      { ...card('regular'), dday: 20, walkMinutes: 70 },
+      { ...card('soon'), dday: 3, walkMinutes: 60 },
+      { ...card('today'), dday: 0, walkMinutes: 60 },
+      { ...card('near'), dday: 20, walkMinutes: 8 },
+      { ...card('near'), dday: 20, walkMinutes: 8 },
+      { ...card('extra'), dday: 20, walkMinutes: 20 },
+    ]);
+
+    expect(ranked.map((item) => item.eventId)).toEqual(['today', 'soon', 'near']);
+    expect(getCardNextAction(ranked[0]!).label).toBe('오늘 마감');
   });
 
   test('explains growing and established taste profiles', () => {

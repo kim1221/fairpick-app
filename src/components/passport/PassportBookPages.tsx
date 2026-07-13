@@ -357,7 +357,7 @@ const styles = StyleSheet.create({
   },
   tileShade: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.38)',
+    backgroundColor: 'rgba(0,0,0,0.18)',
   },
   tileTop: {
     paddingHorizontal: 9,
@@ -379,6 +379,7 @@ const styles = StyleSheet.create({
   },
   tileCopy: {
     padding: 9,
+    backgroundColor: 'rgba(24,22,20,0.76)',
   },
   tileTitle: {
     color: '#FFFFFF',

@@ -835,7 +835,11 @@ function PassportPage() {
           />
         </View>
         <Text style={styles.bookHint}>탭을 누르거나 옆으로 넘겨 컬렉션을 살펴보세요</Text>
-        <PassportDiscoverySummary passport={passport} />
+        <PassportDiscoverySummary
+          passport={passport}
+          onExplore={() => navigation.navigate('/')}
+          onOpenSaved={() => handlePressBookmark('wishlist')}
+        />
         {activeBookmark === 'stamps' && stampBookMeta.totalBooks > 1 ? (
           <View style={styles.stampBookPager}>
             <Pressable

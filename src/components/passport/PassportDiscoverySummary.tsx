@@ -1,68 +1,98 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { PassportResponse } from '../../services/passportService';
 import { getPassportDiscoverySummary } from '../../pages/passportLogic';
 
 const TEXT = '#171717';
 const MUTED = '#716D66';
+const RED = '#A52822';
 
-function CollectionChip({ label, value, goal }: {
-  label: string;
-  value: number;
-  goal: number;
-}) {
+function ProgressLine({ label, value, goal }: { label: string; value: number; goal: number }) {
+  const progress = goal > 0 ? Math.min(1, value / goal) : 0;
   return (
-    <View style={styles.collectionChip}>
-      <Text style={styles.collectionLabel}>{label}</Text>
-      <Text style={styles.collectionValue}>{value}<Text style={styles.collectionGoal}>/{goal}</Text></Text>
+    <View style={styles.progressItem}>
+      <View style={styles.progressHeader}>
+        <Text style={styles.progressLabel}>{label}</Text>
+        <Text style={styles.progressValue}>{value}/{goal}</Text>
+      </View>
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+      </View>
     </View>
   );
 }
 
-export function PassportDiscoverySummary({ passport }: { passport: PassportResponse | null }) {
-  // 백엔드 선배포 전 구버전 응답에서는 잘못된 0 통계를 보여주지 않는다.
+export function PassportDiscoverySummary({
+  passport,
+  onExplore,
+  onOpenSaved,
+}: {
+  passport: PassportResponse | null;
+  onExplore: () => void;
+  onOpenSaved: () => void;
+}) {
   if (!passport || typeof passport.regionsDiscovered !== 'number') return null;
 
   const summary = getPassportDiscoverySummary(passport);
-  const favoriteCopy = summary.favoriteRegion
-    ? `가장 자주 찾은 곳은 ${summary.favoriteRegion}이에요`
-    : '첫 지역을 발견하면 여기에 기록돼요';
+  const remainingRegions = Math.max(0, summary.regionGoal - summary.regionsDiscovered);
+  const remainingCategories = Math.max(0, summary.categoryGoal - summary.categoriesDiscovered);
+  const hasOpenedButNotVisited = summary.monthDiscovered > 0 && summary.monthVisited === 0;
+
+  const monthlyCopy = summary.monthDiscovered > 0
+    ? `이번 달 ${summary.monthDiscovered}개를 발견하고 ${summary.monthVisited}곳에 다녀왔어요.`
+    : '이번 달 첫 문화를 열면 다음 목표를 제안해 드려요.';
+
+  const goalTitle = hasOpenedButNotVisited
+    ? '열어본 문화 중 이번 달 첫 방문을 골라보세요'
+    : remainingRegions > 0
+      ? `새로운 지역 ${remainingRegions}곳을 더 발견해 보세요`
+      : remainingCategories > 0
+        ? `새로운 장르 ${remainingCategories}개를 더 만나보세요`
+        : '익숙한 취향에서 한 걸음 더 나가볼까요?';
+
+  const goalDescription = hasOpenedButNotVisited
+    ? '저장한 일정과 위치를 다시 확인하면 실제 방문으로 이어가기 쉬워요.'
+    : summary.favoriteRegion
+      ? `${summary.favoriteRegion} 밖의 새로운 동네를 열면 컬렉션이 더 다양해져요.`
+      : '오늘 탭에서 새로운 카드를 열어 컬렉션을 이어가세요.';
+
+  const primaryLabel = hasOpenedButNotVisited ? '저장한 문화 보기' : '새로운 문화 열기';
+  const primaryAction = hasOpenedButNotVisited ? onOpenSaved : onExplore;
 
   return (
     <View style={styles.section}>
-      <View style={styles.headingRow}>
-        <View>
-          <Text style={styles.eyebrow}>DISCOVERY LOG</Text>
-          <Text style={styles.title}>이번 달 발견 기록</Text>
-        </View>
-        {summary.regionsDiscovered > 0 ? (
-          <View style={styles.badge}>
-            <Text style={styles.badgeMark}>✦</Text>
-            <Text style={styles.badgeText}>지역 {summary.regionsDiscovered}</Text>
-          </View>
-        ) : null}
-      </View>
+      <Text style={styles.eyebrow}>NEXT FOR YOUR COLLECTION</Text>
+      <Text style={styles.title}>다음 컬렉션 목표</Text>
+      <Text style={styles.monthlyCopy}>{monthlyCopy}</Text>
 
-      <View style={styles.metrics}>
-        <View style={styles.metric}>
-          <Text style={styles.metricNumber}>{summary.monthDiscovered}</Text>
-          <Text style={styles.metricLabel}>새로 발견</Text>
-        </View>
-        <View style={styles.metric}>
-          <Text style={styles.metricNumber}>{summary.monthVisited}</Text>
-          <Text style={styles.metricLabel}>이번 달 도장</Text>
-        </View>
-        <View style={styles.metric}>
-          <Text style={styles.metricNumber}>{summary.regionsVisited}</Text>
-          <Text style={styles.metricLabel}>다녀온 지역</Text>
-        </View>
-      </View>
+      <View style={styles.goalCard}>
+        <Text style={styles.goalKicker}>NEXT MOVE</Text>
+        <Text style={styles.goalTitle}>{goalTitle}</Text>
+        <Text style={styles.goalDescription}>{goalDescription}</Text>
 
-      <Text style={styles.favorite}>{favoriteCopy}</Text>
+        <View style={styles.progressGroup}>
+          <ProgressLine label="지역 컬렉션" value={summary.regionsDiscovered} goal={summary.regionGoal} />
+          <ProgressLine label="장르 컬렉션" value={summary.categoriesDiscovered} goal={summary.categoryGoal} />
+        </View>
 
-      <View style={styles.collectionRow}>
-        <CollectionChip label="지역 수집" value={summary.regionsDiscovered} goal={summary.regionGoal} />
-        <CollectionChip label="장르 수집" value={summary.categoriesDiscovered} goal={summary.categoryGoal} />
+        <Pressable
+          accessibilityRole="button"
+          onPress={primaryAction}
+          style={({ pressed }) => [styles.primaryButton, pressed ? styles.pressed : null]}
+        >
+          <Text style={styles.primaryButtonText}>{primaryLabel}</Text>
+          <Text style={styles.primaryButtonArrow}>→</Text>
+        </Pressable>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={hasOpenedButNotVisited ? onExplore : onOpenSaved}
+          style={({ pressed }) => [styles.secondaryButton, pressed ? styles.pressed : null]}
+        >
+          <Text style={styles.secondaryButtonText}>
+            {hasOpenedButNotVisited ? '오늘의 추천으로 돌아가기' : '저장한 문화 확인하기'}
+          </Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -70,113 +100,125 @@ export function PassportDiscoverySummary({ passport }: { passport: PassportRespo
 
 const styles = StyleSheet.create({
   section: {
-    marginTop: 18,
+    marginTop: 26,
     marginBottom: 22,
-    borderRadius: 22,
-    backgroundColor: '#EFE9D8',
-    padding: 17,
-  },
-  headingRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
   },
   eyebrow: {
-    color: '#A52822',
-    fontSize: 10.5,
-    lineHeight: 14,
-    letterSpacing: 2,
-    fontWeight: '800',
+    color: RED,
+    fontSize: 9.5,
+    lineHeight: 13,
+    letterSpacing: 1.45,
+    fontWeight: '900',
   },
   title: {
     marginTop: 5,
     color: TEXT,
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 22,
+    lineHeight: 29,
     fontWeight: '900',
     fontFamily: 'Noto Serif KR',
   },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    borderRadius: 999,
-    backgroundColor: '#A52822',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  badgeMark: {
-    color: '#F5EDDA',
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  badgeText: {
-    color: '#FFFFFF',
-    fontSize: 11.5,
-    fontWeight: '900',
-  },
-  metrics: {
-    marginTop: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  metric: {
-    flex: 1,
-    alignItems: 'center',
-    minHeight: 70,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.58)',
-    justifyContent: 'center',
-    paddingVertical: 10,
-  },
-  metricNumber: {
-    color: TEXT,
-    fontSize: 20,
-    lineHeight: 24,
-    fontWeight: '900',
-  },
-  metricLabel: {
-    marginTop: 3,
-    color: '#5A5131',
-    fontSize: 10.5,
-    lineHeight: 14,
-    fontWeight: '700',
-  },
-  favorite: {
-    marginTop: 14,
+  monthlyCopy: {
+    marginTop: 6,
     color: MUTED,
-    fontSize: 12.5,
+    fontSize: 12,
     lineHeight: 18,
-    fontWeight: '700',
+    fontWeight: '600',
   },
-  collectionRow: {
+  goalCard: {
     marginTop: 14,
-    flexDirection: 'row',
-    gap: 8,
+    borderRadius: 22,
+    backgroundColor: '#EFE9D8',
+    padding: 18,
   },
-  collectionChip: {
-    flex: 1,
-    minHeight: 68,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.66)',
-    padding: 12,
+  goalKicker: {
+    color: RED,
+    fontSize: 9,
+    lineHeight: 12,
+    letterSpacing: 1.2,
+    fontWeight: '900',
+  },
+  goalTitle: {
+    marginTop: 7,
+    color: TEXT,
+    fontSize: 19,
+    lineHeight: 26,
+    letterSpacing: -0.55,
+    fontWeight: '900',
+    fontFamily: 'Noto Serif KR',
+  },
+  goalDescription: {
+    marginTop: 7,
+    color: MUTED,
+    fontSize: 11.5,
+    lineHeight: 17,
+    fontWeight: '600',
+  },
+  progressGroup: {
+    marginTop: 18,
+    gap: 13,
+  },
+  progressItem: {
+    gap: 6,
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
   },
-  collectionLabel: {
+  progressLabel: {
     color: TEXT,
+    fontSize: 10.5,
+    fontWeight: '800',
+  },
+  progressValue: {
+    color: RED,
+    fontSize: 10.5,
+    fontWeight: '900',
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(113,109,102,0.15)',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: RED,
+  },
+  primaryButton: {
+    marginTop: 20,
+    minHeight: 48,
+    borderRadius: 16,
+    backgroundColor: RED,
+    paddingHorizontal: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '900',
+  },
+  primaryButtonArrow: {
+    color: '#FFFFFF',
+    fontSize: 19,
+    fontWeight: '700',
+  },
+  secondaryButton: {
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryButtonText: {
+    color: MUTED,
     fontSize: 11,
     fontWeight: '800',
   },
-  collectionValue: {
-    color: '#A52822',
-    fontSize: 20,
-    lineHeight: 23,
-    fontWeight: '900',
-  },
-  collectionGoal: {
-    color: '#716D66',
-    fontSize: 12,
+  pressed: {
+    opacity: 0.76,
   },
 });

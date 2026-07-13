@@ -747,6 +747,7 @@ function HomePageInner() {
           <WeeklyDiscoveryCollection
             discovery={cardsData.weeklyDiscovery}
             onPressCard={(eventId) => navigation.navigate('/events/:id', { id: eventId })}
+            onOpenCollection={() => navigation.navigate('/passport')}
           />
         ) : null}
 

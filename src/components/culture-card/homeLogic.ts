@@ -11,6 +11,13 @@ export type TodayCardProgress = {
   current: number;
 };
 
+export type CardNextAction = {
+  label: string;
+  description: string;
+  cta: string;
+  score: number;
+};
+
 export const AD_LOAD_FAILED_COPY: HomeCopy = {
   title: '지금은 광고를 불러올 수 없어요',
   description: '잠시 후 다시 시도해 주세요. 카드는 그대로예요.',
@@ -67,6 +74,41 @@ export function getEarnFailureCopy(error: unknown): HomeCopy {
 
 export function isRewardAdProgressEvent(eventType: string): boolean {
   return REWARD_AD_PROGRESS_EVENTS.has(eventType);
+}
+
+export function getCardNextAction(card: Card): CardNextAction {
+  if (card.dday === 0) {
+    return { label: '오늘 마감', description: '오늘이 마지막 기회예요', cta: '일정 확인', score: 1_000 };
+  }
+  if (card.dday != null && card.dday > 0 && card.dday <= 7) {
+    return {
+      label: `D-${card.dday}`,
+      description: `${card.dday}일 안에 끝나는 문화예요`,
+      cta: '놓치기 전에 보기',
+      score: 900 - card.dday,
+    };
+  }
+  if (card.walkMinutes != null && card.walkMinutes <= 30) {
+    return {
+      label: `도보 ${card.walkMinutes}분`,
+      description: '가볍게 다녀오기 좋은 거리예요',
+      cta: '가까운 곳 확인',
+      score: 700 - card.walkMinutes,
+    };
+  }
+  return {
+    label: card.category || '다시 보기',
+    description: card.venue ? `${card.venue}에서 만날 수 있어요` : '열어본 정보를 다시 확인해 보세요',
+    cta: '정보 다시 보기',
+    score: 100,
+  };
+}
+
+export function rankWeeklyActionCards(items: Card[]): Card[] {
+  const unique = Array.from(new Map(items.map((item) => [item.eventId, item])).values());
+  return unique
+    .sort((a, b) => getCardNextAction(b).score - getCardNextAction(a).score)
+    .slice(0, 3);
 }
 
 export function getTodayCards(cards: Card[]): Card[] {

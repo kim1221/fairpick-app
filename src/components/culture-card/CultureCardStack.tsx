@@ -55,6 +55,7 @@ export function CultureCardStack({
   const clues = card
     ? [card.distanceLabel, card.timingLabel].filter((value): value is string => Boolean(value)).slice(0, 2)
     : [];
+  const clueCopy = clues.length > 0 ? clues.join(' · ') : '오늘의 추천';
 
   return (
     <View style={[styles.section, isCompactHeight ? styles.sectionCompact : null]}>
@@ -82,8 +83,6 @@ export function CultureCardStack({
 
       {card ? (
         <View style={[styles.ticketDeck, { width: ticketWidth }]}>
-          <View pointerEvents="none" style={[styles.backTicket, styles.backTicketSecond]} />
-          <View pointerEvents="none" style={[styles.backTicket, styles.backTicketFirst]} />
           <View style={[styles.ticket, isCompactHeight ? styles.ticketCompact : null]}>
             <View style={styles.ticketMain}>
               <View style={styles.ticketHeader}>
@@ -99,13 +98,7 @@ export function CultureCardStack({
               >
                 <View style={styles.ticketArtWash} pointerEvents="none" />
                 <View style={styles.ticketCopyPanel}>
-                  <View style={styles.clueRow}>
-                    {(clues.length > 0 ? clues : ['오늘의 추천']).map((clue) => (
-                      <View key={clue} style={styles.cluePill}>
-                        <Text style={styles.clueText}>{clue}</Text>
-                      </View>
-                    ))}
-                  </View>
+                  <Text style={styles.clueLine}>{clueCopy}</Text>
                   <Text style={[styles.ticketHeadline, isCompactHeight ? styles.ticketHeadlineCompact : null]}>
                     {mysteryHeadline(card)}
                   </Text>
@@ -135,7 +128,6 @@ export function CultureCardStack({
 
             <View style={styles.rewardStub}>
               <View style={styles.perforation} />
-              <Text style={styles.rewardLabel}>REWARD</Text>
               <View style={styles.rewardCopy}>
                 <Text style={styles.rewardAmount}>+2~3</Text>
                 <Text style={styles.rewardUnit}>티켓</Text>
@@ -244,27 +236,7 @@ const styles = StyleSheet.create({
   ticketDeck: {
     alignSelf: 'center',
     marginTop: 17,
-    paddingTop: 8,
     paddingBottom: 5,
-  },
-  backTicket: {
-    position: 'absolute',
-    height: 204,
-    borderRadius: 22,
-  },
-  backTicketFirst: {
-    top: 4,
-    left: 9,
-    right: 9,
-    backgroundColor: '#F3B64A',
-    opacity: 0.7,
-  },
-  backTicketSecond: {
-    top: 0,
-    left: 18,
-    right: 18,
-    backgroundColor: '#2D6A66',
-    opacity: 0.5,
   },
   ticket: {
     minHeight: 250,
@@ -313,8 +285,8 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 166,
     backgroundColor: '#EEE8DA',
-    alignItems: 'flex-end',
-    justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   ticketArtImage: {
     width: '100%',
@@ -325,12 +297,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(35, 30, 22, 0.05)',
   },
   ticketCopyPanel: {
-    width: '62%',
-    marginRight: 10,
+    width: '89%',
+    marginBottom: 10,
     paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 253, 247, 0.91)',
+    paddingVertical: 11,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255, 253, 247, 0.9)',
     justifyContent: 'center',
     shadowColor: '#171717',
     shadowOffset: { width: 0, height: 4 },
@@ -338,25 +310,14 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 2,
   },
-  clueRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 5,
-  },
-  cluePill: {
-    borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    backgroundColor: 'rgba(237, 231, 218, 0.92)',
-  },
-  clueText: {
-    color: MUTED,
-    fontSize: 8.5,
-    lineHeight: 11,
-    fontWeight: '800',
+  clueLine: {
+    color: RED,
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: '900',
   },
   ticketHeadline: {
-    marginTop: 10,
+    marginTop: 5,
     color: INK,
     fontSize: 18,
     lineHeight: 24,
@@ -370,7 +331,7 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   lockedCopy: {
-    marginTop: 8,
+    marginTop: 5,
     color: MUTED,
     fontSize: 8.5,
     lineHeight: 12,
@@ -406,11 +367,12 @@ const styles = StyleSheet.create({
     color: '#817C74',
   },
   rewardStub: {
-    width: 66,
+    width: 60,
     position: 'relative',
     backgroundColor: '#F3EEE3',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    gap: 30,
     paddingVertical: 13,
     paddingHorizontal: 5,
   },
@@ -422,15 +384,6 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     borderStyle: 'dashed',
     borderLeftColor: '#9E978B',
-  },
-  rewardLabel: {
-    color: MUTED,
-    fontSize: 7.5,
-    lineHeight: 10,
-    fontWeight: '900',
-    letterSpacing: 1.1,
-    transform: [{ rotate: '90deg' }],
-    marginTop: 22,
   },
   rewardCopy: {
     alignItems: 'center',
@@ -458,7 +411,7 @@ const styles = StyleSheet.create({
   },
   notch: {
     position: 'absolute',
-    right: 58,
+    right: 52,
     width: 15,
     height: 15,
     borderRadius: 8,
