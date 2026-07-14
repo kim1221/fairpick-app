@@ -15,6 +15,7 @@ import { runAutoFeaturedScore } from './jobs/autoFeaturedScore';
 import { generateContentPool } from './jobs/generateContentPool';
 import { runningJobs } from './lib/jobState';
 import { withJobLog } from './lib/jobLogger';
+import { latestDailyScheduleBoundaryMs } from './lib/scheduleBoundary';
 import { pool } from './db';
 
 /**
@@ -66,6 +67,7 @@ async function runMissedJobsOnStartup(): Promise<void> {
        FROM collection_logs
        WHERE scheduler_job_name IS NOT NULL
          AND status IN ('success', 'partial', 'partial_success')
+         AND (scheduler_job_name <> 'popga-collector' OR items_count > 0)
          AND started_at > NOW() - INTERVAL '48 hours'
        GROUP BY scheduler_job_name`
     );
@@ -95,6 +97,7 @@ async function runMissedJobsOnStartup(): Promise<void> {
       { name: 'price-info',             schedH:  3, schedM: 30, expectedH: 24, fn: () => withJobLog('price-info', () => runPriceInfoBackfill({ dryRun: false })) },
       { name: 'phase2-internal-fields', schedH:  4, schedM: 15, expectedH: 24, fn: () => withJobLog('phase2-internal-fields', enrichInternalFields) },
       { name: 'embed-new-events',       schedH:  5, schedM:  0, expectedH: 24, fn: () => withJobLog('embed-new-events', embedNewEvents) },
+      { name: 'popga-collector',        schedH:  6, schedM:  0, expectedH: 24, fn: () => withJobLog('popga-collector', runPopgaCollector) },
       { name: 'ai-hot-rating',          schedH:  9, schedM:  0, expectedH: 168, fn: () => withJobLog('ai-hot-rating', runHotRating) },
       { name: 'artmap-collector',       schedH:  7, schedM:  0, expectedH: 24,  fn: async () => { const { runArtmapCollector } = await import('./jobs/artmapCollector').catch(() => ({ runArtmapCollector: async () => 0 })); return withJobLog('artmap-collector', runArtmapCollector); } },
       // collect-15 제거 — 새벽 3시 1회 수집으로 통합
@@ -104,13 +107,23 @@ async function runMissedJobsOnStartup(): Promise<void> {
     const missed: CatchupItem[] = [];
 
     for (const job of CATCHUP) {
-      if (!pastToday(job.schedH, job.schedM)) continue;  // 오늘 아직 예정 시간 미도래
       if (runningJobs.has(job.name)) {
         // 현재 프로세스에서 이미 실행 중인 경우만 스킵 (DB 상태는 무시)
         console.log(`[Startup] ${job.name}: 현재 실행 중 — 스킵`);
         continue;
       }
-      if (hoursSince(job.name) > job.expectedH * 0.85) {
+
+      // 일일 잡은 "오늘 시각이 지났는가"가 아니라 가장 최근 예정 경계를 본다.
+      // 예: 06시 잡을 04시에 재배포해도 전날 06시 실행을 놓쳤다면 즉시 보완한다.
+      const lastRun = lastRunMs[job.name];
+      const missedDailyBoundary = job.expectedH <= 24
+        ? lastRun === undefined || lastRun < latestDailyScheduleBoundaryMs(nowMs, job.schedH, job.schedM)
+        : false;
+      const missedLongInterval = job.expectedH > 24
+        ? pastToday(job.schedH, job.schedM) && hoursSince(job.name) > job.expectedH * 0.85
+        : false;
+
+      if (missedDailyBoundary || missedLongInterval) {
         // collect-15: geo-refresh-03도 실행 예정이면 스킵 (동일 수집 중복 방지)
         if (job.name === 'collect-15' && geoRefreshQueued) {
           console.log('[Startup] collect-15: geo-refresh-03 실행 예정으로 스킵');
@@ -142,7 +155,11 @@ async function runMissedJobsOnStartup(): Promise<void> {
 function isTransientNetworkError(error: any): boolean {
   const code = error?.code;
   const message = error?.message || '';
+  const httpStatus = Number(error?.response?.status ?? error?.status);
   return (
+    httpStatus === 408 ||
+    httpStatus === 429 ||
+    httpStatus >= 500 ||
     code === 'ENOTFOUND' ||
     code === 'ETIMEDOUT' ||
     code === 'ECONNREFUSED' ||

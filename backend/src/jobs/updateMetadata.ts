@@ -31,6 +31,7 @@ export async function updateMetadata(): Promise<void> {
     const endingSoonResult = await pool.query(`
       UPDATE canonical_events
       SET is_ending_soon = (
+        COALESCE(metadata->>'popga_open_ended', 'false') <> 'true' AND
         end_at IS NOT NULL AND
         end_at >= CURRENT_DATE AND
         end_at <= CURRENT_DATE + INTERVAL '3 days'
@@ -38,7 +39,10 @@ export async function updateMetadata(): Promise<void> {
       WHERE is_deleted = false
         AND (
           is_ending_soon = true
-          OR end_at BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '4 days'
+          OR (
+            COALESCE(metadata->>'popga_open_ended', 'false') <> 'true'
+            AND end_at BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '4 days'
+          )
         )
       RETURNING id
     `);
@@ -77,6 +81,7 @@ export async function updateMetadata(): Promise<void> {
         CASE source_priority_winner
           WHEN 'kopis' THEN 50
           WHEN 'culture' THEN 30
+          WHEN 'popga' THEN 30
           ELSE 10
         END +
 

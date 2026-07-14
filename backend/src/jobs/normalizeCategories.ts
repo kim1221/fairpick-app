@@ -248,7 +248,11 @@ async function normalizeCategories() {
       );
 
       // 5. source_priority_winner 보정
-      const correctSourcePriorityWinner = SOURCE_PRIORITY[validMainCategory];
+      // Popga는 canonical에 직접 적재되는 실제 원본 출처다. 카테고리 기본값으로
+      // 덮으면 sources 배열과 winner가 불일치하고 후속 수집이 수동 이벤트로 오인한다.
+      const correctSourcePriorityWinner = event.source_priority_winner === 'popga'
+        ? 'popga'
+        : SOURCE_PRIORITY[validMainCategory];
 
       // 6. 변경 여부 확인
       const needsUpdate =

@@ -51,6 +51,7 @@ type EventRow = {
   distance_m?: number | string | null;
   buzz_score?: number | string | null;
   created_at?: string | Date | null;
+  metadata?: Record<string, unknown> | null;
 };
 
 type TasteRow = { category: string | null; n: number | string; signal_count?: number | string };
@@ -168,6 +169,11 @@ function calculateDday(endAt: string | Date | null): number | null {
   const nowKst = Date.now() + 9 * 60 * 60 * 1000;
   const endKst = endTime + 9 * 60 * 60 * 1000;
   return Math.ceil((endKst - nowKst) / (24 * 60 * 60 * 1000));
+}
+
+function visibleEndAt(row: EventRow): string | Date | null {
+  const openEnded = row.metadata?.popga_open_ended;
+  return openEnded === true || openEnded === 'true' ? null : row.end_at;
 }
 
 function firstLine(value: string | null): string | null {
@@ -294,7 +300,7 @@ function recommendationReasons(row: EventRow, location: LocationQuery | null, ta
   const distanceM = getDistanceMeters(row, location);
   const category = normalizeCategory(row.main_category);
   const tasteScore = taste.get(category) ?? 0;
-  const dday = calculateDday(row.end_at);
+  const dday = calculateDday(visibleEndAt(row));
 
   if (distanceM != null && distanceM <= 3000) reasons.push('내 주변');
   if (tasteScore >= 0.5) reasons.push(`취향 ${category}`);
@@ -318,8 +324,8 @@ function toCard(
     venue: row.venue,
     region: row.region,
     startAt: isoOrNull(row.start_at),
-    endAt: isoOrNull(row.end_at),
-    dday: calculateDday(row.end_at),
+    endAt: isoOrNull(visibleEndAt(row)),
+    dday: calculateDday(visibleEndAt(row)),
     imageUrl: row.image_url,
     walkMinutes: distanceM == null ? null : Math.max(1, Math.ceil(distanceM / WALK_METERS_PER_MINUTE)),
     blurb: firstLine(row.overview),
@@ -398,7 +404,7 @@ async function getFallbackEvents(
   const excludedIds = Array.from(excludedEventIds);
   const excludedKeys = Array.from(excludedDedupeKeys);
   const { rows } = await pool.query<EventRow>(
-    `SELECT id, title, display_title, content_key, canonical_key, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng, buzz_score, created_at
+    `SELECT id, title, display_title, content_key, canonical_key, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng, buzz_score, created_at, metadata
      FROM canonical_events
      WHERE is_deleted = false
        AND (end_at IS NULL OR (end_at AT TIME ZONE 'Asia/Seoul')::date >= $1::date)
@@ -433,7 +439,7 @@ async function getNearbyEvents(
   for (const radiusM of NEARBY_RADIUS_STEPS_M) {
     const box = calculateBoundingBox(location.lat, location.lng, radiusM);
     const { rows } = await pool.query<EventRow>(
-      `SELECT id, title, display_title, content_key, canonical_key, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng, buzz_score, created_at,
+      `SELECT id, title, display_title, content_key, canonical_key, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng, buzz_score, created_at, metadata,
               (${distSQL}) AS distance_m
        FROM canonical_events
        WHERE is_deleted = false
@@ -680,7 +686,7 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
       pool.query<WeeklyOpenedEventRow>(
         `SELECT ce.id, ce.title, ce.display_title, ce.content_key, ce.canonical_key,
                 ce.main_category, ce.region, ce.start_at, ce.end_at, ce.image_url,
-                ce.venue, ce.overview, ce.lat, ce.lng, ce.buzz_score, ce.created_at,
+                ce.venue, ce.overview, ce.lat, ce.lng, ce.buzz_score, ce.created_at, ce.metadata,
                 MAX(el.earn_date) AS earn_date,
                 COUNT(*) OVER()::int AS total_count
          FROM user_ticket_earn_log el
@@ -824,7 +830,7 @@ router.post('/v2/open', requireAuth, async (req: Request, res: Response) => {
 
     const eventResult = await client.query<EventRow>(
       `SELECT id, title, display_title, content_key, canonical_key, main_category, region,
-              start_at, end_at, image_url, venue, overview, lat, lng, buzz_score, created_at
+              start_at, end_at, image_url, venue, overview, lat, lng, buzz_score, created_at, metadata
        FROM canonical_events
        WHERE id::text = $1
          AND is_deleted = false

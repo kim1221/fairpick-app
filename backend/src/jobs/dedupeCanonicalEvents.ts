@@ -1253,6 +1253,7 @@ function getSourcePriorityScore(source: string): number {
   const priorities: Record<string, number> = {
     kopis: 3,
     culture: 2,
+    popga: 2,
     tour: 1,
   };
   return priorities[source.toLowerCase()] || 0;
