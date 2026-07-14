@@ -58,7 +58,7 @@ export function CultureCardReveal({ openedCard, onDetail, onNext, onSave }: Cult
       <View style={styles.openedHeader}>
         <Text style={styles.openedEyebrow}>컬처카드를 열었어요</Text>
         <View style={styles.rewardPill}>
-          <Text style={styles.rewardPillText}>+{earned} 문화 티켓</Text>
+          <Text style={styles.rewardPillText}>+{earned} 티켓</Text>
         </View>
       </View>
 
@@ -106,7 +106,7 @@ export function CultureCardReveal({ openedCard, onDetail, onNext, onSave }: Cult
       </View>
 
       <Pressable accessibilityRole="button" style={styles.next} onPress={onNext}>
-        <Text style={styles.nextText}>새로운 추천 한 장 채우기 ›</Text>
+        <Text style={styles.nextText}>다른 카드 고르기 ›</Text>
       </Pressable>
     </View>
   );

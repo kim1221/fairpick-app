@@ -1,17 +1,23 @@
 import { describe, expect, test } from '@jest/globals';
-import type { Card, CardsTodayResponse } from '../../../services/cardsService';
+import type { Card, CardsTodayResponse, LockedCardPreview } from '../../../services/cardsService';
 import {
   AD_SHOW_REQUEST_TIMEOUT_MS,
   AD_SHOW_TERMINAL_TIMEOUT_MS,
+  LOAD_FAILED_COPY,
+  POOL_EMPTY_COPY,
   getCardNextAction,
   getEarnFailureCopy,
+  getLockedCardChoice,
   getNextOpenableCard,
   getPersonalizationCopy,
+  getTodayCardsAvailability,
   getTodayCardProgress,
   hasReachedDailyLimit,
+  isAlreadyOpenedCardError,
   isRewardAdProgressEvent,
   markCardOpened,
   rankWeeklyActionCards,
+  removeLockedCardPreview,
 } from '../homeLogic';
 
 function card(eventId: string, opened = false): Card {
@@ -39,6 +45,26 @@ function response(overrides: Partial<CardsTodayResponse> = {}): CardsTodayRespon
     dailyEarned: 12,
     dailyLimit: 30,
     userRegion: null,
+    ...overrides,
+  };
+}
+
+function lockedCard(overrides: Partial<LockedCardPreview> = {}): LockedCardPreview {
+  return {
+    cardToken: 'sealed-token',
+    visualSeed: 'visual-seed',
+    category: '전시',
+    areaLabel: '서울',
+    distanceLabel: '도보 12분',
+    timingLabel: '일정 여유가 있어요',
+    reasonTags: [],
+    teaserEyebrow: '오늘의 큐레이션',
+    teaserHeadline: '오늘 열어볼\n전시 한 곳',
+    palette: {
+      background: '#171717',
+      foreground: '#FFFFFF',
+      accent: '#A52822',
+    },
     ...overrides,
   };
 }
@@ -92,8 +118,114 @@ describe('culture-card home logic', () => {
     const limitError = { response: { status: 429, data: { error: 'DAILY_LIMIT_REACHED' } } };
     const networkError = new Error('network');
 
-    expect(getEarnFailureCopy(limitError).title).toContain('50장');
+    expect(getEarnFailureCopy(limitError).title).toBe('오늘 준비한 컬처카드는 여기까지예요');
+    expect(getEarnFailureCopy(limitError).description).toContain('컬렉션');
     expect(getEarnFailureCopy(networkError).title).toBe('티켓 적립에 실패했어요');
+  });
+
+  test.each([
+    'EVENT_ALREADY_OPENED',
+    'CARD_ALREADY_OPENED',
+    'EVENT_ALREADY_EARNED_TODAY',
+  ])('recognizes stale opened-card conflicts: %s', (errorCode) => {
+    expect(isAlreadyOpenedCardError({
+      response: { status: 409, data: { error: errorCode } },
+    })).toBe(true);
+  });
+
+  test('does not treat unrelated or non-conflict errors as stale opened cards', () => {
+    expect(isAlreadyOpenedCardError({
+      response: { status: 409, data: { error: 'AD_REWARD_NOT_CONFIRMED' } },
+    })).toBe(false);
+    expect(isAlreadyOpenedCardError({
+      response: { status: 500, data: { error: 'EVENT_ALREADY_OPENED' } },
+    })).toBe(false);
+    expect(isAlreadyOpenedCardError(new Error('network'))).toBe(false);
+  });
+
+  test('removes only the stale locked token while preserving the response metadata', () => {
+    const stale = lockedCard({ cardToken: 'stale-token', visualSeed: 'stale' });
+    const fresh = lockedCard({ cardToken: 'fresh-token', visualSeed: 'fresh' });
+    const data = {
+      lockedCards: [stale, fresh],
+      ticketCount: 7,
+      dailyEarned: 12,
+      dailyLimit: 150,
+      dailyOpenCount: 4,
+      dailyOpenLimit: 50,
+      userRegion: '서울',
+      weeklyDiscovery: {
+        weekKey: '2026-07-13',
+        openedCount: 4,
+        goal: 5,
+        items: [],
+      },
+      personalization: {
+        level: 'cold' as const,
+        signalCount: 0,
+        topCategories: [],
+      },
+    };
+
+    const next = removeLockedCardPreview(data, stale.cardToken);
+
+    expect(next).not.toBe(data);
+    expect(next.lockedCards).toEqual([fresh]);
+    expect(next.ticketCount).toBe(data.ticketCount);
+    expect(data.lockedCards).toEqual([stale, fresh]);
+  });
+
+  test('builds sealed-card choices only from safe preview hints', () => {
+    expect(getLockedCardChoice(lockedCard({
+      reasonTags: ['내 주변'],
+    }), 0)).toEqual({
+      label: '가까운 전시',
+      description: '도보 12분 · 일정 여유가 있어요',
+    });
+
+    expect(getLockedCardChoice(lockedCard({
+      category: '공연',
+      distanceLabel: null,
+      timingLabel: '3일 안에 마감',
+    }), 1).label).toBe('놓치기 전 공연');
+
+    expect(getLockedCardChoice(lockedCard({
+      category: '팝업',
+      distanceLabel: null,
+      reasonTags: ['취향 팝업'],
+    }), 2).label).toBe('취향 팝업');
+  });
+
+  test('ignores the legacy revisit flag instead of showing a repeat recommendation', () => {
+    const choice = getLockedCardChoice(lockedCard({
+      isRevisit: true,
+      reasonTags: ['내 주변', '곧 마감'],
+    }), 0);
+
+    expect(choice.label).toBe('가까운 전시');
+    expect(choice.label).not.toContain('다시');
+  });
+
+  test('distinguishes a depleted unopened pool from the daily limit', () => {
+    const base = {
+      lockedCards: [] as LockedCardPreview[],
+      dailyEarned: 12,
+      dailyLimit: 30,
+      dailyOpenCount: 4,
+      dailyOpenLimit: 50,
+    };
+
+    expect(getTodayCardsAvailability(base)).toBe('pool_empty');
+    expect(getTodayCardsAvailability({
+      ...base,
+      dailyOpenCount: 50,
+    })).toBe('daily_limit');
+    expect(getTodayCardsAvailability({
+      ...base,
+      lockedCards: [lockedCard()],
+    })).toBe('ready');
+    expect(POOL_EMPTY_COPY.description).toContain('컬렉션');
+    expect(LOAD_FAILED_COPY.title).toContain('불러오지 못했어요');
   });
 
   test('keeps waiting for terminal reward ad events after ad progress starts', () => {

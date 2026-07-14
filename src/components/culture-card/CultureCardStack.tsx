@@ -1,6 +1,15 @@
 import React from 'react';
-import { ImageBackground, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  ImageBackground,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import type { LockedCardPreview } from '../../services/cardsService';
+import { getLockedCardChoice } from './homeLogic';
 import { getTicketSerial, getTicketSkin, stableTicketHash } from './ticketSkins';
 
 const INK = '#171717';
@@ -11,12 +20,11 @@ const TICKET_PAPER = '#FFFDF7';
 
 interface CultureCardStackProps {
   cards: LockedCardPreview[];
-  selectedToken: string | null;
-  dailyOpenCount: number;
-  dailyOpenLimit: number;
+  selectedCardKey: string | null;
   loading: boolean;
   disabled: boolean;
   actionLabel: string;
+  onSelectCard: (cardKey: string) => void;
   onOpen: () => void;
   userRegion: string | null;
 }
@@ -29,64 +37,105 @@ const GENERIC_HEADLINES = [
 ] as const;
 
 function mysteryHeadline(card: LockedCardPreview): string {
-  if (card.isRevisit) return '다시 눈에 들어온\n오늘의 문화';
   const visualKey = card.visualSeed ?? card.cardToken;
   return GENERIC_HEADLINES[stableTicketHash(visualKey) % GENERIC_HEADLINES.length]!;
 }
 
 export function CultureCardStack({
   cards,
-  selectedToken,
-  dailyOpenCount,
-  dailyOpenLimit,
+  selectedCardKey,
   loading,
   disabled,
   actionLabel,
+  onSelectCard,
   onOpen,
   userRegion,
 }: CultureCardStackProps) {
   const { width, height } = useWindowDimensions();
-  const card = cards.find((candidate) => candidate.cardToken === selectedToken) ?? cards[0] ?? null;
+  const card = cards.find((candidate) => (
+    (candidate.visualSeed ?? candidate.cardToken) === selectedCardKey
+  )) ?? cards[0] ?? null;
   const isCompactHeight = height <= 700;
   const ticketWidth = Math.min(width - 44, 430);
-  const progress = dailyOpenLimit > 0 ? Math.min(1, dailyOpenCount / dailyOpenLimit) : 0;
-  const remaining = Math.max(0, dailyOpenLimit - dailyOpenCount);
   const visualKey = card ? (card.visualSeed ?? card.cardToken) : '';
   const clues = card
-    ? [card.distanceLabel, card.timingLabel].filter((value): value is string => Boolean(value)).slice(0, 2)
+    ? [card.category, card.distanceLabel ?? card.areaLabel, card.timingLabel]
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 3)
     : [];
   const clueCopy = clues.length > 0 ? clues.join(' · ') : '오늘의 추천';
 
   return (
     <View style={[styles.section, isCompactHeight ? styles.sectionCompact : null]}>
       <View style={styles.heading}>
-        <View style={styles.headingTop}>
-          <Text style={styles.eyebrow}>TODAY&apos;S CULTURE TICKET</Text>
-          <Text style={styles.dailyCount}>오늘 {dailyOpenCount}장 공개</Text>
-        </View>
+        <Text style={styles.eyebrow}>TODAY&apos;S CULTURE CARD</Text>
         <Text style={[styles.title, isCompactHeight ? styles.titleCompact : null]}>
-          오늘의 문화 티켓이 도착했어요
+          어떤 문화를 열어볼까요?
         </Text>
         <Text style={[styles.subtitle, isCompactHeight ? styles.subtitleCompact : null]} numberOfLines={2}>
           {userRegion
-            ? `${userRegion} 근처에서 당신에게 맞춰 고른 한 장이에요.`
-            : '겉표지는 랜덤, 오늘의 문화는 당신에게 맞춰 골랐어요.'}
+            ? `${userRegion} 근처에서 고른 카드예요. 힌트를 보고 한 장을 선택해 보세요.`
+            : '힌트를 보고 오늘 열어볼 컬처카드 한 장을 선택해 보세요.'}
         </Text>
-        <View style={styles.progressHeader}>
-          <Text style={styles.progressCopy}>열어본 티켓 {dailyOpenCount}</Text>
-          <Text style={styles.progressLimit}>최대 {dailyOpenLimit}장</Text>
-        </View>
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-        </View>
       </View>
 
+      {cards.length > 1 ? (
+        <View style={styles.choiceSection}>
+          <View style={styles.choiceHeader}>
+            <Text style={styles.choiceEyebrow}>열어볼 카드 선택</Text>
+            <Text style={styles.choiceHint}>선택해도 광고는 바로 시작되지 않아요</Text>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.choiceList}
+          >
+            {cards.map((candidate, index) => {
+              const candidateKey = candidate.visualSeed ?? candidate.cardToken;
+              const selected = candidateKey === (card ? (card.visualSeed ?? card.cardToken) : selectedCardKey);
+              const choice = getLockedCardChoice(candidate, index);
+              return (
+                <Pressable
+                  key={candidateKey}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${choice.label}, ${choice.description}`}
+                  accessibilityHint="선택하면 메인 컬처카드의 힌트가 바뀌어요"
+                  accessibilityState={{ selected, disabled }}
+                  disabled={disabled}
+                  onPress={() => onSelectCard(candidateKey)}
+                  style={({ pressed }) => [
+                    styles.choiceCard,
+                    selected ? styles.choiceCardSelected : null,
+                    pressed && !disabled ? styles.choiceCardPressed : null,
+                    disabled ? styles.choiceCardDisabled : null,
+                  ]}
+                >
+                  <View style={styles.choiceTop}>
+                    <Text style={[styles.choiceIndex, selected ? styles.choiceTextSelected : null]}>
+                      {String(index + 1).padStart(2, '0')}
+                    </Text>
+                    <View style={[styles.choiceDot, selected ? styles.choiceDotSelected : null]} />
+                  </View>
+                  <Text style={[styles.choiceLabel, selected ? styles.choiceTextSelected : null]} numberOfLines={1}>
+                    {choice.label}
+                  </Text>
+                  <Text style={styles.choiceDescription} numberOfLines={2}>{choice.description}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
+
       {card ? (
-        <View style={[styles.ticketDeck, { width: ticketWidth }]}>
+        <View
+          accessibilityLiveRegion="polite"
+          style={[styles.ticketDeck, { width: ticketWidth }]}
+        >
           <View style={[styles.ticket, isCompactHeight ? styles.ticketCompact : null]}>
             <View style={styles.ticketMain}>
               <View style={styles.ticketHeader}>
-                <Text style={styles.ticketBrand}>CULTURE TICKET</Text>
+                <Text style={styles.ticketBrand}>CULTURE CARD</Text>
                 <Text style={styles.ticketSerial}>NO. {getTicketSerial(visualKey)}</Text>
               </View>
 
@@ -98,19 +147,22 @@ export function CultureCardStack({
               >
                 <View style={styles.ticketArtWash} pointerEvents="none" />
                 <View style={styles.ticketCopyPanel}>
-                  <Text style={styles.clueLine}>{clueCopy}</Text>
+                  <Text style={styles.clueLine}>{card.teaserEyebrow || clueCopy}</Text>
                   <Text style={[styles.ticketHeadline, isCompactHeight ? styles.ticketHeadlineCompact : null]}>
-                    {mysteryHeadline(card)}
+                    {card.teaserHeadline || mysteryHeadline(card)}
                   </Text>
+                  <Text style={styles.ticketMeta} numberOfLines={1}>{clueCopy}</Text>
                   <Text style={styles.lockedCopy} numberOfLines={1}>
-                    행사명과 장소는 광고 뒤에 공개돼요
+                    행사명과 정확한 장소는 광고를 본 뒤 공개돼요
                   </Text>
                 </View>
               </ImageBackground>
 
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`${actionLabel}, 광고가 끝나면 행사 정보가 공개돼요`}
+                accessibilityLabel="광고를 보고 선택한 컬처카드 공개하기"
+                accessibilityHint="광고를 끝까지 보면 행사명과 장소가 공개되고 티켓 1장부터 3장이 적립돼요"
+                accessibilityState={{ disabled, busy: loading }}
                 onPress={onOpen}
                 disabled={disabled}
                 style={({ pressed }) => [
@@ -129,7 +181,7 @@ export function CultureCardStack({
             <View style={styles.rewardStub}>
               <View style={styles.perforation} />
               <View style={styles.rewardCopy}>
-                <Text style={styles.rewardAmount}>+2~3</Text>
+                <Text style={styles.rewardAmount}>1~3</Text>
                 <Text style={styles.rewardUnit}>티켓</Text>
               </View>
               <Text style={styles.stubSerial}>{getTicketSerial(visualKey).slice(-3)}</Text>
@@ -139,11 +191,6 @@ export function CultureCardStack({
           </View>
         </View>
       ) : null}
-
-      <View style={styles.afterTicket}>
-        <Text style={styles.remainingCopy}>오늘 남은 티켓 {remaining}장</Text>
-        <Text style={styles.hint}>한 장을 열면 다음 추천 티켓이 이어져요</Text>
-      </View>
     </View>
   );
 }
@@ -158,24 +205,12 @@ const styles = StyleSheet.create({
   heading: {
     paddingHorizontal: 22,
   },
-  headingTop: {
-    paddingBottom: 7,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
   eyebrow: {
     color: RED,
     fontSize: 10.5,
     lineHeight: 18,
     fontWeight: '900',
     letterSpacing: 1.3,
-  },
-  dailyCount: {
-    color: INK,
-    fontSize: 10,
-    lineHeight: 16,
-    fontWeight: '800',
   },
   title: {
     marginTop: 9,
@@ -203,39 +238,98 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
   },
-  progressHeader: {
-    marginTop: 13,
+  choiceSection: {
+    marginTop: 15,
+  },
+  choiceHeader: {
+    paddingHorizontal: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  choiceEyebrow: {
+    color: INK,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '900',
+  },
+  choiceHint: {
+    flex: 1,
+    color: MUTED,
+    fontSize: 9,
+    lineHeight: 13,
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  choiceList: {
+    paddingHorizontal: 22,
+    paddingTop: 8,
+    gap: 8,
+  },
+  choiceCard: {
+    width: 132,
+    minHeight: 78,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#D7D0C4',
+    backgroundColor: '#FFFCF5',
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+  },
+  choiceCardSelected: {
+    borderColor: RED,
+    backgroundColor: '#F4E8E2',
+  },
+  choiceCardPressed: {
+    opacity: 0.78,
+  },
+  choiceCardDisabled: {
+    opacity: 0.55,
+  },
+  choiceTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  progressCopy: {
-    color: INK,
-    fontSize: 10.5,
-    lineHeight: 15,
-    fontWeight: '800',
-  },
-  progressLimit: {
+  choiceIndex: {
     color: MUTED,
-    fontSize: 10.5,
-    lineHeight: 15,
-    fontWeight: '700',
+    fontSize: 8,
+    lineHeight: 11,
+    fontWeight: '900',
+    letterSpacing: 0.8,
   },
-  progressTrack: {
-    marginTop: 6,
-    height: 4,
-    borderRadius: 2,
-    overflow: 'hidden',
-    backgroundColor: '#DDD8CE',
+  choiceDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#A9A297',
   },
-  progressFill: {
-    height: '100%',
-    borderRadius: 2,
+  choiceDotSelected: {
+    borderColor: RED,
     backgroundColor: RED,
+  },
+  choiceLabel: {
+    marginTop: 7,
+    color: INK,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '900',
+  },
+  choiceTextSelected: {
+    color: RED,
+  },
+  choiceDescription: {
+    marginTop: 2,
+    color: MUTED,
+    fontSize: 9.5,
+    lineHeight: 13,
+    fontWeight: '600',
   },
   ticketDeck: {
     alignSelf: 'center',
-    marginTop: 17,
+    marginTop: 13,
     paddingBottom: 5,
   },
   ticket: {
@@ -330,8 +424,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 21,
   },
-  lockedCopy: {
+  ticketMeta: {
     marginTop: 5,
+    color: INK,
+    fontSize: 8.5,
+    lineHeight: 12,
+    fontWeight: '800',
+  },
+  lockedCopy: {
+    marginTop: 3,
     color: MUTED,
     fontSize: 8.5,
     lineHeight: 12,
@@ -424,23 +525,5 @@ const styles = StyleSheet.create({
   },
   notchBottom: {
     bottom: -8,
-  },
-  afterTicket: {
-    marginTop: 9,
-    paddingHorizontal: 22,
-    alignItems: 'center',
-  },
-  remainingCopy: {
-    color: INK,
-    fontSize: 11,
-    lineHeight: 16,
-    fontWeight: '800',
-  },
-  hint: {
-    marginTop: 4,
-    color: MUTED,
-    fontSize: 10.5,
-    lineHeight: 15,
-    fontWeight: '600',
   },
 });

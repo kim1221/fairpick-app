@@ -32,31 +32,77 @@ interface AuthState {
   isLoading: boolean;
 }
 
-export function useAuth() {
-  const [state, setState] = useState<AuthState>({
-    isLoggedIn: false,
-    user: null,
-    isLoading: true,
-  });
+const AUTH_REVALIDATE_MS = 5 * 60 * 1000;
+const INITIAL_AUTH_STATE: AuthState = {
+  isLoggedIn: false,
+  user: null,
+  isLoading: true,
+};
 
-  // 앱 시작 시 저장된 세션 복원 + Toss 연결 끊기 감지
+let sharedAuthState: AuthState | null = null;
+let authHydrationPromise: Promise<AuthState> | null = null;
+let lastAuthValidationAt = 0;
+let authRevision = 0;
+const authListeners = new Set<(state: AuthState) => void>();
+
+function publishAuthState(next: AuthState): AuthState {
+  sharedAuthState = next;
+  for (const listener of authListeners) listener(next);
+  return next;
+}
+
+async function restoreAuthState(): Promise<AuthState> {
+  const [token, user] = await Promise.all([getToken(), getStoredUser()]);
+  if (!token || !user) {
+    return { isLoggedIn: false, user: null, isLoading: false };
+  }
+
+  try {
+    const { data } = await http.get<{ id: string; userKey: number; name?: string | null }>('/auth/me');
+    const freshUser: StoredUser = { ...user, name: data.name ?? null };
+    await setStoredUser(freshUser);
+    return { isLoggedIn: true, user: freshUser, isLoading: false };
+  } catch {
+    return { isLoggedIn: false, user: null, isLoading: false };
+  }
+}
+
+function ensureAuthState(force = false): Promise<AuthState> {
+  if (sharedAuthState && !force) return Promise.resolve(sharedAuthState);
+  if (authHydrationPromise) return authHydrationPromise;
+
+  const requestRevision = authRevision;
+  authHydrationPromise = restoreAuthState()
+    .then((next) => {
+      // 로그인/로그아웃이 복원 요청보다 늦게 시작됐다면 오래된 응답으로 덮지 않는다.
+      if (requestRevision !== authRevision && sharedAuthState) return sharedAuthState;
+      lastAuthValidationAt = Date.now();
+      return publishAuthState(next);
+    })
+    .finally(() => {
+      authHydrationPromise = null;
+    });
+  return authHydrationPromise;
+}
+
+export function useAuth() {
+  const [state, setState] = useState<AuthState>(() => sharedAuthState ?? INITIAL_AUTH_STATE);
+
+  // 최초 한 번만 세션을 복원하고, 이후 탭 마운트는 공유 상태를 즉시 사용한다.
+  // 오래된 세션은 화면을 가리지 않고 백그라운드에서 재검증한다.
   useEffect(() => {
-    (async () => {
-      const [token, user] = await Promise.all([getToken(), getStoredUser()]);
-      if (!token || !user) {
-        setState({ isLoggedIn: false, user: null, isLoading: false });
-        return;
-      }
-      // /auth/me로 Toss 토큰 유효성 확인 (unlink 시 401 → http 인터셉터가 토큰 자동 삭제)
-      try {
-        const { data } = await http.get<{ id: string; userKey: number; name?: string | null }>('/auth/me');
-        const freshUser: StoredUser = { ...user, name: data.name ?? null };
-        await setStoredUser(freshUser);
-        setState({ isLoggedIn: true, user: freshUser, isLoading: false });
-      } catch {
-        setState({ isLoggedIn: false, user: null, isLoading: false });
-      }
-    })();
+    authListeners.add(setState);
+    if (sharedAuthState) setState(sharedAuthState);
+
+    const shouldRevalidate = Boolean(
+      sharedAuthState
+      && Date.now() - lastAuthValidationAt >= AUTH_REVALIDATE_MS,
+    );
+    ensureAuthState(shouldRevalidate).catch(() => {});
+
+    return () => {
+      authListeners.delete(setState);
+    };
   }, []);
 
   // 토스 로그인
@@ -74,7 +120,9 @@ export function useAuth() {
       // 3. 토큰 + 유저 정보 저장
       await Promise.all([setToken(data.token), setStoredUser(data.user)]);
 
-      setState({ isLoggedIn: true, user: data.user, isLoading: false });
+      authRevision += 1;
+      lastAuthValidationAt = Date.now();
+      publishAuthState({ isLoggedIn: true, user: data.user, isLoading: false });
 
       // 4. 익명 행동 이력 → 로그인 계정으로 이전 (백그라운드)
       linkAnonymousToLogin(data.user.userKey).catch((e) => {
@@ -93,6 +141,7 @@ export function useAuth() {
 
   // 로그아웃
   const logout = useCallback(async () => {
+    authRevision += 1;
     try {
       const token = await getToken();
       if (token) {
@@ -102,7 +151,8 @@ export function useAuth() {
       }
     } finally {
       await Promise.all([clearToken(), clearStoredUser()]);
-      setState({ isLoggedIn: false, user: null, isLoading: false });
+      lastAuthValidationAt = Date.now();
+      publishAuthState({ isLoggedIn: false, user: null, isLoading: false });
     }
   }, []);
 

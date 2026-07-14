@@ -1,13 +1,13 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Loader, useDialog } from '@toss/tds-react-native';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { TicketBalanceVoucher } from '../components/passport/TicketBalanceVoucher';
 import { TicketHistoryList } from '../components/passport/TicketHistoryList';
+import { useAuth } from '../hooks/useAuth';
 import {
   exchangeTickets,
-  getLastKnownTicketCount,
   getTicketHistory,
   getTickets,
   subscribeTicketCount,
@@ -25,6 +25,28 @@ const BG = '#F7F5EF';
 const ON_BG = '#171717';
 const ON_BG_MUTED = '#716D66';
 const ERROR_BG = '#FFF0ED';
+
+type PointDashboardSessionCache = {
+  tickets: TicketInfo | null;
+  ticketHistory: TicketHistoryResponse | null;
+  balanceLoadError: boolean;
+  historyLoadError: boolean;
+  lastKnownTicketCount: number | null;
+};
+
+const pointDashboardSessionCache = new Map<string, PointDashboardSessionCache>();
+
+function getDashboardCacheKey(isLoggedIn: boolean, userId?: string): string {
+  return isLoggedIn && userId ? `user:${userId}` : 'guest';
+}
+
+const emptyDashboardCache = (): PointDashboardSessionCache => ({
+  tickets: null,
+  ticketHistory: null,
+  balanceLoadError: false,
+  historyLoadError: false,
+  lastKnownTicketCount: null,
+});
 
 function createStyles() {
   return StyleSheet.create({
@@ -102,53 +124,127 @@ function createStyles() {
 function PointsPage() {
   const styles = useMemo(createStyles, []);
   const dialog = useDialog();
+  const { isLoggedIn, user, isLoading: authLoading } = useAuth();
+  const dashboardCacheKey = authLoading
+    ? null
+    : getDashboardCacheKey(isLoggedIn, user?.id);
+  const cachedDashboard = dashboardCacheKey
+    ? pointDashboardSessionCache.get(dashboardCacheKey) ?? null
+    : null;
+  const activeDashboardCacheKeyRef = useRef(dashboardCacheKey);
+  activeDashboardCacheKeyRef.current = dashboardCacheKey;
 
-  const [tickets, setTickets] = useState<TicketInfo | null>(null);
-  const [ticketHistory, setTicketHistory] = useState<TicketHistoryResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [tickets, setTickets] = useState<TicketInfo | null>(() => cachedDashboard?.tickets ?? null);
+  const [ticketHistory, setTicketHistory] = useState<TicketHistoryResponse | null>(
+    () => cachedDashboard?.ticketHistory ?? null
+  );
+  const [loading, setLoading] = useState(() => cachedDashboard === null);
   const [refreshing, setRefreshing] = useState(false);
   const [exchanging, setExchanging] = useState(false);
-  const [balanceLoadError, setBalanceLoadError] = useState(false);
-  const [historyLoadError, setHistoryLoadError] = useState(false);
-  const [lastKnownTicketCount, setLastKnownTicketCount] = useState<number | null>(() => getLastKnownTicketCount());
+  const [balanceLoadError, setBalanceLoadError] = useState(
+    () => cachedDashboard?.balanceLoadError ?? false
+  );
+  const [historyLoadError, setHistoryLoadError] = useState(
+    () => cachedDashboard?.historyLoadError ?? false
+  );
+  const [renderedDashboardKey, setRenderedDashboardKey] = useState<string | null>(
+    () => dashboardCacheKey
+  );
+  const [lastKnownTicketCount, setLastKnownTicketCount] = useState<number | null>(
+    () => cachedDashboard?.lastKnownTicketCount ?? null
+  );
 
-  const applyDashboard = useCallback((result: PointDashboardLoadResult) => {
-    if (result.tickets) setTickets(result.tickets);
-    if (result.history) setTicketHistory(result.history);
-    if (result.historyLoadFailed) setTicketHistory(null);
-    setBalanceLoadError(result.balanceLoadFailed);
-    setHistoryLoadError(result.historyLoadFailed);
+  const commitDashboard = useCallback((
+    cacheKey: string,
+    update: (previous: PointDashboardSessionCache) => PointDashboardSessionCache
+  ) => {
+    const next = update(pointDashboardSessionCache.get(cacheKey) ?? emptyDashboardCache());
+    pointDashboardSessionCache.set(cacheKey, next);
+    if (activeDashboardCacheKeyRef.current !== cacheKey) return;
+    setTickets(next.tickets);
+    setTicketHistory(next.ticketHistory);
+    setBalanceLoadError(next.balanceLoadError);
+    setHistoryLoadError(next.historyLoadError);
+    setLastKnownTicketCount(next.lastKnownTicketCount);
   }, []);
 
-  const load = useCallback(async () => {
+  const applyDashboard = useCallback((cacheKey: string, result: PointDashboardLoadResult) => {
+    commitDashboard(cacheKey, (previous) => ({
+      tickets: result.tickets ?? previous.tickets,
+      ticketHistory: result.history ?? previous.ticketHistory,
+      balanceLoadError: result.balanceLoadFailed,
+      historyLoadError: result.historyLoadFailed,
+      lastKnownTicketCount: result.tickets?.ticketCount
+        ?? result.history?.ticketCount
+        ?? previous.lastKnownTicketCount,
+    }));
+  }, [commitDashboard]);
+
+  const load = useCallback(async (cacheKey: string) => {
     try {
-      setBalanceLoadError(false);
-      setHistoryLoadError(false);
       const result = await loadPointDashboard(getTickets, getTicketHistory);
-      applyDashboard(result);
+      applyDashboard(cacheKey, result);
     } catch {
-      setBalanceLoadError(true);
+      commitDashboard(cacheKey, (previous) => ({
+        ...previous,
+        balanceLoadError: true,
+        historyLoadError: true,
+      }));
     } finally {
-      setLoading(false);
+      if (activeDashboardCacheKeyRef.current === cacheKey) setLoading(false);
     }
-  }, [applyDashboard]);
+  }, [applyDashboard, commitDashboard]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!dashboardCacheKey) return;
 
-  useEffect(() => subscribeTicketCount(setLastKnownTicketCount), []);
+    const cached = pointDashboardSessionCache.get(dashboardCacheKey);
+    setRenderedDashboardKey(dashboardCacheKey);
+    if (cached) {
+      setTickets(cached.tickets);
+      setTicketHistory(cached.ticketHistory);
+      setBalanceLoadError(cached.balanceLoadError);
+      setHistoryLoadError(cached.historyLoadError);
+      setLastKnownTicketCount(cached.lastKnownTicketCount);
+      setLoading(false);
+    } else {
+      setTickets(null);
+      setTicketHistory(null);
+      setBalanceLoadError(false);
+      setHistoryLoadError(false);
+      setLastKnownTicketCount(null);
+      setLoading(true);
+    }
+
+    load(dashboardCacheKey);
+  }, [dashboardCacheKey, load]);
+
+  useEffect(() => {
+    if (!dashboardCacheKey) return;
+    return subscribeTicketCount((ticketCount) => {
+      commitDashboard(dashboardCacheKey, (previous) => ({
+        ...previous,
+        tickets: previous.tickets ? { ...previous.tickets, ticketCount } : null,
+        ticketHistory: previous.ticketHistory
+          ? { ...previous.ticketHistory, ticketCount }
+          : null,
+        lastKnownTicketCount: ticketCount,
+      }));
+    });
+  }, [commitDashboard, dashboardCacheKey]);
 
   const refresh = useCallback(async () => {
+    if (!dashboardCacheKey) return;
     setRefreshing(true);
     try {
-      await load();
+      await load(dashboardCacheKey);
     } finally {
       setRefreshing(false);
     }
-  }, [load]);
+  }, [dashboardCacheKey, load]);
 
   const handleExchange = useCallback(async () => {
+    if (!dashboardCacheKey) return;
     const currentTicketCount = resolveTicketCount(tickets, ticketHistory, lastKnownTicketCount);
     const ticketsPerExchange = tickets?.ticketsPerExchange ?? TICKETS_PER_EXCHANGE;
 
@@ -161,20 +257,29 @@ function PointsPage() {
         throw new Error('EXCHANGE_NOT_CONFIRMED');
       }
 
-      setTickets((prev) => prev
-        ? { ...prev, ticketCount: result.ticketCount }
-        : {
-            ticketCount: result.ticketCount,
-            totalEarned: 0,
-            totalExchanged: 0,
-            ticketsPerExchange,
-          });
+      commitDashboard(dashboardCacheKey, (previous) => ({
+        ...previous,
+        tickets: previous.tickets
+          ? { ...previous.tickets, ticketCount: result.ticketCount }
+          : {
+              ticketCount: result.ticketCount,
+              totalEarned: 0,
+              totalExchanged: 0,
+              ticketsPerExchange,
+            },
+        balanceLoadError: false,
+        lastKnownTicketCount: result.ticketCount,
+      }));
 
       try {
         const nextDashboard = await loadPointDashboard(getTickets, getTicketHistory);
-        applyDashboard(nextDashboard);
+        applyDashboard(dashboardCacheKey, nextDashboard);
       } catch {
-        setBalanceLoadError(true);
+        commitDashboard(dashboardCacheKey, (previous) => ({
+          ...previous,
+          balanceLoadError: true,
+          historyLoadError: true,
+        }));
       }
 
       await dialog.openAlert({
@@ -189,12 +294,14 @@ function PointsPage() {
     } finally {
       setExchanging(false);
     }
-  }, [applyDashboard, dialog, exchanging, lastKnownTicketCount, ticketHistory, tickets]);
+  }, [applyDashboard, commitDashboard, dashboardCacheKey, dialog, exchanging, lastKnownTicketCount, ticketHistory, tickets]);
 
   const ticketCount = resolveTicketCount(tickets, ticketHistory, lastKnownTicketCount);
   const ticketsPerExchange = tickets?.ticketsPerExchange ?? TICKETS_PER_EXCHANGE;
   const historyItems = ticketHistory?.history ?? [];
-  const showInitialLoading = loading && !tickets && !ticketHistory;
+  const showInitialLoading = authLoading
+    || dashboardCacheKey !== renderedDashboardKey
+    || (loading && !tickets && !ticketHistory);
 
   return (
     <View style={styles.container}>

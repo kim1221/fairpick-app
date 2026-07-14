@@ -17,17 +17,20 @@ import { BottomTabBar } from '../components/BottomTabBar';
 import { CultureCardReveal, type RevealedCultureCard } from '../components/culture-card/CultureCardReveal';
 import { CultureCardStack } from '../components/culture-card/CultureCardStack';
 import { CultureCardStatePanel } from '../components/culture-card/CultureCardStatePanel';
-import { TasteCompass } from '../components/culture-card/TasteCompass';
-import { WeeklyDiscoveryCollection } from '../components/culture-card/WeeklyDiscoveryCollection';
 import {
   AD_LOAD_FAILED_COPY,
   AD_LOADING_COPY,
   AD_SHOW_REQUEST_TIMEOUT_MS,
   AD_SHOW_TERMINAL_TIMEOUT_MS,
+  LOAD_FAILED_COPY,
+  POOL_EMPTY_COPY,
   getEarnFailureCopy,
+  getTodayCardsAvailability,
   hasReachedDailyLimit,
+  isAlreadyOpenedCardError,
   isRewardAdProgressEvent,
   isDailyLimitReachedError,
+  removeLockedCardPreview,
   type HomeCopy,
 } from '../components/culture-card/homeLogic';
 import { LikesProvider } from '../contexts/LikesContext';
@@ -63,7 +66,16 @@ const MUTED = '#6F6B65';
 const MUTED_2 = '#817C74';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
-type HomeStatus = 'loading' | 'ready' | 'ad_loading' | 'ad_failed' | 'earn_failed' | 'daily_limit' | 'revealed' | 'empty';
+type HomeStatus =
+  | 'loading'
+  | 'ready'
+  | 'ad_loading'
+  | 'ad_failed'
+  | 'earn_failed'
+  | 'daily_limit'
+  | 'revealed'
+  | 'pool_empty'
+  | 'load_failed';
 type AdLoadStatus = 'idle' | 'loading' | 'loaded' | 'failed';
 type AdShowWatchdogPhase = 'request' | 'terminal';
 
@@ -71,6 +83,58 @@ const WATCHDOG_COPY: HomeCopy = {
   title: '광고 응답이 없어요',
   description: '잠시 후 다시 시도해 주세요. 카드는 그대로예요.',
 };
+
+type HomeSessionCache = {
+  cardsData: CardsTodayV2Response;
+  status: HomeStatus;
+  statusCopy: HomeCopy | null;
+  selectedCardKey: string | null;
+};
+
+// 탭 이동으로 홈 라우트가 다시 마운트되어도 직전 화면을 즉시 보여준다.
+// 계정 id와 KST 날짜를 키로 삼아 다른 계정/전날의 카드가 섞이지 않게 한다.
+const homeSessionCache = new Map<string, HomeSessionCache>();
+
+function getHomeSessionCacheKey(userId: string | null | undefined): string | null {
+  if (!userId) return null;
+  const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const dayKey = [
+    nowKst.getUTCFullYear(),
+    String(nowKst.getUTCMonth() + 1).padStart(2, '0'),
+    String(nowKst.getUTCDate()).padStart(2, '0'),
+  ].join('-');
+  return `user:${userId}:day:${dayKey}`;
+}
+
+function getCardKey(card: CardsTodayV2Response['lockedCards'][number]): string {
+  return card.visualSeed ?? card.cardToken;
+}
+
+function getStableCachedState(data: CardsTodayV2Response): Pick<HomeSessionCache, 'status' | 'statusCopy'> {
+  const availability = getTodayCardsAvailability(data);
+  if (availability === 'daily_limit') {
+    return {
+      status: 'daily_limit',
+      statusCopy: getEarnFailureCopy({
+        response: { status: 429, data: { error: 'DAILY_OPEN_LIMIT_REACHED' } },
+      }),
+    };
+  }
+
+  return {
+    status: availability === 'pool_empty' ? 'pool_empty' : 'ready',
+    statusCopy: availability === 'pool_empty' ? POOL_EMPTY_COPY : null,
+  };
+}
+
+function formatIssueLine(region: string | null): string {
+  const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const year = nowKst.getUTCFullYear();
+  const month = String(nowKst.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(nowKst.getUTCDate()).padStart(2, '0');
+  const edition = region?.trim() || 'DAILY';
+  return `${edition} · DAILY EDITION · ${month}.${day}.${year}`;
+}
 
 function createStyles(a: Adaptive) {
   return StyleSheet.create({
@@ -223,15 +287,21 @@ function HomePageInner() {
   const adaptive = useAdaptive();
   const styles = useMemo(() => createStyles(adaptive), [adaptive]);
   const dialog = useDialog();
-  const { isLoggedIn, isLoading: authLoading, login } = useAuth();
+  const { isLoggedIn, user, isLoading: authLoading, login } = useAuth();
 
-  const [status, setStatus] = useState<HomeStatus>('loading');
-  const [cardsData, setCardsData] = useState<CardsTodayV2Response | null>(null);
-  const [selectedToken, setSelectedToken] = useState<string | null>(null);
+  const renderCacheKey = isLoggedIn ? getHomeSessionCacheKey(user?.id) : null;
+  const initialCacheRef = useRef<HomeSessionCache | null>(
+    renderCacheKey ? (homeSessionCache.get(renderCacheKey) ?? null) : null,
+  );
+  const initialCache = initialCacheRef.current;
+
+  const [status, setStatus] = useState<HomeStatus>(initialCache?.status ?? 'loading');
+  const [cardsData, setCardsData] = useState<CardsTodayV2Response | null>(initialCache?.cardsData ?? null);
+  const [selectedCardKey, setSelectedCardKey] = useState<string | null>(initialCache?.selectedCardKey ?? null);
   const [openedCard, setOpenedCard] = useState<RevealedCultureCard | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [adLoadStatus, setAdLoadStatus] = useState<AdLoadStatus>('idle');
-  const [statusCopy, setStatusCopy] = useState<HomeCopy | null>(null);
+  const [statusCopy, setStatusCopy] = useState<HomeCopy | null>(initialCache?.statusCopy ?? null);
   const [loginPending, setLoginPending] = useState(false);
 
   const loadUnregisterRef = useRef<(() => void) | null>(null);
@@ -241,6 +311,9 @@ function HomePageInner() {
   const showSettledRef = useRef(false);
   const lastShowEventTypeRef = useRef<RewardAdEventType | null>(null);
   const mountedRef = useRef(true);
+  const activeCacheKeyRef = useRef<string | null>(renderCacheKey);
+  const selectedCardKeyRef = useRef<string | null>(initialCache?.selectedCardKey ?? null);
+  const refreshRequestVersionRef = useRef(0);
 
   const clearLoadTimeout = useCallback(() => {
     if (loadTimeoutRef.current) {
@@ -297,22 +370,53 @@ function HomePageInner() {
   }, [startRewardedAdLoad]);
 
   const refreshCards = useCallback(async (nextStatus: HomeStatus = 'ready') => {
+    const requestCacheKey = activeCacheKeyRef.current;
+    if (!requestCacheKey) return;
+    const requestVersion = ++refreshRequestVersionRef.current;
+
     const coords = await getCurrentCoordsOrNull();
     const data = await getTodayCardsV2(coords ?? undefined);
-    if (!mountedRef.current) return;
+    if (
+      !mountedRef.current
+      || activeCacheKeyRef.current !== requestCacheKey
+      || refreshRequestVersionRef.current !== requestVersion
+    ) return;
+
+    const nextSelectedCardKey = data.lockedCards.some((card) => getCardKey(card) === selectedCardKeyRef.current)
+      ? selectedCardKeyRef.current
+      : (data.lockedCards[0] ? getCardKey(data.lockedCards[0]) : null);
+    selectedCardKeyRef.current = nextSelectedCardKey;
     setCardsData(data);
-    setSelectedToken((current) => (
-      data.lockedCards.some((card) => card.cardToken === current)
-        ? current
-        : (data.lockedCards[0]?.cardToken ?? null)
-    ));
-    if (hasReachedDailyLimit(data)) {
-      setStatusCopy(getEarnFailureCopy({ response: { status: 429, data: { error: 'DAILY_OPEN_LIMIT_REACHED' } } }));
+    setSelectedCardKey(nextSelectedCardKey);
+
+    const availability = getTodayCardsAvailability(data);
+    if (availability === 'daily_limit') {
+      const dailyLimitCopy = getEarnFailureCopy({
+        response: { status: 429, data: { error: 'DAILY_OPEN_LIMIT_REACHED' } },
+      });
+      setStatusCopy(dailyLimitCopy);
       setStatus('daily_limit');
-      return;
+      homeSessionCache.set(requestCacheKey, {
+        cardsData: data,
+        selectedCardKey: nextSelectedCardKey,
+        status: 'daily_limit',
+        statusCopy: dailyLimitCopy,
+      });
+      return data;
     }
-    setStatusCopy(null);
-    setStatus(data.lockedCards.length === 0 ? 'empty' : nextStatus);
+
+    const resolvedStatus = availability === 'pool_empty' ? 'pool_empty' : nextStatus;
+    const resolvedCopy = availability === 'pool_empty' ? POOL_EMPTY_COPY : null;
+    setStatusCopy(resolvedCopy);
+    setStatus(resolvedStatus);
+    homeSessionCache.set(requestCacheKey, {
+      cardsData: data,
+      selectedCardKey: nextSelectedCardKey,
+      // 공개 결과 화면은 openedCard가 필요하므로 재진입 캐시에서는 카드 목록으로 복귀한다.
+      status: resolvedStatus === 'revealed' ? 'ready' : resolvedStatus,
+      statusCopy: resolvedCopy,
+    });
+    return data;
   }, []);
 
   useEffect(() => {
@@ -328,30 +432,61 @@ function HomePageInner() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (!isLoggedIn) {
+
+    const nextCacheKey = isLoggedIn ? getHomeSessionCacheKey(user?.id) : null;
+    if (!isLoggedIn || !nextCacheKey) {
+      refreshRequestVersionRef.current += 1;
+      activeCacheKeyRef.current = null;
+      selectedCardKeyRef.current = null;
+      setCardsData(null);
+      setSelectedCardKey(null);
+      setOpenedCard(null);
+      setStatusCopy(null);
       setStatus('ready');
       return;
     }
-    setStatus('loading');
+
+    const cached = homeSessionCache.get(nextCacheKey) ?? null;
+    if (activeCacheKeyRef.current !== nextCacheKey) {
+      refreshRequestVersionRef.current += 1;
+      activeCacheKeyRef.current = nextCacheKey;
+      selectedCardKeyRef.current = cached?.selectedCardKey ?? null;
+      setCardsData(cached?.cardsData ?? null);
+      setSelectedCardKey(cached?.selectedCardKey ?? null);
+      setOpenedCard(null);
+      setStatusCopy(cached?.statusCopy ?? null);
+      setStatus(cached?.status ?? 'loading');
+    }
+
+    // 캐시가 있으면 화면은 그대로 보여 주고, 최신 카드는 뒤에서 재검증한다.
     refreshCards().catch(() => {
-      if (!mountedRef.current) return;
-      setStatus('empty');
-      setStatusCopy({
-        title: '새로운 문화카드를 찾고 있어요',
-        description: '이벤트 정보를 불러오지 못했어요. 잠시 후 다시 확인해 주세요.',
-      });
+      if (!mountedRef.current || activeCacheKeyRef.current !== nextCacheKey || cached) return;
+      setStatus('load_failed');
+      setStatusCopy(LOAD_FAILED_COPY);
     });
     startRewardedAdLoad();
-  }, [authLoading, isLoggedIn, refreshCards, startRewardedAdLoad]);
+  }, [authLoading, isLoggedIn, refreshCards, startRewardedAdLoad, user?.id]);
+
+  const handleSelectCard = useCallback((cardKey: string) => {
+    selectedCardKeyRef.current = cardKey;
+    setSelectedCardKey(cardKey);
+
+    const cacheKey = activeCacheKeyRef.current;
+    const cached = cacheKey ? homeSessionCache.get(cacheKey) : null;
+    if (cacheKey && cached) {
+      homeSessionCache.set(cacheKey, { ...cached, selectedCardKey: cardKey });
+    }
+  }, []);
 
   const activeCard = useMemo(() => {
     const lockedCards = cardsData?.lockedCards ?? [];
-    return lockedCards.find((card) => card.cardToken === selectedToken) ?? lockedCards[0] ?? null;
-  }, [cardsData?.lockedCards, selectedToken]);
+    return lockedCards.find((card) => (
+      (card.visualSeed ?? card.cardToken) === selectedCardKey
+    )) ?? lockedCards[0] ?? null;
+  }, [cardsData?.lockedCards, selectedCardKey]);
   const dailyLimitReached = hasReachedDailyLimit(cardsData);
   const ticketCount = cardsData?.ticketCount ?? 0;
-  const dailyOpenCount = cardsData?.dailyOpenCount ?? 0;
-  const dailyOpenLimit = cardsData?.dailyOpenLimit ?? 50;
+  const issueLine = formatIssueLine(cardsData?.userRegion ?? null);
 
   const handleRefresh = useCallback(async () => {
     if (!isLoggedIn) return;
@@ -359,7 +494,8 @@ function HomePageInner() {
     try {
       await refreshCards(status === 'revealed' ? 'revealed' : 'ready');
     } catch {
-      setStatus('empty');
+      setStatusCopy(LOAD_FAILED_COPY);
+      setStatus('load_failed');
     } finally {
       setRefreshing(false);
     }
@@ -392,7 +528,10 @@ function HomePageInner() {
     }
     if (!cardsData) {
       setStatus('loading');
-      await refreshCards().catch(() => setStatus('empty'));
+      await refreshCards().catch(() => {
+        setStatusCopy(LOAD_FAILED_COPY);
+        setStatus('load_failed');
+      });
       return;
     }
     if (dailyLimitReached) {
@@ -403,11 +542,8 @@ function HomePageInner() {
       return;
     }
     if (!activeCard) {
-      setStatus('empty');
-      setStatusCopy({
-        title: '새로운 문화카드를 찾고 있어요',
-        description: '오늘 열 수 있는 카드를 준비하지 못했어요. 잠시 후 다시 확인해 주세요.',
-      });
+      setStatusCopy(POOL_EMPTY_COPY);
+      setStatus('pool_empty');
       return;
     }
     if (!showFullScreenAd.isSupported()) {
@@ -464,6 +600,8 @@ function HomePageInner() {
       showWatchdogRef.current = setTimeout(() => settleTimedOutAd(phase), timeoutMs);
     };
 
+    // 캐시 재검증 요청이 뒤늦게 끝나 광고 진행 상태를 덮지 않게 한다.
+    refreshRequestVersionRef.current += 1;
     setStatus('ad_loading');
     setStatusCopy(null);
     setOpenedCard(null);
@@ -498,15 +636,33 @@ function HomePageInner() {
             await eventLog;
             const result = await openCultureCard(card.cardToken, attemptId);
             if (!mountedRef.current) return;
-            setCardsData((prev) => prev ? {
-              ...prev,
-              lockedCards: prev.lockedCards.filter((item) => item.cardToken !== card.cardToken),
+            const nextCardsData: CardsTodayV2Response = {
+              ...cardsData,
+              lockedCards: cardsData.lockedCards.filter((item) => item.cardToken !== card.cardToken),
               ticketCount: result.ticketCount,
               dailyEarned: result.dailyEarned,
               dailyLimit: result.dailyLimit,
               dailyOpenCount: result.dailyOpenCount,
               dailyOpenLimit: result.dailyOpenLimit,
-            } : prev);
+            };
+            const nextSelectedCardKey = nextCardsData.lockedCards.some((item) => (
+              getCardKey(item) === selectedCardKeyRef.current
+            ))
+              ? selectedCardKeyRef.current
+              : (nextCardsData.lockedCards[0] ? getCardKey(nextCardsData.lockedCards[0]) : null);
+            selectedCardKeyRef.current = nextSelectedCardKey;
+            setCardsData(nextCardsData);
+            setSelectedCardKey(nextSelectedCardKey);
+
+            const cacheKey = activeCacheKeyRef.current;
+            if (cacheKey) {
+              const cachedState = getStableCachedState(nextCardsData);
+              homeSessionCache.set(cacheKey, {
+                cardsData: nextCardsData,
+                selectedCardKey: nextSelectedCardKey,
+                ...cachedState,
+              });
+            }
             setOpenedCard({
               card: result.card,
               earned: result.earned,
@@ -518,6 +674,40 @@ function HomePageInner() {
             resetAdAfterAttempt();
           } catch (error) {
             if (!mountedRef.current) return;
+            if (isAlreadyOpenedCardError(error)) {
+              const nextCardsData = removeLockedCardPreview(cardsData, card.cardToken);
+              const nextSelectedCardKey = nextCardsData.lockedCards.some((item) => (
+                getCardKey(item) === selectedCardKeyRef.current
+              ))
+                ? selectedCardKeyRef.current
+                : (nextCardsData.lockedCards[0] ? getCardKey(nextCardsData.lockedCards[0]) : null);
+              const stableState = getStableCachedState(nextCardsData);
+
+              selectedCardKeyRef.current = nextSelectedCardKey;
+              setCardsData(nextCardsData);
+              setSelectedCardKey(nextSelectedCardKey);
+              setOpenedCard(null);
+              setStatusCopy(stableState.statusCopy);
+              setStatus(stableState.status);
+
+              const cacheKey = activeCacheKeyRef.current;
+              if (cacheKey) {
+                homeSessionCache.set(cacheKey, {
+                  cardsData: nextCardsData,
+                  selectedCardKey: nextSelectedCardKey,
+                  ...stableState,
+                });
+              }
+
+              resetAdAfterAttempt();
+              // 다른 기기나 이전 세션에서 이미 공개된 stale 토큰은 조용히 버리고
+              // 서버 권위의 최신 미공개 목록으로 즉시 다시 맞춘다.
+              await refreshCards().catch(() => {
+                // 로컬과 세션 캐시에서는 이미 stale 카드를 제거했으므로,
+                // 재검증 실패 시에도 그 카드를 다시 노출하지 않는다.
+              });
+              return;
+            }
             const copy = getEarnFailureCopy(error);
             setStatusCopy(copy);
             setStatus(isDailyLimitReachedError(error) ? 'daily_limit' : 'earn_failed');
@@ -589,8 +779,18 @@ function HomePageInner() {
   const handleNextCard = useCallback(async () => {
     setOpenedCard(null);
     setStatus('loading');
-    await refreshCards().catch(() => setStatus('empty'));
-  }, [refreshCards]);
+    try {
+      const nextData = await refreshCards();
+      if (hasReachedDailyLimit(nextData ?? null)) {
+        openAlert(getEarnFailureCopy({
+          response: { status: 429, data: { error: 'DAILY_OPEN_LIMIT_REACHED' } },
+        }));
+      }
+    } catch {
+      setStatusCopy(LOAD_FAILED_COPY);
+      setStatus('load_failed');
+    }
+  }, [openAlert, refreshCards]);
 
   const handleDetail = useCallback(() => {
     if (!openedCard) return;
@@ -626,16 +826,16 @@ function HomePageInner() {
   }, [dialog, openedCard]);
 
   const actionLabel = !isLoggedIn && !authLoading
-    ? '로그인하고 공개하기'
+    ? '로그인하고 컬처카드 공개하기'
     : dailyLimitReached
-      ? '오늘 50장 공개 완료'
-      : '광고 보고 공개하기';
+      ? '오늘 공개 완료'
+      : '광고 보고 컬처카드 공개하기';
   const stackDisabled = (
     authLoading
     || loginPending
     || status === 'loading'
     || status === 'ad_loading'
-    || (isLoggedIn && (!activeCard || status === 'empty'))
+    || (isLoggedIn && (!activeCard || status === 'pool_empty' || status === 'load_failed'))
   );
 
   return (
@@ -650,9 +850,14 @@ function HomePageInner() {
           <View style={styles.nav}>
             <View style={styles.brand}>
               <Text style={styles.name}>CULTURE CARD</Text>
-              <Text style={styles.issue}>SEOUL · DAILY EDITION · 07.11.2026</Text>
+              <Text style={styles.issue}>{issueLine}</Text>
             </View>
-            <Pressable style={styles.ticketChip} onPress={() => navigation.navigate('/points' as never)}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`보유 티켓 ${ticketCount}장, 리워드에서 교환하기`}
+              style={styles.ticketChip}
+              onPress={() => (navigation.replace as (route: string) => void)('/points')}
+            >
               <Icon name="icon-ticket-mono" size={15} color={GOLD} />
               <Text style={styles.ticketChipNumber}>{ticketCount}</Text>
               <Text style={styles.ticketChipLabel}>티켓</Text>
@@ -672,17 +877,18 @@ function HomePageInner() {
           />
         ) : (
           <>
-            <CultureCardStack
-              cards={cardsData?.lockedCards ?? []}
-              selectedToken={activeCard?.cardToken ?? null}
-              dailyOpenCount={dailyOpenCount}
-              dailyOpenLimit={dailyOpenLimit}
-              loading={status === 'ad_loading' || adLoadStatus === 'loading'}
-              disabled={stackDisabled}
-              actionLabel={actionLabel}
-              onOpen={handleOpenCard}
-              userRegion={cardsData?.userRegion ?? null}
-            />
+            {status !== 'daily_limit' && status !== 'pool_empty' && status !== 'load_failed' ? (
+              <CultureCardStack
+                cards={cardsData?.lockedCards ?? []}
+                selectedCardKey={activeCard ? (activeCard.visualSeed ?? activeCard.cardToken) : null}
+                loading={status === 'ad_loading' || adLoadStatus === 'loading'}
+                disabled={stackDisabled}
+                actionLabel={actionLabel}
+                onSelectCard={handleSelectCard}
+                onOpen={handleOpenCard}
+                userRegion={cardsData?.userRegion ?? null}
+              />
+            ) : null}
 
             {status === 'ad_loading' ? (
               <View style={styles.loadingBox}>
@@ -724,36 +930,37 @@ function HomePageInner() {
             {status === 'daily_limit' ? (
               <CultureCardStatePanel
                 label="오늘 완료"
-                title={statusCopy?.title ?? '오늘 컬처카드 50장을 모두 열었어요'}
-                description={statusCopy?.description ?? '공개한 카드는 컬렉션에서 다시 볼 수 있어요.'}
+                title={statusCopy?.title ?? '오늘 준비한 컬처카드는 여기까지예요'}
+                description={statusCopy?.description ?? '내일 새로운 카드가 도착해요. 공개한 카드는 컬렉션에서 다시 볼 수 있어요.'}
+                actionLabel="컬렉션 보기"
                 tone="success"
+                onAction={() => (navigation.replace as (route: string) => void)('/passport')}
               />
             ) : null}
 
-            {status === 'empty' ? (
+            {status === 'pool_empty' ? (
               <CultureCardStatePanel
-                label="카드 준비 중"
-                title={statusCopy?.title ?? '새로운 문화카드를 찾고 있어요'}
-                description={statusCopy?.description ?? '이벤트 정보를 불러오지 못했어요. 잠시 후 다시 확인해 주세요.'}
-                actionLabel="새로 고침"
+                label="새로운 카드 완료"
+                title={statusCopy?.title ?? POOL_EMPTY_COPY.title}
+                description={statusCopy?.description ?? POOL_EMPTY_COPY.description}
+                actionLabel="컬렉션 보기"
+                tone="success"
+                onAction={() => (navigation.replace as (route: string) => void)('/passport')}
+              />
+            ) : null}
+
+            {status === 'load_failed' ? (
+              <CultureCardStatePanel
+                label="불러오기 실패"
+                title={statusCopy?.title ?? LOAD_FAILED_COPY.title}
+                description={statusCopy?.description ?? LOAD_FAILED_COPY.description}
+                actionLabel="다시 시도"
                 tone="neutral"
                 onAction={handleRefresh}
               />
             ) : null}
           </>
         )}
-
-        {cardsData?.weeklyDiscovery ? (
-          <WeeklyDiscoveryCollection
-            discovery={cardsData.weeklyDiscovery}
-            onPressCard={(eventId) => navigation.navigate('/events/:id', { id: eventId })}
-            onOpenCollection={() => navigation.navigate('/passport')}
-          />
-        ) : null}
-
-        {cardsData?.personalization && cardsData.personalization.signalCount > 0 ? (
-          <TasteCompass profile={cardsData.personalization} />
-        ) : null}
 
         {!isLoggedIn && !authLoading ? (
           <View style={styles.loginBox}>

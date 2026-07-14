@@ -77,7 +77,9 @@ export const BottomTabBar: React.FC<BottomTabBarProps> = ({ currentTab, onHomeTa
     // 홈 탭: 어디서 진입하든 최상단으로 (다른 탭 복귀 + 현재 탭 재클릭 모두)
     if (tab.key === 'home') onHomeTabPress?.();
     if (tab.key === currentTab) return;
-    navigation.navigate(tab.route as never);
+    // 이 UI는 실제 TabNavigator가 아니라 Native Stack 위에 있으므로 navigate를 쓰면
+    // 탭을 오갈 때마다 같은 화면이 스택에 계속 쌓인다. 최상단 탭 화면만 교체한다.
+    (navigation.replace as (route: string) => void)(tab.route);
   };
 
   return (

@@ -8,6 +8,14 @@
 
 import http from '../lib/http';
 
+export type PassportCollectionStatus = 'active' | 'ended' | 'removed';
+
+export type PassportDiscoveredPageInfo = {
+  limit: number;
+  hasMore: boolean;
+  nextCursor: string | null;
+};
+
 export type PassportStamp = {
   eventId: string;
   title: string;
@@ -16,6 +24,8 @@ export type PassportStamp = {
   venue: string | null;
   imageUrl: string | null;
   visitedAt: string;
+  /** 종료된 행사도 방문 추억으로 남길 수 있도록 서버가 계산한 아카이브 상태. */
+  status?: PassportCollectionStatus;
   /** 이 사용자의 해당 지역 첫 도장. 구버전 서버 호환을 위해 optional. */
   isFirstInRegion?: boolean;
   /** 이 사용자의 해당 카테고리 첫 도장. 구버전 서버 호환을 위해 optional. */
@@ -39,6 +49,8 @@ export type PassportDiscoveredCard = {
   lat: number | null;
   lng: number | null;
   discoveredAt: string;
+  /** 구버전 서버에서는 생략될 수 있으며 클라이언트는 active로 취급한다. */
+  status?: PassportCollectionStatus;
 };
 
 export type PassportResponse = {
@@ -57,16 +69,47 @@ export type PassportResponse = {
   tasteCategories: string[]; // 상위 2~3 카테고리
   stamps: PassportStamp[]; // 다녀온 문화(도장 그리드용, 최대 60, visitedAt 내림차순)
   visitedEventIds: string[]; // 다녀온 이벤트 전체 id(위시리스트 필터용)
-  discoveredCards: PassportDiscoveredCard[]; // 광고 보고 받은 카드(최신순, 최대 50)
+  discoveredCards: PassportDiscoveredCard[]; // 광고 보고 받은 카드 첫 페이지(최신순)
+  discoveredPageInfo?: PassportDiscoveredPageInfo;
 };
 
 export type GetPassportOptions = {
   stampBook?: number;
+  discoveredLimit?: number;
 };
 
 export async function getPassport(options: GetPassportOptions = {}): Promise<PassportResponse> {
   const { data } = await http.get<PassportResponse>('/api/passport', {
-    params: options.stampBook ? { stampBook: options.stampBook } : undefined,
+    params: {
+      ...(options.stampBook ? { stampBook: options.stampBook } : {}),
+      ...(typeof options.discoveredLimit === 'number' ? { discoveredLimit: options.discoveredLimit } : {}),
+    },
+  });
+  return data;
+}
+
+export type GetDiscoveredCardsOptions = {
+  limit?: number;
+  cursor?: string | null;
+};
+
+export type PassportDiscoveredCardsResponse = {
+  items: PassportDiscoveredCard[];
+  pageInfo: PassportDiscoveredPageInfo;
+};
+
+/**
+ * 공개한 문화 전체를 최신순으로 불러온다.
+ * cursor는 서버가 발급한 opaque 값만 그대로 전달한다.
+ */
+export async function getDiscoveredCards(
+  options: GetDiscoveredCardsOptions = {}
+): Promise<PassportDiscoveredCardsResponse> {
+  const { data } = await http.get<PassportDiscoveredCardsResponse>('/api/passport/discovered', {
+    params: {
+      ...(typeof options.limit === 'number' ? { limit: options.limit } : {}),
+      ...(options.cursor ? { cursor: options.cursor } : {}),
+    },
   });
   return data;
 }

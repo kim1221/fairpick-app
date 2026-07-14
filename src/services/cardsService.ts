@@ -68,7 +68,8 @@ export type LockedCardPreview = {
     foreground: string;
     accent: string;
   };
-  isRevisit: boolean;
+  /** @deprecated 공개했던 카드는 홈에서 다시 추천하지 않는다. 구버전 응답 호환용. */
+  isRevisit?: boolean;
 };
 
 export type WeeklyDiscovery = {

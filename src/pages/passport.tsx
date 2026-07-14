@@ -2,42 +2,35 @@ import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-nat
 import { useDialog } from '@toss/tds-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
-  FlatList,
+  AppState,
   Linking,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { BottomTabBar } from '../components/BottomTabBar';
 import {
-  PassportBookStatePage,
-  PassportIndexRail,
-  PassportTicketBookPage,
-  type PassportBookmarkItem,
-} from '../components/passport/PassportBookPages';
-import {
-  PassportCoverPage,
-  PassportIdentityPage,
-  PassportStampPage,
-} from '../components/passport/PassportPages';
-import { StampDetailSheet } from '../components/passport/StampDetailSheet';
-import { PassportDiscoverySummary } from '../components/passport/PassportDiscoverySummary';
-import type { SavedTicketItem, SaveButtonState, VisitButtonState } from '../components/saved/SavedTicketRow';
-import { SavedVisitToast, SavedVisitToastMessage } from '../components/saved/SavedVisitToast';
-import type { EventCardData } from '../data/events';
+  CollectionOverviewSections,
+  filterCollectionCards,
+  getCollectionCardStatus,
+  type CollectionCardFilter,
+  type CollectionOverviewCard,
+  type CollectionVisitRecord,
+} from '../components/passport/CollectionOverviewSections';
+import { SavedVisitToast, type SavedVisitToastMessage } from '../components/saved/SavedVisitToast';
 import { useAuth } from '../hooks/useAuth';
 import http from '../lib/http';
-import eventService from '../services/eventService';
 import {
+  getDiscoveredCards,
   getPassport,
+  type PassportCollectionStatus,
   type PassportDiscoveredCard,
+  type PassportDiscoveredPageInfo,
   type PassportResponse,
   type PassportStamp,
 } from '../services/passportService';
@@ -45,201 +38,152 @@ import userEventService from '../services/userEventService';
 import { markVisited, unmarkVisited } from '../services/visitService';
 import type { GetLikesResponse } from '../types/serverSync';
 import { openNaverMap } from '../utils/mapLinks';
-import {
-  getLikesV2,
-  subscribeStorageChange,
-  toggleLike,
-  type StoredEventItemV2,
-} from '../utils/storage';
-import {
-  buildPassportBookPages,
-  getActivePassportBookmark,
-  getPassportSectionCopy,
-  getPassportSectionIndexes,
-  getStampBookMeta,
-  STAMPS_PER_PASSPORT_BOOK,
-  type PassportBookPage,
-  type PassportBookmarkSection,
-  type PassportContentSection,
-} from './passportLogic';
+import { getLikesV2, subscribeStorageChange, toggleLike } from '../utils/storage';
 
 export const Route = createRoute('/passport', {
   component: PassportPage,
 });
 
 const BG = '#F7F5EF';
-const ON_BG = '#171717';
-const ON_BG_MUTED = '#716D66';
-const GOLD = '#CBA15E';
+const TEXT = '#171717';
+const MUTED = '#716D66';
+const RED = '#A52822';
+const PAGE_SIZE = 100;
+const OPENED_PREVIEW_STEP = 12;
+const VISIT_PREVIEW_STEP = 6;
 
-type OrderedLike = { id: string; timestamp: string };
-type EventWithWalk = EventCardData & { walkMinutes?: number | null };
-type ScrollToIndexFailure = {
-  index: number;
-  highestMeasuredFrameIndex: number;
-  averageItemLength: number;
+type CollectionSessionCache = {
+  passport: PassportResponse;
+  openedCards: PassportDiscoveredCard[];
+  pageInfo: PassportDiscoveredPageInfo | null;
+  visitStamps: PassportStamp[];
+  nextStampBook: number;
+  savedEventIds: string[];
+  visitedEventIds: string[];
+  openedPreviewLimit: number;
+  visitPreviewLimit: number;
+  activeFilter: CollectionCardFilter;
+  fetchedAt: number;
 };
 
-function snapshotToTicketItem(item: StoredEventItemV2): SavedTicketItem {
-  return {
-    id: item.id,
-    title: item.snapshot?.title?.trim() || '저장한 문화행사',
-    venue: item.snapshot?.venue,
-    region: item.snapshot?.region,
-    category: item.snapshot?.mainCategory,
-    subCategory: item.snapshot?.subCategory,
-    startAt: item.snapshot?.startAt,
-    endAt: item.snapshot?.endAt,
-    imageUrl: item.snapshot?.imageUrl,
-    lastKnownStatus: item.lastKnownStatus,
-  };
-}
+const collectionSessionCache = new Map<string, CollectionSessionCache>();
 
-function eventToTicketItem(event: EventWithWalk): SavedTicketItem {
-  return {
-    id: event.id,
-    title: event.displayTitle?.trim() || event.title,
-    venue: event.venue,
-    region: event.region,
-    category: event.mainCategory ?? event.category,
-    subCategory: event.subCategory,
-    startAt: event.startAt,
-    endAt: event.endAt,
-    walkMinutes: event.walkMinutes,
-    lat: event.lat,
-    lng: event.lng,
-    detailLink: event.detailLink,
-    imageUrl: event.imageUrl,
-    lastKnownStatus: 'active',
-  };
-}
-
-function discoveredToTicketItem(card: PassportDiscoveredCard): SavedTicketItem {
-  return {
-    id: card.eventId,
-    title: card.title,
-    venue: card.venue,
-    region: card.region,
-    category: card.category,
-    startAt: card.startAt,
-    endAt: card.endAt,
-    imageUrl: card.imageUrl,
-    lat: card.lat,
-    lng: card.lng,
-    lastKnownStatus: 'active',
-  };
-}
-
-function createFallbackItem(id: string, snapshot?: StoredEventItemV2): SavedTicketItem {
-  if (snapshot) return snapshotToTicketItem(snapshot);
-  return { id, title: '저장한 문화행사', lastKnownStatus: 'active' };
-}
-
-async function getOrderedLikes(isLoggedIn: boolean): Promise<{
-  orderedLikes: OrderedLike[];
-  localItems: StoredEventItemV2[];
-}> {
-  const localLikes = await getLikesV2();
-  if (!isLoggedIn) {
-    return {
-      orderedLikes: localLikes.items.map((item) => ({ id: item.id, timestamp: item.timestamp })),
-      localItems: localLikes.items,
-    };
-  }
-  try {
-    const { data } = await http.get<GetLikesResponse>('/users/me/likes');
-    return {
-      orderedLikes: data.items.map((item) => ({ id: item.eventId, timestamp: item.likedAt })),
-      localItems: localLikes.items,
-    };
-  } catch {
-    return {
-      orderedLikes: localLikes.items.map((item) => ({ id: item.id, timestamp: item.timestamp })),
-      localItems: localLikes.items,
-    };
-  }
+function collectionCacheKey(isLoggedIn: boolean, userId?: string): string {
+  return isLoggedIn && userId ? `user:${userId}` : 'guest';
 }
 
 function addId(setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) {
-  setter((prev) => {
-    if (prev.has(id)) return prev;
-    const next = new Set(prev);
+  setter((previous) => {
+    if (previous.has(id)) return previous;
+    const next = new Set(previous);
     next.add(id);
     return next;
   });
 }
 
 function removeId(setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) {
-  setter((prev) => {
-    if (!prev.has(id)) return prev;
-    const next = new Set(prev);
+  setter((previous) => {
+    if (!previous.has(id)) return previous;
+    const next = new Set(previous);
     next.delete(id);
     return next;
   });
 }
 
-function pageMonthLabel(stamps: PassportStamp[]): string {
-  const first = stamps[0];
-  if (!first) return '2026';
-  const d = new Date(first.visitedAt);
-  if (Number.isNaN(d.getTime())) return '2026';
-  return `${d.getFullYear()}. ${d.getMonth() + 1}`;
+function toLastKnownStatus(status: PassportCollectionStatus | undefined): CollectionOverviewCard['lastKnownStatus'] {
+  if (status === 'removed') return 'deleted';
+  if (status === 'ended') return 'ended';
+  return 'active';
 }
 
-function deriveIssueMonth(stamps: PassportStamp[]): string | null {
-  const oldest = stamps[stamps.length - 1];
-  if (!oldest) return null;
-  const d = new Date(oldest.visitedAt);
-  if (Number.isNaN(d.getTime())) return null;
-  return `${d.getFullYear()}. ${d.getMonth() + 1}`;
+function uniqueDiscoveredCards(cards: readonly PassportDiscoveredCard[]): PassportDiscoveredCard[] {
+  return Array.from(new Map(cards.map((card) => [card.eventId, card])).values());
+}
+
+function mergeDiscoveredCards(
+  previous: readonly PassportDiscoveredCard[],
+  incoming: readonly PassportDiscoveredCard[]
+): PassportDiscoveredCard[] {
+  return uniqueDiscoveredCards([...previous, ...incoming]);
+}
+
+function mergeStamps(previous: readonly PassportStamp[], incoming: readonly PassportStamp[]): PassportStamp[] {
+  const byKey = new Map<string, PassportStamp>();
+  for (const stamp of [...previous, ...incoming]) {
+    byKey.set(`${stamp.eventId}:${stamp.visitedAt}`, stamp);
+  }
+  return Array.from(byKey.values()).sort((a, b) => new Date(b.visitedAt).getTime() - new Date(a.visitedAt).getTime());
+}
+
+function discoveredCardMatchesFilter(
+  card: PassportDiscoveredCard,
+  filter: CollectionCardFilter,
+  savedIds: ReadonlySet<string>,
+  referenceDate: Date
+): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'saved') return savedIds.has(card.eventId);
+  const status = getCollectionCardStatus(
+    { endAt: card.endAt, lastKnownStatus: toLastKnownStatus(card.status) },
+    referenceDate
+  );
+  return filter === 'active' ? status === 'active' : status !== 'active';
+}
+
+async function loadSavedEventIds(isLoggedIn: boolean): Promise<Set<string>> {
+  const local = await getLikesV2();
+  if (!isLoggedIn) return new Set(local.items.map((item) => item.id));
+  try {
+    const { data } = await http.get<GetLikesResponse>('/users/me/likes');
+    return new Set(data.items.map((item) => item.eventId));
+  } catch {
+    return new Set(local.items.map((item) => item.id));
+  }
 }
 
 function PassportPage() {
-  const { width: screenWidth } = useWindowDimensions();
   const navigation = Route.useNavigation();
   const dialog = useDialog();
-  const { isLoggedIn, isLoading: authLoading } = useAuth();
-  const bookListRef = useRef<FlatList<PassportBookPage<SavedTicketItem, PassportStamp>>>(null);
-  const savingIdsRef = useRef<Set<string>>(new Set());
-  const markingIdsRef = useRef<Set<string>>(new Set());
-  const desiredBookSectionRef = useRef<PassportBookmarkSection>('discovered');
-  const stampBookRef = useRef(1);
-  const lastAlignedBookPageRef = useRef<string | null>(null);
-  const [currentBookPage, setCurrentBookPage] = useState(0);
-  const [savingIds, setSavingIds] = useState<Set<string>>(() => new Set());
-
-  const [passport, setPassport] = useState<PassportResponse | null>(null);
-  const [passportLoading, setPassportLoading] = useState(true);
-  const [passportError, setPassportError] = useState(false);
-  const [stampBook, setStampBook] = useState(1);
-  const [activeStamp, setActiveStamp] = useState<PassportStamp | null>(null);
-  const [cancelingStamp, setCancelingStamp] = useState(false);
-
-  const [savedItems, setSavedItems] = useState<SavedTicketItem[]>([]);
-  const [savedLoading, setSavedLoading] = useState(true);
-  const [savedError, setSavedError] = useState(false);
-  const [visitedIds, setVisitedIds] = useState<Set<string>>(() => new Set());
-  const [markingIds, setMarkingIds] = useState<Set<string>>(() => new Set());
-
-  const [refreshing, setRefreshing] = useState(false);
-  const [toastMessage, setToastMessage] = useState<SavedVisitToastMessage | null>(null);
-
+  const { isLoggedIn, user, isLoading: authLoading } = useAuth();
+  const initialCacheKey = collectionCacheKey(isLoggedIn, user?.id);
+  const initialCacheRef = useRef<CollectionSessionCache | null>(
+    authLoading ? null : collectionSessionCache.get(initialCacheKey) ?? null
+  );
+  const initialCache = initialCacheRef.current;
+  const activeCacheKeyRef = useRef(initialCacheKey);
+  const lastFetchedAtRef = useRef(initialCache?.fetchedAt ?? 0);
+  const savingIdsRef = useRef(new Set<string>());
+  const markingIdsRef = useRef(new Set<string>());
   const toastOpacity = useRef(new Animated.Value(0));
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const firstStampNoticeShownRef = useRef(false);
 
-  const pageWidth = Math.max(screenWidth, 0);
-
-  const setCurrentStampBook = useCallback((nextBook: number) => {
-    stampBookRef.current = nextBook;
-    setStampBook(nextBook);
-  }, []);
+  const [passport, setPassport] = useState<PassportResponse | null>(initialCache?.passport ?? null);
+  const [openedCards, setOpenedCards] = useState<PassportDiscoveredCard[]>(() => initialCache?.openedCards ?? []);
+  const [pageInfo, setPageInfo] = useState<PassportDiscoveredPageInfo | null>(initialCache?.pageInfo ?? null);
+  const [visitStamps, setVisitStamps] = useState<PassportStamp[]>(() => initialCache?.visitStamps ?? []);
+  const [nextStampBook, setNextStampBook] = useState(initialCache?.nextStampBook ?? 2);
+  const [savedIds, setSavedIds] = useState<Set<string>>(() => new Set(initialCache?.savedEventIds ?? []));
+  const [visitedIds, setVisitedIds] = useState<Set<string>>(() => new Set(initialCache?.visitedEventIds ?? []));
+  const [loading, setLoading] = useState(!initialCache);
+  const [error, setError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMoreOpened, setLoadingMoreOpened] = useState(false);
+  const [loadingMoreVisits, setLoadingMoreVisits] = useState(false);
+  const [openedPreviewLimit, setOpenedPreviewLimit] = useState(
+    initialCache?.openedPreviewLimit ?? OPENED_PREVIEW_STEP
+  );
+  const [visitPreviewLimit, setVisitPreviewLimit] = useState(initialCache?.visitPreviewLimit ?? VISIT_PREVIEW_STEP);
+  const [activeFilter, setActiveFilter] = useState<CollectionCardFilter>(initialCache?.activeFilter ?? 'all');
+  const [referenceDate, setReferenceDate] = useState(() => new Date());
+  const [toastMessage, setToastMessage] = useState<SavedVisitToastMessage | null>(null);
+  const [dataOwnerKey, setDataOwnerKey] = useState<string | null>(initialCache ? initialCacheKey : null);
+  const openedCardsRef = useRef(openedCards);
+  const pageInfoRef = useRef(pageInfo);
+  openedCardsRef.current = openedCards;
+  pageInfoRef.current = pageInfo;
 
   const showToast = useCallback((message: SavedVisitToastMessage) => {
-    if (toastTimerRef.current) {
-      clearTimeout(toastTimerRef.current);
-      toastTimerRef.current = null;
-    }
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToastMessage(message);
     toastOpacity.current.stopAnimation();
     toastOpacity.current.setValue(0);
@@ -257,543 +201,447 @@ function PassportPage() {
     }, 2600);
   }, []);
 
-  const loadPassport = useCallback(async (nextStampBook?: number) => {
-    const requestedStampBook = nextStampBook ?? stampBookRef.current;
-    setPassportError(false);
-    try {
-      let next = await getPassport({ stampBook: requestedStampBook });
-      let normalizedStampBook = getStampBookMeta(
-        next.visitedCount,
-        next.stampBook ?? requestedStampBook,
-        next.stampBookSize ?? STAMPS_PER_PASSPORT_BOOK,
-      ).bookIndex;
-      if (normalizedStampBook !== requestedStampBook) {
-        next = await getPassport({ stampBook: normalizedStampBook });
-        normalizedStampBook = getStampBookMeta(
-          next.visitedCount,
-          next.stampBook ?? normalizedStampBook,
-          next.stampBookSize ?? STAMPS_PER_PASSPORT_BOOK,
-        ).bookIndex;
-      }
-      setPassport(next);
-      setCurrentStampBook(normalizedStampBook);
-      setVisitedIds(new Set((next.visitedEventIds ?? next.stamps.map((stamp) => stamp.eventId)).map(String)));
-    } catch {
-      setPassportError(true);
-    } finally {
-      setPassportLoading(false);
-    }
-  }, [setCurrentStampBook]);
+  const hydrateCollectionCache = useCallback((key: string, cache: CollectionSessionCache) => {
+    activeCacheKeyRef.current = key;
+    lastFetchedAtRef.current = cache.fetchedAt;
+    openedCardsRef.current = cache.openedCards;
+    pageInfoRef.current = cache.pageInfo;
+    setPassport(cache.passport);
+    setOpenedCards(cache.openedCards);
+    setPageInfo(cache.pageInfo);
+    setVisitStamps(cache.visitStamps);
+    setNextStampBook(cache.nextStampBook);
+    setSavedIds(new Set(cache.savedEventIds));
+    setVisitedIds(new Set(cache.visitedEventIds));
+    setOpenedPreviewLimit(cache.openedPreviewLimit);
+    setVisitPreviewLimit(cache.visitPreviewLimit);
+    setActiveFilter(cache.activeFilter);
+    setDataOwnerKey(key);
+    setLoadingMoreOpened(false);
+    setLoadingMoreVisits(false);
+    setError(false);
+    setLoading(false);
+  }, []);
 
-  const loadSaved = useCallback(async () => {
-    setSavedError(false);
-    try {
-      const { orderedLikes, localItems } = await getOrderedLikes(isLoggedIn);
-      const localSnapshotMap = new Map(localItems.map((item) => [item.id, item]));
-      const uniqueLikes = orderedLikes.filter((item, index, all) =>
-        all.findIndex((candidate) => candidate.id === item.id) === index
-      );
-      if (uniqueLikes.length === 0) {
-        setSavedItems([]);
-        return;
-      }
-      const results = await Promise.allSettled(
-        uniqueLikes.slice(0, 50).map((item) => eventService.getEventById(item.id))
-      );
-      const nextItems = uniqueLikes.slice(0, 50).map((like, index) => {
-        const result = results[index];
-        if (result?.status === 'fulfilled' && result.value) {
-          return eventToTicketItem(result.value as EventWithWalk);
+  const loadCollection = useCallback(
+    async ({ preservePages = false }: { preservePages?: boolean } = {}) => {
+      const requestKey = collectionCacheKey(isLoggedIn, user?.id);
+      setError(false);
+      try {
+        const [nextPassport, nextSavedIds] = await Promise.all([
+          getPassport({ stampBook: 1, discoveredLimit: PAGE_SIZE }),
+          loadSavedEventIds(isLoggedIn),
+        ]);
+        if (activeCacheKeyRef.current !== requestKey) return;
+
+        const nextVisitedIds = new Set(nextPassport.visitedEventIds.map(String));
+        const nextRootPageInfo = nextPassport.discoveredPageInfo ?? {
+          limit: PAGE_SIZE,
+          // 구버전 서버는 cursor를 발급하지 않으므로 눌러도 동작하지 않는
+          // "더 보기"를 노출하지 않는다. 백엔드와 함께 배포되면 pageInfo가 온다.
+          hasMore: false,
+          nextCursor: null,
+        };
+        const hasPreservedPages = preservePages
+          && openedCardsRef.current.length > nextPassport.discoveredCards.length;
+
+        setPassport(nextPassport);
+        setSavedIds(nextSavedIds);
+        setVisitedIds(nextVisitedIds);
+        setVisitStamps((previous) =>
+          preservePages
+            ? mergeStamps(
+                previous.filter((stamp) => nextVisitedIds.has(stamp.eventId)),
+                nextPassport.stamps
+              )
+            : nextPassport.stamps
+        );
+        if (!preservePages) setNextStampBook(2);
+        if (preservePages) {
+          setOpenedCards((previous) => mergeDiscoveredCards(previous, nextPassport.discoveredCards));
+        } else {
+          setOpenedCards(uniqueDiscoveredCards(nextPassport.discoveredCards));
+          setOpenedPreviewLimit(OPENED_PREVIEW_STEP);
+          setVisitPreviewLimit(VISIT_PREVIEW_STEP);
         }
-        return createFallbackItem(like.id, localSnapshotMap.get(like.id));
-      });
-      setSavedItems(nextItems);
-    } catch (error) {
-      setSavedError(true);
-      if (__DEV__) console.error('[PassportPage][loadSaved]', error);
-    } finally {
-      setSavedLoading(false);
-    }
-  }, [isLoggedIn]);
+        setPageInfo(hasPreservedPages ? pageInfoRef.current ?? nextRootPageInfo : nextRootPageInfo);
+        lastFetchedAtRef.current = Date.now();
+        setDataOwnerKey(requestKey);
+      } catch (loadError) {
+        if (activeCacheKeyRef.current === requestKey) setError(true);
+        if (__DEV__) console.error('[PassportPage][loadCollection]', loadError);
+      } finally {
+        if (activeCacheKeyRef.current === requestKey) setLoading(false);
+      }
+    },
+    [isLoggedIn, user?.id]
+  );
 
   useEffect(() => {
     if (authLoading) return;
-    setPassportLoading(true);
-    setSavedLoading(true);
-    loadPassport().catch(() => {});
-    loadSaved().catch(() => {});
-  }, [authLoading, loadPassport, loadSaved]);
+    const nextKey = collectionCacheKey(isLoggedIn, user?.id);
+    const cached = collectionSessionCache.get(nextKey);
+    activeCacheKeyRef.current = nextKey;
+
+    if (cached) {
+      hydrateCollectionCache(nextKey, cached);
+      // 화면은 캐시로 즉시 그리고, 새 공개/저장/방문 상태는 뒤에서 맞춘다.
+      loadCollection({ preservePages: true }).catch(() => {});
+      return;
+    }
+
+    openedCardsRef.current = [];
+    pageInfoRef.current = null;
+    setPassport(null);
+    setOpenedCards([]);
+    setPageInfo(null);
+    setVisitStamps([]);
+    setNextStampBook(2);
+    setSavedIds(new Set());
+    setVisitedIds(new Set());
+    setOpenedPreviewLimit(OPENED_PREVIEW_STEP);
+    setVisitPreviewLimit(VISIT_PREVIEW_STEP);
+    setActiveFilter('all');
+    setLoadingMoreOpened(false);
+    setLoadingMoreVisits(false);
+    setDataOwnerKey(null);
+    setError(false);
+    setLoading(true);
+    loadCollection().catch(() => {});
+  }, [authLoading, hydrateCollectionCache, isLoggedIn, loadCollection, user?.id]);
+
+  useEffect(() => {
+    if (authLoading || !passport) return;
+    const currentKey = collectionCacheKey(isLoggedIn, user?.id);
+    if (dataOwnerKey !== currentKey || activeCacheKeyRef.current !== currentKey) return;
+    collectionSessionCache.set(currentKey, {
+      passport,
+      openedCards: [...openedCards],
+      pageInfo,
+      visitStamps: [...visitStamps],
+      nextStampBook,
+      savedEventIds: [...savedIds],
+      visitedEventIds: [...visitedIds],
+      openedPreviewLimit,
+      visitPreviewLimit,
+      activeFilter,
+      fetchedAt: lastFetchedAtRef.current || Date.now(),
+    });
+  }, [
+    activeFilter,
+    authLoading,
+    dataOwnerKey,
+    isLoggedIn,
+    nextStampBook,
+    openedCards,
+    openedPreviewLimit,
+    pageInfo,
+    passport,
+    savedIds,
+    user?.id,
+    visitPreviewLimit,
+    visitStamps,
+    visitedIds,
+  ]);
 
   useEffect(() => {
     const unsubscribe = subscribeStorageChange((event) => {
-      if (event.type === 'likes') loadSaved().catch(() => {});
+      if (event.type !== 'likes') return;
+      const requestKey = collectionCacheKey(isLoggedIn, user?.id);
+      loadSavedEventIds(isLoggedIn)
+        .then((next) => {
+          if (activeCacheKeyRef.current === requestKey) setSavedIds(next);
+        })
+        .catch(() => {});
     });
     return unsubscribe;
-  }, [loadSaved]);
+  }, [isLoggedIn, user?.id]);
 
   useEffect(() => {
+    let midnightTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleMidnightRefresh = () => {
+      const now = new Date();
+      const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      midnightTimer = setTimeout(() => {
+        setReferenceDate(new Date());
+        scheduleMidnightRefresh();
+      }, Math.max(1_000, nextMidnight.getTime() - now.getTime() + 250));
+    };
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setReferenceDate(new Date());
+    });
+    scheduleMidnightRefresh();
     return () => {
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      if (midnightTimer) clearTimeout(midnightTimer);
+      appStateSubscription.remove();
     };
   }, []);
+
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    },
+    []
+  );
+
+  const visitDateById = useMemo(
+    () => new Map(visitStamps.map((stamp) => [stamp.eventId, stamp.visitedAt])),
+    [visitStamps]
+  );
+
+  const overviewCards = useMemo<CollectionOverviewCard[]>(
+    () =>
+      openedCards.map((card) => ({
+        id: card.eventId,
+        title: card.title,
+        category: card.category,
+        region: card.region,
+        venue: card.venue,
+        imageUrl: card.imageUrl,
+        startAt: card.startAt,
+        endAt: card.endAt,
+        lat: card.lat,
+        lng: card.lng,
+        lastKnownStatus: toLastKnownStatus(card.status),
+        openedAt: card.discoveredAt,
+        isSaved: savedIds.has(card.eventId),
+        isVisited: visitedIds.has(card.eventId),
+        visitedAt: visitDateById.get(card.eventId) ?? null,
+      })),
+    [openedCards, savedIds, visitDateById, visitedIds]
+  );
+
+  const visitRecords = useMemo<CollectionVisitRecord[]>(
+    () =>
+      visitStamps.map((stamp) => ({
+        eventId: stamp.eventId,
+        title: stamp.title,
+        category: stamp.category,
+        region: stamp.region,
+        venue: stamp.venue,
+        imageUrl: stamp.imageUrl,
+        visitedAt: stamp.visitedAt,
+        status: stamp.status,
+      })),
+    [visitStamps]
+  );
+  const savedOpenedCount = useMemo(() => overviewCards.filter((card) => card.isSaved).length, [overviewCards]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([loadPassport(), loadSaved()]);
+      await loadCollection();
     } finally {
       setRefreshing(false);
     }
-  }, [loadPassport, loadSaved]);
+  }, [loadCollection]);
 
-  const handlePressStamp = useCallback((stamp: PassportStamp) => {
-    setActiveStamp(stamp);
+  const syncLocalLikeState = useCallback(async (card: CollectionOverviewCard, shouldSave: boolean) => {
+    const likes = await getLikesV2();
+    const exists = likes.items.some((item) => item.id === card.id);
+    if (exists === shouldSave) return;
+    await toggleLike(card.id, {
+      title: card.title,
+      startAt: card.startAt ?? undefined,
+      endAt: card.endAt ?? undefined,
+      venue: card.venue ?? undefined,
+      region: card.region ?? undefined,
+      imageUrl: card.imageUrl ?? undefined,
+      mainCategory: card.category ?? undefined,
+      subCategory: card.subCategory ?? undefined,
+    });
   }, []);
 
-  const stamps = passport?.stamps ?? [];
-
-  const handleCancelStamp = useCallback(async (stamp: PassportStamp) => {
-    if (cancelingStamp) return;
-    if (!isLoggedIn) {
-      await dialog.openAlert({
-        title: '로그인이 필요해요',
-        description: '도장은 로그인한 계정에 보관돼요.',
-      });
-      return;
-    }
-    setCancelingStamp(true);
-    setPassport((prev) => prev
-      ? {
-          ...prev,
-          stamps: prev.stamps.filter(
-            (candidate) => !(candidate.eventId === stamp.eventId && candidate.visitedAt === stamp.visitedAt),
-          ),
-          visitedCount: Math.max(prev.visitedCount - 1, 0),
+  const handleToggleSave = useCallback(
+    async (card: CollectionOverviewCard) => {
+      if (savingIdsRef.current.has(card.id)) return;
+      savingIdsRef.current.add(card.id);
+      const shouldSave = !savedIds.has(card.id);
+      if (shouldSave) addId(setSavedIds, card.id);
+      else removeId(setSavedIds, card.id);
+      try {
+        if (isLoggedIn) {
+          if (shouldSave) await http.post(`/users/me/likes/${card.id}`);
+          else await http.delete(`/users/me/likes/${card.id}`);
         }
-      : prev);
-    setActiveStamp(null);
-    try {
-      await unmarkVisited(stamp.eventId);
-      removeId(setVisitedIds, stamp.eventId);
-      await loadPassport(1).catch(() => {});
-    } catch (error) {
-      await loadPassport(1).catch(() => {});
-      showToast({ title: '도장을 취소하지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
-      if (__DEV__) console.error('[PassportPage][cancelStamp]', error);
-    } finally {
-      setCancelingStamp(false);
-    }
-  }, [cancelingStamp, dialog, isLoggedIn, loadPassport, showToast]);
+        await syncLocalLikeState(card, shouldSave);
+        if (shouldSave) userEventService.logEventSave(card.id).catch(() => {});
+        else userEventService.logEventUnsave(card.id).catch(() => {});
+        showToast({ title: shouldSave ? '가고 싶어요에 저장했어요' : '저장을 취소했어요' });
+      } catch (saveError) {
+        if (shouldSave) removeId(setSavedIds, card.id);
+        else addId(setSavedIds, card.id);
+        showToast({ title: '저장 상태를 바꾸지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
+        if (__DEV__) console.error('[PassportPage][toggleSave]', saveError);
+      } finally {
+        savingIdsRef.current.delete(card.id);
+      }
+    },
+    [isLoggedIn, savedIds, showToast, syncLocalLikeState]
+  );
 
-  const handleOpenEvent = useCallback((eventId: string) => {
-    setActiveStamp(null);
-    navigation.navigate('/events/:id', { id: eventId });
-  }, [navigation]);
-
-  const handleTicketPress = useCallback((item: SavedTicketItem) => {
-    navigation.navigate('/events/:id', { id: item.id });
-  }, [navigation]);
-
-  const handleDirections = useCallback(async (item: SavedTicketItem) => {
-    const placeName = [item.venue, item.region].filter(Boolean).join(' ');
-    if (!placeName) {
-      showToast({ title: '장소 정보가 아직 없어요' });
-      return;
-    }
-    try {
-      if (typeof item.lat === 'number' && typeof item.lng === 'number') {
-        await openNaverMap(item.lat, item.lng, placeName);
+  const handleToggleVisit = useCallback(
+    async (card: CollectionOverviewCard) => {
+      if (markingIdsRef.current.has(card.id)) return;
+      if (!isLoggedIn) {
+        await dialog.openAlert({
+          title: '로그인하면 방문 기록을 남길 수 있어요',
+          description: '다녀온 문화는 계정의 컬렉션에 안전하게 보관돼요.',
+        });
         return;
       }
-      await Linking.openURL(`https://map.naver.com/v5/search/${encodeURIComponent(placeName)}`);
-    } catch {
-      showToast({ title: '길찾기를 열지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
-    }
-  }, [showToast]);
 
-  const savedIds = useMemo(() => new Set(savedItems.map((item) => item.id)), [savedItems]);
-
-  const syncLocalLikeState = useCallback(async (item: SavedTicketItem, shouldSave: boolean) => {
-    const likes = await getLikesV2();
-    const exists = likes.items.some((like) => like.id === item.id);
-    if (exists === shouldSave) return;
-    await toggleLike(item.id, {
-      title: item.title,
-      startAt: item.startAt ?? undefined,
-      endAt: item.endAt ?? undefined,
-      venue: item.venue ?? undefined,
-      region: item.region ?? undefined,
-      mainCategory: item.category ?? undefined,
-      subCategory: item.subCategory ?? undefined,
-    });
-  }, []);
-
-  const handleToggleSave = useCallback(async (item: SavedTicketItem) => {
-    if (savingIdsRef.current.has(item.id)) return;
-    if (savingIds.has(item.id)) return;
-    savingIdsRef.current.add(item.id);
-    addId(setSavingIds, item.id);
-    const shouldSave = !savedIds.has(item.id);
-    try {
-      if (isLoggedIn) {
-        if (shouldSave) await http.post(`/users/me/likes/${item.id}`);
-        else await http.delete(`/users/me/likes/${item.id}`);
-      }
-      await syncLocalLikeState(item, shouldSave);
-      if (shouldSave) {
-        userEventService.logEventSave(item.id).catch(() => {});
-        setSavedItems((prev) => (
-          prev.some((saved) => saved.id === item.id) ? prev : [item, ...prev]
-        ));
-        showToast({ title: '가고 싶어요에 저장했어요' });
-      } else {
-        userEventService.logEventUnsave(item.id).catch(() => {});
-        setSavedItems((prev) => prev.filter((saved) => saved.id !== item.id));
-        showToast({ title: '저장을 취소했어요' });
-      }
-    } catch (error) {
-      showToast({ title: '저장 상태를 바꾸지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
-      loadSaved().catch(() => {});
-      if (__DEV__) console.error('[PassportPage][toggleSave]', error);
-    } finally {
-      savingIdsRef.current.delete(item.id);
-      removeId(setSavingIds, item.id);
-    }
-  }, [isLoggedIn, loadSaved, savedIds, savingIds, showToast, syncLocalLikeState]);
-
-  const handleVisit = useCallback(async (item: SavedTicketItem) => {
-    if (markingIdsRef.current.has(item.id)) return;
-    if (!isLoggedIn) {
-      await dialog.openAlert({
-        title: '로그인하면 도장을 남길 수 있어요',
-        description: '다녀온 문화 기록을 컬렉션에 안전하게 보관해요.',
-      });
-      return;
-    }
-    markingIdsRef.current.add(item.id);
-    const wasVisited = visitedIds.has(item.id);
-    addId(setMarkingIds, item.id);
-    if (wasVisited) {
-      removeId(setVisitedIds, item.id);
+      markingIdsRef.current.add(card.id);
+      const wasVisited = visitedIds.has(card.id);
+      if (wasVisited) removeId(setVisitedIds, card.id);
+      else addId(setVisitedIds, card.id);
       try {
-        await unmarkVisited(item.id);
-        await loadPassport(1).catch(() => {});
-      } catch (error) {
-        addId(setVisitedIds, item.id);
-        showToast({ title: '도장을 취소하지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
-        if (__DEV__) console.error('[PassportPage][unmarkVisited]', error);
-      } finally {
-        markingIdsRef.current.delete(item.id);
-        removeId(setMarkingIds, item.id);
-      }
-      return;
-    }
-    addId(setVisitedIds, item.id);
-    try {
-      await markVisited(item.id);
-      await loadPassport(1).catch(() => {});
-      if (!firstStampNoticeShownRef.current) {
-        firstStampNoticeShownRef.current = true;
+        if (wasVisited) await unmarkVisited(card.id);
+        else await markVisited(card.id);
+        await loadCollection({ preservePages: true });
         showToast({
-          title: '컬렉션에 방문 기록을 남겼어요',
-          description: '위치 인증 없이 추억으로 남겨요 (보상 아님)',
+          title: wasVisited ? '방문 기록을 취소했어요' : '컬렉션에 방문 기록을 남겼어요',
+          description: wasVisited ? undefined : '위치 인증 없이 추억으로 남겨요.',
         });
+      } catch (visitError) {
+        if (wasVisited) addId(setVisitedIds, card.id);
+        else removeId(setVisitedIds, card.id);
+        showToast({ title: '방문 기록을 바꾸지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
+        if (__DEV__) console.error('[PassportPage][toggleVisit]', visitError);
+      } finally {
+        markingIdsRef.current.delete(card.id);
       }
-    } catch (error) {
-      removeId(setVisitedIds, item.id);
-      showToast({ title: '도장을 남기지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
-      if (__DEV__) console.error('[PassportPage][markVisited]', error);
-    } finally {
-      markingIdsRef.current.delete(item.id);
-      removeId(setMarkingIds, item.id);
-    }
-  }, [dialog, isLoggedIn, loadPassport, showToast, visitedIds]);
-
-  const getVisitState = useCallback((id: string): VisitButtonState => {
-    if (visitedIds.has(id)) return 'visited';
-    if (markingIds.has(id)) return 'loading';
-    return 'idle';
-  }, [markingIds, visitedIds]);
-
-  const getSaveState = useCallback((id: string): SaveButtonState => {
-    if (savingIds.has(id)) return 'loading';
-    if (savedIds.has(id)) return 'saved';
-    return 'idle';
-  }, [savedIds, savingIds]);
-
-
-  const visitedCount = passport?.visitedCount ?? stamps.length;
-  const stampBookMeta = useMemo(
-    () => getStampBookMeta(
-      visitedCount,
-      stampBook,
-      passport?.stampBookSize ?? STAMPS_PER_PASSPORT_BOOK,
-    ),
-    [passport?.stampBookSize, stampBook, visitedCount],
-  );
-  const stampOrdinal = useMemo(() => {
-    if (!activeStamp) return null;
-    const idx = stamps.findIndex(
-      (stamp) => stamp.eventId === activeStamp.eventId && stamp.visitedAt === activeStamp.visitedAt,
-    );
-    if (idx < 0 || stampBookMeta.endOrdinal <= 0) return null;
-    return Math.max(stampBookMeta.startOrdinal, stampBookMeta.endOrdinal - idx);
-  }, [activeStamp, stampBookMeta.endOrdinal, stampBookMeta.startOrdinal, stamps]);
-  const discoveredItems = useMemo(
-    () => (passport?.discoveredCards ?? []).map(discoveredToTicketItem),
-    [passport?.discoveredCards],
-  );
-  const discoveredCount = passport?.discoveredCount ?? discoveredItems.length;
-  const passportNo = passport?.passportNo ?? '----';
-  const issueMonth = useMemo(() => deriveIssueMonth(stamps), [stamps]);
-  const tasteCategories = passport?.tasteCategories ?? [];
-  const pendingSavedCount = useMemo(
-    () => savedItems.filter((item) => !visitedIds.has(item.id)).length,
-    [savedItems, visitedIds],
+    },
+    [dialog, isLoggedIn, loadCollection, showToast, visitedIds]
   );
 
-  const bookPages = useMemo(
-    () => buildPassportBookPages<SavedTicketItem, PassportStamp>({
-      discoveredItems,
-      wishlistItems: savedItems,
-      stamps,
-      visitedIds,
-      passportLoading,
-      passportError,
-      savedLoading,
-      savedError,
-    }).filter((page) => page.section !== 'cover'),
+  const handleDirections = useCallback(
+    async (card: CollectionOverviewCard) => {
+      const placeName = [card.venue, card.region].filter(Boolean).join(' ');
+      if (!placeName) {
+        showToast({ title: '장소 정보가 아직 없어요' });
+        return;
+      }
+      try {
+        if (typeof card.lat === 'number' && typeof card.lng === 'number') {
+          await openNaverMap(card.lat, card.lng, placeName);
+        } else {
+          await Linking.openURL(`https://map.naver.com/v5/search/${encodeURIComponent(placeName)}`);
+        }
+      } catch {
+        showToast({ title: '길찾기를 열지 못했어요', description: '잠시 후 다시 시도해 주세요.' });
+      }
+    },
+    [showToast]
+  );
+
+  const handleViewMoreOpened = useCallback(
+    async (filter: CollectionCardFilter) => {
+      if (loadingMoreOpened) return;
+      const filteredCount = filterCollectionCards(overviewCards, filter, referenceDate).length;
+      if (openedPreviewLimit < filteredCount) {
+        setOpenedPreviewLimit((previous) => previous + OPENED_PREVIEW_STEP);
+        return;
+      }
+      if (!pageInfo?.hasMore || !pageInfo.nextCursor) return;
+
+      const requestKey = activeCacheKeyRef.current;
+      setLoadingMoreOpened(true);
+      try {
+        let mergedCards = openedCardsRef.current;
+        let nextPageInfo = pageInfo;
+        let nextCursor: string | null = pageInfo.nextCursor;
+        const visibleBefore = mergedCards.filter((card) => (
+          discoveredCardMatchesFilter(card, filter, savedIds, referenceDate)
+        )).length;
+
+        // 저장/지난 문화처럼 희소한 필터는 다음 한 묶음에 결과가 없을 수 있다.
+        // 한 번의 탭에서 최대 세 묶음까지 찾아 체감상 무반응인 경로를 줄인다.
+        for (let attempt = 0; attempt < 3 && nextCursor; attempt += 1) {
+          const requestedCursor: string = nextCursor;
+          const next = await getDiscoveredCards({ limit: PAGE_SIZE, cursor: requestedCursor });
+          if (activeCacheKeyRef.current !== requestKey) return;
+          mergedCards = mergeDiscoveredCards(mergedCards, next.items);
+          nextPageInfo = next.pageInfo;
+          nextCursor = next.pageInfo.hasMore ? next.pageInfo.nextCursor : null;
+
+          const visibleAfter = mergedCards.filter((card) => (
+            discoveredCardMatchesFilter(card, filter, savedIds, referenceDate)
+          )).length;
+          if (visibleAfter > visibleBefore || !nextPageInfo.hasMore) break;
+          if (!nextCursor || nextCursor === requestedCursor) break;
+        }
+
+        const visibleAfter = mergedCards.filter((card) => (
+          discoveredCardMatchesFilter(card, filter, savedIds, referenceDate)
+        )).length;
+        openedCardsRef.current = mergedCards;
+        pageInfoRef.current = nextPageInfo;
+        setOpenedCards(mergedCards);
+        setPageInfo(nextPageInfo);
+        if (visibleAfter > visibleBefore) {
+          setOpenedPreviewLimit((previous) => previous + OPENED_PREVIEW_STEP);
+        } else {
+          showToast({
+            title: nextPageInfo.hasMore ? '이 조건의 카드를 더 찾고 있어요' : '이 조건의 카드는 여기까지예요',
+            description: nextPageInfo.hasMore ? '버튼을 한 번 더 누르면 더 지난 기록을 찾아봐요.' : undefined,
+          });
+        }
+      } catch (paginationError) {
+        showToast({ title: '지난 카드를 더 불러오지 못했어요' });
+        if (__DEV__) console.error('[PassportPage][loadMoreOpened]', paginationError);
+      } finally {
+        setLoadingMoreOpened(false);
+      }
+    },
     [
-      discoveredItems,
-      passportError,
-      passportLoading,
-      savedError,
-      savedItems,
-      savedLoading,
-      stamps,
-      visitedIds,
-    ],
+      loadingMoreOpened,
+      openedPreviewLimit,
+      overviewCards,
+      pageInfo,
+      referenceDate,
+      savedIds,
+      showToast,
+    ]
   );
 
-  const bookmarkIndexes = useMemo(() => getPassportSectionIndexes(bookPages), [bookPages]);
-  const activeBookmark = getActivePassportBookmark(bookPages, currentBookPage);
-  const bookmarkItems: PassportBookmarkItem[] = useMemo(() => [
-    { section: 'discovered', label: `공개 ${discoveredCount}` },
-    { section: 'wishlist', label: `저장 ${pendingSavedCount}` },
-    { section: 'stamps', label: `방문 ${visitedCount}` },
-  ], [discoveredCount, pendingSavedCount, visitedCount]);
-
-  useEffect(() => {
-    if (bookPages.length === 0) return;
-    const maxIndex = bookPages.length - 1;
-    const clampedIndex = Math.min(currentBookPage, maxIndex);
-    const desiredSection = desiredBookSectionRef.current;
-    const clampedPage = bookPages[clampedIndex];
-    const desiredIndex = bookPages.findIndex((page) => page.section === desiredSection);
-    const targetIndex = clampedPage?.section === desiredSection
-      ? clampedIndex
-      : desiredIndex >= 0
-        ? desiredIndex
-        : clampedIndex;
-
-    const alignmentKey = `${pageWidth}:${targetIndex}`;
-
-    if (targetIndex !== currentBookPage) {
-      setCurrentBookPage(targetIndex);
-      if (pageWidth > 0) {
-        requestAnimationFrame(() => {
-          bookListRef.current?.scrollToIndex({ index: targetIndex, animated: false });
-        });
-        lastAlignedBookPageRef.current = alignmentKey;
-      }
+  const handleViewMoreVisits = useCallback(async () => {
+    if (loadingMoreVisits) return;
+    if (visitPreviewLimit < visitStamps.length) {
+      setVisitPreviewLimit((previous) => previous + VISIT_PREVIEW_STEP);
       return;
     }
+    if (!passport || nextStampBook > passport.stampBookCount) return;
 
-    if (pageWidth > 0 && lastAlignedBookPageRef.current !== alignmentKey) {
-      requestAnimationFrame(() => {
-        bookListRef.current?.scrollToIndex({ index: targetIndex, animated: false });
-      });
-      lastAlignedBookPageRef.current = alignmentKey;
+    const requestKey = activeCacheKeyRef.current;
+    setLoadingMoreVisits(true);
+    try {
+      const next = await getPassport({ stampBook: nextStampBook, discoveredLimit: 1 });
+      if (activeCacheKeyRef.current !== requestKey) return;
+      const merged = mergeStamps(visitStamps, next.stamps);
+      setVisitStamps(merged);
+      setPassport((previous) => previous ? {
+        ...previous,
+        visitedCount: next.visitedCount,
+        stampBookCount: next.stampBookCount,
+      } : next);
+      setNextStampBook((previous) => previous + 1);
+      if (merged.length > visitStamps.length) {
+        setVisitPreviewLimit((previous) => previous + VISIT_PREVIEW_STEP);
+      } else {
+        showToast({ title: '방문 기록은 여기까지예요' });
+      }
+    } catch (paginationError) {
+      showToast({ title: '지난 방문 기록을 더 불러오지 못했어요' });
+      if (__DEV__) console.error('[PassportPage][loadMoreVisits]', paginationError);
+    } finally {
+      setLoadingMoreVisits(false);
     }
-  }, [bookPages, currentBookPage, pageWidth]);
+  }, [loadingMoreVisits, nextStampBook, passport, showToast, visitPreviewLimit, visitStamps]);
 
-  useEffect(() => {
-    desiredBookSectionRef.current = activeBookmark;
-  }, [activeBookmark]);
-
-  const handleBookMomentumEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (bookPages.length === 0) return;
-    const nextIndex = Math.round(event.nativeEvent.contentOffset.x / Math.max(pageWidth, 1));
-    const validIndex = Math.max(0, Math.min(nextIndex, bookPages.length - 1));
-    desiredBookSectionRef.current = bookPages[validIndex]?.section ?? 'discovered';
-    setCurrentBookPage(validIndex);
-  }, [bookPages, pageWidth]);
-
-  const handlePressBookmark = useCallback((section: PassportBookmarkSection) => {
-    desiredBookSectionRef.current = section;
-    const index = bookmarkIndexes[section];
-    setCurrentBookPage(index);
-    if (pageWidth <= 0) return;
-    bookListRef.current?.scrollToIndex({ index, animated: true });
-    lastAlignedBookPageRef.current = `${pageWidth}:${index}`;
-  }, [bookmarkIndexes, pageWidth]);
-
-  const handleSelectStampBook = useCallback((nextBook: number) => {
-    const nextMeta = getStampBookMeta(
-      visitedCount,
-      nextBook,
-      passport?.stampBookSize ?? STAMPS_PER_PASSPORT_BOOK,
-    );
-    if (nextMeta.bookIndex === stampBook && !passportError) return;
-
-    setActiveStamp(null);
-    setCurrentStampBook(nextMeta.bookIndex);
-    setPassport((prev) => prev ? { ...prev, stamps: [] } : prev);
-    setPassportLoading(true);
-    desiredBookSectionRef.current = 'stamps';
-    const index = bookmarkIndexes.stamps;
-    setCurrentBookPage(index);
-    if (pageWidth > 0) {
-      bookListRef.current?.scrollToIndex({ index, animated: true });
-      lastAlignedBookPageRef.current = `${pageWidth}:${index}`;
-    }
-    loadPassport(nextMeta.bookIndex).catch(() => {});
-  }, [
-    bookmarkIndexes.stamps,
-    loadPassport,
-    pageWidth,
-    passport?.stampBookSize,
-    passportError,
-    setCurrentStampBook,
-    stampBook,
-    visitedCount,
-  ]);
-
-  const handleScrollToIndexFailed = useCallback((info: ScrollToIndexFailure) => {
-    const offset = Math.max(info.averageItemLength, pageWidth, 1) * info.index;
-    requestAnimationFrame(() => {
-      bookListRef.current?.scrollToOffset({ offset, animated: false });
-    });
-  }, [pageWidth]);
-
-  const renderStateCopy = useCallback((section: PassportContentSection) => {
-    if (section === 'wishlist') return getPassportSectionCopy('wishlist');
-    if (section === 'stamps') return getPassportSectionCopy('visited');
-    return getPassportSectionCopy('discovered');
-  }, []);
-
-  const discoveredBookPageCount = useMemo(
-    () => bookPages.filter((candidate) => candidate.type === 'discovered').length,
-    [bookPages],
+  const hasMoreVisits = Boolean(
+    visitPreviewLimit < visitStamps.length || (passport && nextStampBook <= passport.stampBookCount)
   );
-  const wishlistBookPageCount = useMemo(
-    () => bookPages.filter((candidate) => candidate.type === 'wishlist').length,
-    [bookPages],
-  );
-
-  const renderBookPage = useCallback(({ item }: { item: PassportBookPage<SavedTicketItem, PassportStamp> }) => {
-    if (item.type === 'cover') {
-      return (
-        <PassportCoverPage
-          width={pageWidth}
-          passportNo={passportNo}
-          discoveredCount={discoveredCount}
-          wishlistCount={pendingSavedCount}
-          visitedCount={visitedCount}
-        />
-      );
-    }
-    if (item.type === 'identity') {
-      return (
-        <PassportIdentityPage
-          width={pageWidth}
-          passportNo={passportNo}
-          discoveredCount={discoveredCount}
-          wishlistCount={pendingSavedCount}
-          visitedCount={visitedCount}
-          monthLabel={issueMonth}
-          tasteCategories={tasteCategories}
-        />
-      );
-    }
-    if (item.type === 'discovered') {
-      return (
-        <PassportTicketBookPage
-          width={pageWidth}
-          copy={getPassportSectionCopy('discovered')}
-          pageIndex={item.pageIndex}
-          totalPages={discoveredBookPageCount}
-          items={item.items}
-          getVisitState={getVisitState}
-          getSaveState={getSaveState}
-          onPressTicket={handleTicketPress}
-          onDirections={handleDirections}
-          onVisit={handleVisit}
-          onToggleSave={handleToggleSave}
-        />
-      );
-    }
-    if (item.type === 'wishlist') {
-      return (
-        <PassportTicketBookPage
-          width={pageWidth}
-          copy={getPassportSectionCopy('wishlist')}
-          pageIndex={item.pageIndex}
-          totalPages={wishlistBookPageCount}
-          items={item.items}
-          getVisitState={getVisitState}
-          getSaveState={getSaveState}
-          onPressTicket={handleTicketPress}
-          onDirections={handleDirections}
-          onVisit={handleVisit}
-          onToggleSave={handleToggleSave}
-        />
-      );
-    }
-    if (item.type === 'stamps') {
-      return (
-        <PassportStampPage
-          width={pageWidth}
-          stamps={item.stamps}
-          pageIndex={item.pageIndex}
-          bookLabel={stampBookMeta.label}
-          rangeLabel={stampBookMeta.rangeLabel}
-          pageMonthLabel={pageMonthLabel(item.stamps)}
-          onPressStamp={handlePressStamp}
-        />
-      );
-    }
-    return (
-      <PassportBookStatePage
-        width={pageWidth}
-        section={item.section}
-        copy={renderStateCopy(item.section)}
-        state={item.type}
-        onRetry={refresh}
-      />
-    );
-  }, [
-    discoveredBookPageCount,
-    discoveredCount,
-    getSaveState,
-    getVisitState,
-    handleDirections,
-    handlePressStamp,
-    handleTicketPress,
-    handleToggleSave,
-    handleVisit,
-    issueMonth,
-    pageWidth,
-    passportNo,
-    pendingSavedCount,
-    refresh,
-    renderStateCopy,
-    stampBookMeta.label,
-    stampBookMeta.rangeLabel,
-    tasteCategories,
-    visitedCount,
-    wishlistBookPageCount,
-  ]);
 
   return (
     <View style={styles.container}>
@@ -801,206 +649,137 @@ function PassportPage() {
         style={styles.scroll}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={ON_BG_MUTED} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={MUTED} />}
       >
         <ScrollViewInertialBackground topColor={BG} bottomColor={BG} />
 
         <Text style={styles.navEyebrow}>THE CULTURE ARCHIVE</Text>
         <Text style={styles.navTitle}>나의 컬렉션</Text>
-        <Text style={styles.navDescription}>광고로 공개하고, 저장하고, 직접 다녀온 문화를 한곳에 모았어요.</Text>
+        <Text style={styles.navDescription}>내가 연 카드에서 다음 문화를 고르고, 다녀온 기억까지 남겨요.</Text>
 
-        <PassportIndexRail
-          items={bookmarkItems}
-          activeSection={activeBookmark}
-          onPress={handlePressBookmark}
-        />
-        <View style={styles.bookStage}>
-          <FlatList
-            ref={bookListRef}
-            horizontal
-            pagingEnabled
-            data={bookPages}
-            keyExtractor={(item) => item.key}
-            renderItem={renderBookPage}
-            showsHorizontalScrollIndicator={false}
-            onMomentumScrollEnd={handleBookMomentumEnd}
-            onScrollToIndexFailed={handleScrollToIndexFailed}
-            getItemLayout={(_, index) => ({
-              length: pageWidth,
-              offset: pageWidth * index,
-              index,
-            })}
-          />
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryMain}>
+            <Text style={styles.summaryValue}>{passport?.discoveredCount ?? openedCards.length}</Text>
+            <Text style={styles.summaryLabel}>장의 문화 카드</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryMetric}>
+            <Text style={styles.summaryMetricValue}>{passport?.visitedCount ?? visitedIds.size}</Text>
+            <Text style={styles.summaryMetricLabel}>방문</Text>
+          </View>
+          <View style={styles.summaryMetric}>
+            <Text style={styles.summaryMetricValue}>{savedOpenedCount}</Text>
+            <Text style={styles.summaryMetricLabel}>저장</Text>
+          </View>
         </View>
-        <Text style={styles.bookHint}>탭을 누르거나 옆으로 넘겨 컬렉션을 살펴보세요</Text>
-        <PassportDiscoverySummary
-          passport={passport}
-          onExplore={() => navigation.navigate('/')}
-          onOpenSaved={() => handlePressBookmark('wishlist')}
-        />
-        {activeBookmark === 'stamps' && stampBookMeta.totalBooks > 1 ? (
-          <View style={styles.stampBookPager}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="새 도장권 보기"
-              disabled={!stampBookMeta.hasNewerBook || passportLoading}
-              onPress={() => handleSelectStampBook(stampBook - 1)}
-              style={[
-                styles.stampBookButton,
-                !stampBookMeta.hasNewerBook || passportLoading ? styles.stampBookButtonDisabled : null,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.stampBookButtonText,
-                  !stampBookMeta.hasNewerBook || passportLoading ? styles.stampBookButtonTextDisabled : null,
-                ]}
-              >
-                새 권
-              </Text>
-            </Pressable>
-            <View style={styles.stampBookStatus}>
-              <Text style={styles.stampBookTitle} numberOfLines={1}>{stampBookMeta.label}</Text>
-              <Text style={styles.stampBookRange} numberOfLines={1}>{stampBookMeta.rangeLabel}</Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="지난 도장권 보기"
-              disabled={!stampBookMeta.hasOlderBook || passportLoading}
-              onPress={() => handleSelectStampBook(stampBook + 1)}
-              style={[
-                styles.stampBookButton,
-                !stampBookMeta.hasOlderBook || passportLoading ? styles.stampBookButtonDisabled : null,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.stampBookButtonText,
-                  !stampBookMeta.hasOlderBook || passportLoading ? styles.stampBookButtonTextDisabled : null,
-                ]}
-              >
-                지난 권
-              </Text>
+
+        {loading && openedCards.length === 0 ? (
+          <View style={styles.stateCard}>
+            <ActivityIndicator color={RED} />
+            <Text style={styles.stateTitle}>컬렉션을 불러오고 있어요</Text>
+          </View>
+        ) : error && openedCards.length === 0 ? (
+          <View style={styles.stateCard}>
+            <Text style={styles.stateTitle}>컬렉션을 불러오지 못했어요</Text>
+            <Text style={styles.stateDescription}>잠시 후 다시 확인해 주세요.</Text>
+            <Pressable accessibilityRole="button" onPress={() => loadCollection()} style={styles.retryButton}>
+              <Text style={styles.retryButtonText}>다시 불러오기</Text>
             </Pressable>
           </View>
-        ) : null}
+        ) : (
+          <CollectionOverviewSections
+            openedCards={overviewCards}
+            visitRecords={visitRecords}
+            filter={activeFilter}
+            onFilterChange={(next) => {
+              setActiveFilter(next);
+              setOpenedPreviewLimit(OPENED_PREVIEW_STEP);
+            }}
+            openedPreviewLimit={openedPreviewLimit}
+            visitPreviewLimit={visitPreviewLimit}
+            referenceDate={referenceDate}
+            hasMoreOpened={Boolean(pageInfo?.hasMore && pageInfo.nextCursor)}
+            isLoadingMoreOpened={loadingMoreOpened}
+            hasMoreVisits={hasMoreVisits}
+            isLoadingMoreVisits={loadingMoreVisits}
+            onPressActiveCard={(card) => navigation.navigate('/events/:id', { id: card.id })}
+            onToggleSave={handleToggleSave}
+            onToggleVisit={handleToggleVisit}
+            onDirections={handleDirections}
+            onViewAllOpened={handleViewMoreOpened}
+            onViewAllVisits={hasMoreVisits ? handleViewMoreVisits : undefined}
+            onOpenNewCard={() => (navigation.replace as (route: string) => void)('/')}
+          />
+        )}
       </ScrollView>
 
       <SavedVisitToast message={toastMessage} opacity={toastOpacity.current} />
-      <StampDetailSheet
-        stamp={activeStamp}
-        ordinal={stampOrdinal}
-        canceling={cancelingStamp}
-        onClose={() => setActiveStamp(null)}
-        onCancelStamp={handleCancelStamp}
-        onOpenEvent={handleOpenEvent}
-      />
       <BottomTabBar currentTab="passport" />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: BG,
-  },
-  scroll: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 124,
-  },
+  container: { flex: 1, backgroundColor: BG },
+  scroll: { flex: 1 },
+  content: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 124 },
+  navEyebrow: { color: RED, fontSize: 10.5, lineHeight: 14, fontWeight: '900', letterSpacing: 1.6 },
   navTitle: {
-    color: ON_BG,
+    marginTop: 5,
+    color: TEXT,
     fontSize: 34,
     lineHeight: 41,
     fontWeight: '900',
     letterSpacing: -1,
-    marginTop: 5,
     fontFamily: 'Noto Serif KR',
-    marginBottom: 4,
   },
-  navEyebrow: {
-    color: '#A52822',
-    fontSize: 10.5,
-    lineHeight: 14,
-    fontWeight: '900',
-    letterSpacing: 1.6,
-  },
-  navDescription: {
-    color: ON_BG_MUTED,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  bookStage: {
-    height: 430,
-    marginHorizontal: -20,
-    position: 'relative',
-  },
-  bookHint: {
-    marginTop: 12,
-    textAlign: 'center',
-    color: ON_BG_MUTED,
-    fontSize: 12.5,
-    fontWeight: '700',
-  },
-  stampBookPager: {
-    marginTop: 14,
-    minHeight: 52,
+  navDescription: { marginTop: 4, color: MUTED, fontSize: 12, lineHeight: 18, fontWeight: '600' },
+  summaryCard: {
+    marginTop: 20,
+    marginBottom: 32,
+    minHeight: 92,
+    borderRadius: 22,
+    paddingHorizontal: 18,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-  },
-  stampBookButton: {
-    minWidth: 74,
-    minHeight: 42,
-    borderRadius: 999,
+    backgroundColor: '#EFE9D8',
     borderWidth: 1,
-    borderColor: 'rgba(203,161,94,0.54)',
+    borderColor: '#E0D6BE',
+  },
+  summaryMain: { flex: 1, minWidth: 0 },
+  summaryValue: { color: TEXT, fontSize: 28, lineHeight: 34, fontWeight: '900', fontFamily: 'Noto Serif KR' },
+  summaryLabel: { marginTop: 1, color: MUTED, fontSize: 10.5, fontWeight: '800' },
+  summaryDivider: { width: 1, height: 42, marginHorizontal: 14, backgroundColor: '#D4C9AF' },
+  summaryMetric: { width: 48, alignItems: 'center' },
+  summaryMetricValue: { color: RED, fontSize: 18, lineHeight: 24, fontWeight: '900' },
+  summaryMetricLabel: { marginTop: 2, color: MUTED, fontSize: 9.5, fontWeight: '800' },
+  stateCard: {
+    minHeight: 240,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(203,161,94,0.16)',
+    padding: 22,
+    backgroundColor: '#EFE9D8',
   },
-  stampBookButtonDisabled: {
-    borderColor: 'rgba(176,164,142,0.2)',
-    backgroundColor: 'rgba(176,164,142,0.08)',
+  stateTitle: { marginTop: 12, color: TEXT, fontSize: 16, lineHeight: 22, fontWeight: '900', textAlign: 'center' },
+  stateDescription: {
+    marginTop: 5,
+    color: MUTED,
+    fontSize: 11.5,
+    lineHeight: 17,
+    fontWeight: '600',
+    textAlign: 'center',
   },
-  stampBookButtonText: {
-    color: GOLD,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  stampBookButtonTextDisabled: {
-    color: 'rgba(176,164,142,0.38)',
-  },
-  stampBookStatus: {
-    flex: 1,
-    minWidth: 0,
+  retryButton: {
+    marginTop: 16,
+    minHeight: 44,
+    borderRadius: 999,
+    paddingHorizontal: 18,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: RED,
   },
-  stampBookTitle: {
-    color: ON_BG,
-    fontSize: 14,
-    lineHeight: 19,
-    fontWeight: '900',
-    fontFamily: 'Noto Serif KR',
-  },
-  stampBookRange: {
-    marginTop: 2,
-    color: ON_BG_MUTED,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '700',
-  },
+  retryButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
 });
 
 export default PassportPage;

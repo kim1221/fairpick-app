@@ -1,4 +1,10 @@
-import type { Card, CardsTodayResponse, PersonalizationProfile } from '../../services/cardsService';
+import type {
+  Card,
+  CardsTodayResponse,
+  CardsTodayV2Response,
+  LockedCardPreview,
+  PersonalizationProfile,
+} from '../../services/cardsService';
 
 export type HomeCopy = {
   title: string;
@@ -28,14 +34,29 @@ export const AD_LOADING_COPY: HomeCopy = {
   description: '광고를 불러오는 중이에요. 잠시 후 다시 눌러 주세요.',
 };
 
+export const POOL_EMPTY_COPY: HomeCopy = {
+  title: '열어볼 새로운 카드를 모두 발견했어요',
+  description: '공개한 카드는 컬렉션에서 다시 볼 수 있어요. 새로운 이벤트가 들어오면 새 카드가 준비돼요.',
+};
+
+export const LOAD_FAILED_COPY: HomeCopy = {
+  title: '카드를 불러오지 못했어요',
+  description: '네트워크 상태를 확인하고 다시 시도해 주세요.',
+};
+
 export const AD_SHOW_REQUEST_TIMEOUT_MS = 60_000;
 export const AD_SHOW_TERMINAL_TIMEOUT_MS = 240_000;
 
 const REWARD_AD_PROGRESS_EVENTS = new Set(['requested', 'show', 'impression', 'clicked']);
+const ALREADY_OPENED_CARD_ERROR_CODES = new Set([
+  'EVENT_ALREADY_OPENED',
+  'CARD_ALREADY_OPENED',
+  'EVENT_ALREADY_EARNED_TODAY',
+]);
 
 const DAILY_LIMIT_COPY: HomeCopy = {
-  title: '오늘 컬처카드 50장을 모두 열었어요',
-  description: '공개한 카드는 여권에서 다시 보고, 내일 새로운 카드를 열 수 있어요.',
+  title: '오늘 준비한 컬처카드는 여기까지예요',
+  description: '내일 새로운 카드가 도착해요. 공개한 카드는 컬렉션에서 다시 볼 수 있어요.',
 };
 
 const EARN_FAILED_COPY: HomeCopy = {
@@ -68,12 +89,78 @@ export function isDailyLimitReachedError(error: unknown): boolean {
     || code === 'DAILY_OPEN_LIMIT_REACHED';
 }
 
+export function isAlreadyOpenedCardError(error: unknown): boolean {
+  return getServerStatus(error) === 409
+    && ALREADY_OPENED_CARD_ERROR_CODES.has(getServerErrorCode(error) ?? '');
+}
+
 export function getEarnFailureCopy(error: unknown): HomeCopy {
   return isDailyLimitReachedError(error) ? DAILY_LIMIT_COPY : EARN_FAILED_COPY;
 }
 
 export function isRewardAdProgressEvent(eventType: string): boolean {
   return REWARD_AD_PROGRESS_EVENTS.has(eventType);
+}
+
+export type LockedCardChoice = {
+  label: string;
+  description: string;
+};
+
+export type TodayCardsAvailability = 'ready' | 'daily_limit' | 'pool_empty';
+
+export function getTodayCardsAvailability(
+  data: Pick<
+    CardsTodayV2Response,
+    'lockedCards' | 'dailyEarned' | 'dailyLimit' | 'dailyOpenCount' | 'dailyOpenLimit'
+  >,
+): TodayCardsAvailability {
+  if (hasReachedDailyLimit(data)) return 'daily_limit';
+  return data.lockedCards.length === 0 ? 'pool_empty' : 'ready';
+}
+
+export function removeLockedCardPreview(
+  data: CardsTodayV2Response,
+  cardToken: string,
+): CardsTodayV2Response {
+  return {
+    ...data,
+    lockedCards: data.lockedCards.filter((card) => card.cardToken !== cardToken),
+  };
+}
+
+/**
+ * 잠금 응답에 포함된 비식별 힌트만으로 선택지 카피를 만든다.
+ * 이벤트 제목·장소·이미지는 공개 전에 사용하지 않는다.
+ */
+export function getLockedCardChoice(card: LockedCardPreview, index: number): LockedCardChoice {
+  const category = card.category?.trim() || '문화';
+  const reasons = card.reasonTags ?? [];
+  const isEndingSoon = card.timingLabel.includes('마감');
+  const hasTasteReason = reasons.some((reason) => reason.startsWith('취향 '));
+
+  let label: string;
+  if (reasons.includes('내 주변')) {
+    label = `가까운 ${category}`;
+  } else if (reasons.includes('곧 마감') || isEndingSoon) {
+    label = `놓치기 전 ${category}`;
+  } else if (hasTasteReason) {
+    label = `취향 ${category}`;
+  } else if (reasons.includes('새로 등록')) {
+    label = `새로운 ${category}`;
+  } else {
+    label = index === 0 ? `오늘의 ${category}` : `${category} 한 장`;
+  }
+
+  const description = [card.distanceLabel, card.timingLabel]
+    .filter((value): value is string => Boolean(value))
+    .slice(0, 2)
+    .join(' · ');
+
+  return {
+    label,
+    description: description || card.areaLabel || '힌트는 카드에서 확인해요',
+  };
 }
 
 export function getCardNextAction(card: Card): CardNextAction {
