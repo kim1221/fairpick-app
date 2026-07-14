@@ -11,7 +11,7 @@ const cardsRouter = require('../../../src/routes/cards').default;
 const visitsRouter = require('../../../src/routes/visits').default;
 const passportRouter = require('../../../src/routes/passport').default;
 const ticketsRouter = require('../../../src/routes/tickets').default;
-const { sealLockedCard } = require('../../../src/services/cardToken');
+const { openLockedCard, sealLockedCard } = require('../../../src/services/cardToken');
 
 const userId = '00000000-0000-4000-8000-000000000001';
 
@@ -82,6 +82,58 @@ function todayKst() {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+function mockCardClient(query, { readSlots, writeAssignments } = {}) {
+  const state = {
+    connectCount: 0,
+    releaseCount: 0,
+    lockQueries: [],
+    transactions: [],
+  };
+
+  pool.query = query;
+  pool.connect = async () => {
+    state.connectCount += 1;
+    const transactionEvents = [];
+    state.transactions.push(transactionEvents);
+    return {
+      async query(sql, params = []) {
+        const text = String(sql);
+        if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') {
+          transactionEvents.push(text);
+          return { rows: [], rowCount: 0 };
+        }
+        if (text.includes('pg_advisory_xact_lock(')) {
+          assert.deepEqual(params, [userId]);
+          assert.match(text, /hashtext\(\$1::text\), hashtext\('culturecard-open'\)/);
+          state.lockQueries.push({ text, params });
+          transactionEvents.push('xact-lock');
+          return { rows: [{ pg_advisory_xact_lock: null }], rowCount: 1 };
+        }
+        if (text.includes('FROM user_daily_card_slots slot')) {
+          return readSlots ? readSlots(params, text) : { rows: [] };
+        }
+        if (
+          text.includes('WITH selected AS') &&
+          text.includes('INSERT INTO user_daily_card_slots') &&
+          text.includes('INSERT INTO user_card_impressions')
+        ) {
+          transactionEvents.push('assignment');
+          return writeAssignments
+            ? writeAssignments(params, text)
+            : { rows: [], rowCount: Array.isArray(params[4]) ? params[4].length : 0 };
+        }
+        return query(sql, params);
+      },
+      release() {
+        state.releaseCount += 1;
+        transactionEvents.push('release');
+      },
+    };
+  };
+
+  return state;
+}
+
 test('POST /api/tickets/earn retires the unverified legacy reward path', async () => {
   const response = await request(ticketsRouter, 'POST', '/earn', {
     eventId: 'arbitrary-event-id',
@@ -95,7 +147,7 @@ test('POST /api/tickets/earn retires the unverified legacy reward path', async (
 
 test('GET /api/cards/today returns three unopened cards, morePool, and ticket totals', async () => {
   const canonicalSql = [];
-  pool.query = async (sql, params) => {
+  mockCardClient(async (sql, params) => {
     const text = String(sql);
     if (text.includes('user_card_impressions')) return { rows: [] };
     if (text.includes('user_likes')) return { rows: [] }; // 취향 쿼리(빈 취향)
@@ -121,18 +173,22 @@ test('GET /api/cards/today returns three unopened cards, morePool, and ticket to
       };
     }
     throw new Error(`Unexpected query: ${text}`);
-  };
+  });
 
   const { status, body } = await request(makeApp(cardsRouter), 'GET', '/today');
 
   assert.equal(status, 200);
   assert.equal(body.today.length, 3);
-  assert.deepEqual(body.today.map((card) => card.eventId), ['event-1', 'event-3', 'event-4']);
+  assert.deepEqual(
+    new Set(body.today.map((card) => card.eventId)),
+    new Set(['event-1', 'event-3', 'event-4']),
+  );
   assert.equal(body.today.every((card) => card.opened === false), true);
-  assert.equal(body.today[0].category, '전시');
-  assert.equal(body.today[0].blurb, '첫 줄 소개');
-  assert.equal(typeof body.today[0].dday, 'number');
-  assert.equal(body.today[0].walkMinutes, null);
+  const exhibitionCard = body.today.find((card) => card.category === '전시');
+  assert.ok(exhibitionCard);
+  assert.equal(exhibitionCard.blurb, '첫 줄 소개');
+  assert.equal(typeof exhibitionCard.dday, 'number');
+  assert.equal(exhibitionCard.walkMinutes, null);
   assert.equal(body.morePool.some((card) => card.eventId === 'event-2'), false);
   assert.equal(body.morePool.every((card) => card.opened === false), true);
   assert.equal(body.ticketCount, 7);
@@ -146,7 +202,7 @@ test('GET /api/cards/today returns three unopened cards, morePool, and ticket to
     signalCount: 0,
     topCategories: [],
   });
-  assert.equal(Array.isArray(body.today[0].reasonTags), true);
+  assert.equal(body.today.every((card) => Array.isArray(card.reasonTags)), true);
   assert.match(canonicalSql[0], /is_deleted\s*=\s*false/i);
 });
 
@@ -173,7 +229,7 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
     { id: 'locked-c', title: '비밀 팝업', content_key: 'c', main_category: '팝업', region: '서울', venue: 'C존', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(7), image_url: 'https://img/c.jpg', overview: 'C 소개', buzz_score: 20 },
   ];
 
-  pool.query = async (sql) => {
+  mockCardClient(async (sql) => {
     const text = String(sql);
     if (text.includes('user_card_impressions')) return { rows: [], rowCount: 0 };
     if (text.includes('user_likes')) return { rows: [] };
@@ -182,7 +238,8 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
     }
     if (text.includes('MAX(el.earn_date)')) return { rows: [opened] };
     if (text.includes('FROM user_ticket_earn_log el')) {
-      return { rows: [{ event_id: opened.id, earn_date: todayKst(), dedupe_key: opened.content_key }] };
+      assert.match(text, /COUNT\(\*\)::int AS count/);
+      return { rows: [{ count: 1 }] };
     }
     if (text.includes('FROM canonical_events')) {
       assert.match(text, /FROM user_card_opened_keys opened/);
@@ -190,7 +247,7 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
       return { rows: fresh };
     }
     throw new Error(`Unexpected v2 query: ${text}`);
-  };
+  });
 
   const todayResponse = await request(makeApp(cardsRouter), 'GET', '/v2/today');
   assert.equal(todayResponse.status, 200);
@@ -300,9 +357,513 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
   assert.equal(ledgerClaimCount, 2);
 });
 
+test('GET /api/cards/v2/today expands core categories instead of exhausting the pool on nearby popups', async () => {
+  const lat = 37.5665;
+  const lng = 126.9780;
+  const canonicalCalls = [];
+  const popupRows = Array.from({ length: 60 }, (_, index) => ({
+    id: `near-popup-${index + 1}`,
+    title: `가까운 팝업 ${index + 1}`,
+    content_key: `near-popup-key-${index + 1}`,
+    main_category: '팝업',
+    venue: '팝업 거리',
+    region: '서울',
+    start_at: isoDaysFromNow(-1),
+    end_at: isoDaysFromNow(7),
+    image_url: null,
+    overview: '가까운 팝업',
+    distance_m: 200 + index * 20,
+    buzz_score: 90 - (index % 10),
+  }));
+  const exhibition = {
+    id: 'exhibition-at-10km',
+    title: '조금 더 넓혀 찾은 전시',
+    content_key: 'exhibition-at-10km-key',
+    main_category: '전시',
+    venue: '전시관',
+    region: '서울',
+    start_at: isoDaysFromNow(-1),
+    end_at: isoDaysFromNow(10),
+    image_url: null,
+    overview: '10km 안의 전시',
+    distance_m: 8_000,
+    buzz_score: 50,
+  };
+  const fallbackPerformance = {
+    id: 'performance-from-fallback',
+    title: '전국 풀에서 찾은 공연',
+    content_key: 'performance-from-fallback-key',
+    main_category: '공연',
+    venue: '공연장',
+    region: '부산',
+    start_at: isoDaysFromNow(-1),
+    end_at: isoDaysFromNow(12),
+    image_url: null,
+    overview: '반경 밖의 미공개 공연',
+    buzz_score: 40,
+  };
+  const eventById = new Map(
+    [...popupRows, exhibition, fallbackPerformance].map((event) => [event.id, event]),
+  );
+  const dailySlots = new Map();
+  const impressions = new Map();
+
+  mockCardClient(async (sql, params = []) => {
+    const text = String(sql);
+    if (text.includes('SELECT event_id FROM user_card_impressions')) {
+      return {
+        rows: [...impressions]
+          .filter(([, lastShownOn]) => lastShownOn < todayKst())
+          .map(([event_id]) => ({ event_id })),
+      };
+    }
+    if (text.includes('user_likes')) return { rows: [] };
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 3, daily_earned: 0, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('MAX(el.earn_date)')) return { rows: [] };
+    if (text.includes('FROM user_ticket_earn_log el')) return { rows: [{ count: 0 }] };
+    if (text.includes('FROM canonical_events')) {
+      canonicalCalls.push({ text, params });
+      const requestedCategory = params.find((param) => ['전시', '공연', '팝업'].includes(param));
+      const forRequestedCategory = (rows) => requestedCategory
+        ? rows.filter((row) => row.main_category === requestedCategory)
+        : rows;
+
+      if (text.includes('distance_m')) {
+        if (params.includes(3_000)) return { rows: forRequestedCategory(popupRows) };
+        if (params.includes(10_000)) {
+          return { rows: forRequestedCategory([...popupRows, exhibition]) };
+        }
+        if (params.includes(50_000)) {
+          return { rows: forRequestedCategory([...popupRows, exhibition]) };
+        }
+        throw new Error(`Unexpected nearby radius params: ${JSON.stringify(params)}`);
+      }
+
+      return { rows: forRequestedCategory([fallbackPerformance]) };
+    }
+    throw new Error(`Unexpected category-diversity query: ${text}`);
+  }, {
+    readSlots: async () => ({
+      rows: [...dailySlots].flatMap(([slot_index, slot]) => {
+        const event = eventById.get(slot.eventId);
+        return event ? [{
+          ...event,
+          slot_index,
+          slot_category: slot.category,
+          slot_event_id: slot.eventId,
+          slot_usable: true,
+        }] : [];
+      }),
+    }),
+    writeAssignments: async (params) => {
+      const [assignedUserId, assignedOn, slotIndexes, categories, eventIds] = params;
+      assert.equal(assignedUserId, userId);
+      assert.equal(assignedOn, todayKst());
+      dailySlots.clear();
+      slotIndexes.forEach((slotIndex, index) => dailySlots.set(slotIndex, {
+        category: categories[index],
+        eventId: eventIds[index],
+      }));
+      eventIds.forEach((eventId) => impressions.set(eventId, assignedOn));
+      return { rows: [], rowCount: eventIds.length };
+    },
+  });
+
+  const { status, body } = await request(
+    makeApp(cardsRouter),
+    'GET',
+    `/v2/today?lat=${lat}&lng=${lng}`,
+  );
+
+  assert.equal(status, 200);
+  assert.equal(body.lockedCards.length, 3);
+  assert.deepEqual(
+    new Set(body.lockedCards.map((card) => card.category)),
+    new Set(['전시', '공연', '팝업']),
+  );
+  const radiiUsed = canonicalCalls
+    .flatMap((call) => call.params)
+    .filter((param) => [3_000, 10_000, 50_000].includes(param));
+  assert.equal(radiiUsed.includes(3_000), true);
+  assert.equal(radiiUsed.includes(10_000), true);
+  assert.equal(radiiUsed.includes(50_000), true);
+  assert.equal(canonicalCalls.some((call) => !call.text.includes('distance_m')), true);
+
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test('GET /api/cards/v2/today relaxes recent impressions only for a core category with no fresh card', async () => {
+  const previousKstDay = new Date(Date.now() + 9 * 60 * 60 * 1000 - 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const impressions = new Map([['recent-only-exhibition', previousKstDay]]);
+  const freshCandidates = [
+    { id: 'recent-only-exhibition', title: '최근에 본 유일한 전시', content_key: 'recent-only-exhibition-key', main_category: '전시', venue: '전시관', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(10), image_url: null, overview: null, buzz_score: 1 },
+    ...Array.from({ length: 3 }, (_, index) => ({ id: `fresh-performance-${index + 1}`, title: `새 공연 ${index + 1}`, content_key: `fresh-performance-key-${index + 1}`, main_category: '공연', venue: '공연장', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(10), image_url: null, overview: null, buzz_score: 90 - index })),
+    ...Array.from({ length: 3 }, (_, index) => ({ id: `fresh-popup-${index + 1}`, title: `새 팝업 ${index + 1}`, content_key: `fresh-popup-key-${index + 1}`, main_category: '팝업', venue: '팝업존', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(10), image_url: null, overview: null, buzz_score: 90 - index })),
+  ];
+  const eventById = new Map(freshCandidates.map((event) => [event.id, event]));
+  const dailySlots = new Map();
+  let assignmentEventIds = null;
+
+  mockCardClient(async (sql, params = []) => {
+    const text = String(sql);
+    if (text.includes('SELECT event_id FROM user_card_impressions')) {
+      return {
+        rows: [...impressions]
+          .filter(([, lastShownOn]) => lastShownOn < todayKst())
+          .map(([event_id]) => ({ event_id })),
+      };
+    }
+    if (text.includes('user_likes')) return { rows: [] };
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 0, daily_earned: 0, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('MAX(el.earn_date)')) return { rows: [] };
+    if (text.includes('FROM user_ticket_earn_log el')) return { rows: [{ count: 0 }] };
+    if (text.includes('FROM canonical_events')) return { rows: freshCandidates };
+    throw new Error(`Unexpected per-category-impression query: ${text}`);
+  }, {
+    readSlots: async () => ({
+      rows: [...dailySlots].flatMap(([slot_index, slot]) => {
+        const event = eventById.get(slot.eventId);
+        return event ? [{
+          ...event,
+          slot_index,
+          slot_category: slot.category,
+          slot_event_id: slot.eventId,
+          slot_usable: true,
+        }] : [];
+      }),
+    }),
+    writeAssignments: async (params) => {
+      const [assignedUserId, assignedOn, slotIndexes, categories, eventIds] = params;
+      assert.equal(assignedUserId, userId);
+      assert.equal(assignedOn, todayKst());
+      assert.equal(new Set(slotIndexes).size, slotIndexes.length);
+      assignmentEventIds = eventIds.slice();
+      dailySlots.clear();
+      slotIndexes.forEach((slotIndex, index) => dailySlots.set(slotIndex, {
+        category: categories[index],
+        eventId: eventIds[index],
+      }));
+      eventIds.forEach((eventId) => impressions.set(eventId, assignedOn));
+      return { rows: [], rowCount: eventIds.length };
+    },
+  });
+
+  const { status, body } = await request(makeApp(cardsRouter), 'GET', '/v2/today');
+
+  assert.equal(status, 200);
+  assert.equal(body.lockedCards.length, 3);
+  assert.deepEqual(
+    new Set(body.lockedCards.map((card) => card.category)),
+    new Set(['전시', '공연', '팝업']),
+  );
+  const decodedIds = body.lockedCards.map((card) => openLockedCard(card.cardToken).eventId);
+  assert.equal(decodedIds.includes('recent-only-exhibition'), true);
+  assert.deepEqual(new Set(assignmentEventIds), new Set(decodedIds));
+  assert.deepEqual(
+    new Set([...dailySlots.values()].map((slot) => slot.eventId)),
+    new Set(decodedIds),
+  );
+  assert.equal(impressions.get('recent-only-exhibition'), todayKst());
+});
+
+test('GET /api/cards/v2/today keeps one daily slot across location changes and expands only an opened slot', async () => {
+  const lat = 37.5665;
+  const lng = 126.9780;
+  const openedEventIds = new Set();
+  const dailySlots = new Map();
+  const assignmentWrites = [];
+  const impressionReadCounts = [];
+  const radiusCalls = [];
+  let fallbackCalls = 0;
+  const candidate = (id, category, distanceM, { fresh = false, buzz = 0 } = {}) => ({
+    id,
+    title: id,
+    content_key: `${id}-key`,
+    main_category: category,
+    venue: `${category} 장소`,
+    region: '서울',
+    start_at: isoDaysFromNow(-1),
+    end_at: isoDaysFromNow(10),
+    image_url: null,
+    overview: null,
+    distance_m: distanceM,
+    created_at: fresh ? new Date().toISOString() : isoDaysFromNow(-100),
+    buzz_score: buzz,
+  });
+  const initialExhibition = candidate('pinned-exhibition', '전시', 300);
+  const initialPerformance = candidate('pinned-performance', '공연', 400);
+  const initialPopup = candidate('pinned-popup', '팝업', 500);
+  const wideExhibition = candidate('wide-exhibition', '전시', 40_000);
+  // 첫 배정 뒤 새로 유입되며, pin이 없다면 기존 두 카드보다 점수가 높다.
+  const newHighPerformance = candidate('new-high-performance', '공연', 450, { fresh: true, buzz: 100 });
+  const newHighPopup = candidate('new-high-popup', '팝업', 550, { fresh: true, buzz: 100 });
+  const eventById = new Map([
+    initialExhibition,
+    initialPerformance,
+    initialPopup,
+    wideExhibition,
+    newHighPerformance,
+    newHighPopup,
+  ].map((event) => [event.id, event]));
+  const previousKstDay = new Date(Date.now() + 9 * 60 * 60 * 1000 - 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const impressions = new Map([
+    [initialPerformance.id, previousKstDay],
+    [newHighPerformance.id, previousKstDay],
+    ...Array.from({ length: 8 }, (_, index) => [`older-performance-${index + 1}`, previousKstDay]),
+  ]);
+
+  mockCardClient(async (sql, params = []) => {
+    const text = String(sql);
+    if (text.includes('SELECT event_id FROM user_card_impressions')) {
+      const rows = [...impressions]
+        .filter(([, lastShownOn]) => lastShownOn < todayKst())
+        .map(([event_id]) => ({ event_id }));
+      impressionReadCounts.push(rows.length);
+      return { rows };
+    }
+    if (text.includes('user_likes')) return { rows: [] };
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 3, daily_earned: 0, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('MAX(el.earn_date)')) return { rows: [] };
+    if (text.includes('FROM user_ticket_earn_log el')) {
+      return { rows: [{ count: openedEventIds.size }] };
+    }
+    if (text.includes('FROM canonical_events')) {
+      if (!text.includes('distance_m')) {
+        fallbackCalls += 1;
+        return { rows: [] };
+      }
+
+      const radius = [3_000, 10_000, 50_000].find((value) => params.includes(value));
+      assert.ok(radius);
+      radiusCalls.push({
+        phase: openedEventIds.size > 0 ? 'after-open' : assignmentWrites.length === 0 ? 'initial' : 'same-day',
+        radius,
+      });
+
+      const rows = [initialPerformance, initialPopup];
+      if (assignmentWrites.length > 0) rows.push(newHighPerformance, newHighPopup);
+      if (!openedEventIds.has(initialExhibition.id)) rows.push(initialExhibition);
+      if (radius === 50_000) rows.push(wideExhibition);
+      return { rows: rows.filter((event) => !openedEventIds.has(event.id)) };
+    }
+    throw new Error(`Unexpected pinned-selection query: ${text}`);
+  }, {
+    readSlots: async () => ({
+      rows: [...dailySlots].flatMap(([slot_index, slot]) => {
+        const event = eventById.get(slot.eventId);
+        return event ? [{
+          ...event,
+          slot_index,
+          slot_category: slot.category,
+          slot_event_id: slot.eventId,
+          slot_usable: !openedEventIds.has(slot.eventId),
+        }] : [];
+      }),
+    }),
+    writeAssignments: async (params) => {
+      const [assignedUserId, assignedOn, slotIndexes, categories, eventIds] = params;
+      assert.equal(assignedUserId, userId);
+      assert.equal(assignedOn, todayKst());
+      assert.equal(new Set(slotIndexes).size, slotIndexes.length);
+      assignmentWrites.push({
+        slotIndexes: slotIndexes.slice(),
+        categories: categories.slice(),
+        eventIds: eventIds.slice(),
+      });
+      dailySlots.clear();
+      slotIndexes.forEach((slotIndex, index) => dailySlots.set(slotIndex, {
+        category: categories[index],
+        eventId: eventIds[index],
+      }));
+      eventIds.forEach((eventId) => impressions.set(eventId, assignedOn));
+      return { rows: [], rowCount: eventIds.length };
+    },
+  });
+
+  const readSelection = (response) => new Map(response.body.lockedCards.map((card, slotIndex) => {
+    const payload = openLockedCard(card.cardToken);
+    assert.ok(payload);
+    return [slotIndex, {
+      category: card.category,
+      eventId: payload.eventId,
+      visualSeed: card.visualSeed,
+    }];
+  }));
+
+  const firstPath = `/v2/today?lat=${lat}&lng=${lng}`;
+  const movedPath = '/v2/today?lat=35.1796&lng=129.0756';
+  const first = await request(makeApp(cardsRouter), 'GET', firstPath);
+  const second = await request(makeApp(cardsRouter), 'GET', movedPath);
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+
+  const firstSelection = readSelection(first);
+  const secondSelection = readSelection(second);
+  const firstByCategory = new Map(
+    [...firstSelection].map(([slotIndex, selection]) => [selection.category, { slotIndex, ...selection }]),
+  );
+  assert.equal(firstByCategory.get('전시').eventId, initialExhibition.id);
+  assert.equal(firstByCategory.get('공연').eventId, initialPerformance.id);
+  assert.equal(firstByCategory.get('팝업').eventId, initialPopup.id);
+  assert.deepEqual(secondSelection, firstSelection);
+  assert.deepEqual(
+    second.body.lockedCards.map((card) => ({ category: card.category, visualSeed: card.visualSeed })),
+    first.body.lockedCards.map((card) => ({ category: card.category, visualSeed: card.visualSeed })),
+  );
+  assert.deepEqual(
+    new Set([...firstSelection.values()].map((selection) => selection.category)),
+    new Set(['전시', '공연', '팝업']),
+  );
+  assert.equal(impressions.get(initialExhibition.id), todayKst());
+  assert.equal(impressions.get(initialPerformance.id), todayKst());
+  assert.equal(impressions.get(initialPopup.id), todayKst());
+  assert.equal(dailySlots.get(firstByCategory.get('전시').slotIndex).eventId, initialExhibition.id);
+  assert.equal(dailySlots.get(firstByCategory.get('공연').slotIndex).eventId, initialPerformance.id);
+  assert.equal(dailySlots.get(firstByCategory.get('팝업').slotIndex).eventId, initialPopup.id);
+  assert.equal(radiusCalls.some((call) => call.phase === 'same-day'), false);
+  assert.ok(impressionReadCounts[0] >= 10);
+
+  const exhibitionSlotIndex = firstByCategory.get('전시').slotIndex;
+  const openedExhibitionId = firstByCategory.get('전시').eventId;
+  openedEventIds.add(openedExhibitionId);
+  const afterOpen = await request(makeApp(cardsRouter), 'GET', movedPath);
+  assert.equal(afterOpen.status, 200);
+  assert.equal(afterOpen.body.dailyOpenCount, 1);
+
+  const afterOpenSelection = readSelection(afterOpen);
+  assert.equal(afterOpenSelection.get(exhibitionSlotIndex).eventId, wideExhibition.id);
+  for (const [slotIndex, selection] of firstSelection) {
+    if (slotIndex === exhibitionSlotIndex) continue;
+    assert.deepEqual(afterOpenSelection.get(slotIndex), selection);
+  }
+  assert.equal([...afterOpenSelection.values()].some(({ eventId }) => eventId === newHighPerformance.id), false);
+  assert.equal([...afterOpenSelection.values()].some(({ eventId }) => eventId === newHighPopup.id), false);
+  assert.deepEqual(
+    radiusCalls.filter((call) => call.phase === 'after-open').map((call) => call.radius),
+    [3_000, 10_000, 50_000],
+  );
+  assert.equal(fallbackCalls, 0);
+  assert.equal(assignmentWrites.length, 3);
+  assert.equal(dailySlots.get(exhibitionSlotIndex).eventId, wideExhibition.id);
+  assert.equal(
+    dailySlots.get(firstByCategory.get('공연').slotIndex).eventId,
+    initialPerformance.id,
+  );
+  assert.equal(dailySlots.get(firstByCategory.get('팝업').slotIndex).eventId, initialPopup.id);
+});
+
+test('GET /api/cards/v2/today preserves three popup positions and uses the open-card advisory namespace', async () => {
+  const popupCandidates = Array.from({ length: 5 }, (_, index) => ({
+    id: `popup-only-${index + 1}`,
+    title: `팝업 전용 후보 ${index + 1}`,
+    content_key: `popup-only-key-${index + 1}`,
+    main_category: '팝업',
+    venue: '팝업 거리',
+    region: '서울',
+    start_at: isoDaysFromNow(-1),
+    end_at: isoDaysFromNow(10),
+    image_url: null,
+    overview: null,
+    created_at: isoDaysFromNow(-5),
+    buzz_score: 100 - index,
+  }));
+  const eventById = new Map(popupCandidates.map((event) => [event.id, event]));
+  const dailySlots = new Map();
+  const impressions = new Map();
+  let fallbackReadCount = 0;
+
+  const cardDb = mockCardClient(async (sql) => {
+    const text = String(sql);
+    if (text.includes('SELECT event_id FROM user_card_impressions')) {
+      return { rows: [] };
+    }
+    if (text.includes('user_likes')) return { rows: [] };
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 0, daily_earned: 0, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('MAX(el.earn_date)')) return { rows: [] };
+    if (text.includes('FROM user_ticket_earn_log el')) return { rows: [{ count: 0 }] };
+    if (text.includes('FROM canonical_events')) {
+      fallbackReadCount += 1;
+      assert.doesNotMatch(text, /distance_m/);
+      return { rows: popupCandidates };
+    }
+    throw new Error(`Unexpected popup-only query: ${text}`);
+  }, {
+    readSlots: async () => ({
+      rows: [...dailySlots].flatMap(([slot_index, slot]) => {
+        const event = eventById.get(slot.eventId);
+        return event ? [{
+          ...event,
+          slot_index,
+          slot_category: slot.category,
+          slot_event_id: slot.eventId,
+          slot_usable: true,
+        }] : [];
+      }),
+    }),
+    writeAssignments: async (params, text) => {
+      const [assignedUserId, assignedOn, slotIndexes, categories, eventIds] = params;
+      assert.equal(assignedUserId, userId);
+      assert.equal(assignedOn, todayKst());
+      assert.deepEqual(slotIndexes, [0, 1, 2]);
+      assert.deepEqual(categories, ['팝업', '팝업', '팝업']);
+      assert.equal(new Set(eventIds).size, 3);
+      assert.match(text, /ON CONFLICT \(user_id, slot_index\)/);
+      dailySlots.clear();
+      slotIndexes.forEach((slotIndex, index) => dailySlots.set(slotIndex, {
+        category: categories[index],
+        eventId: eventIds[index],
+      }));
+      eventIds.forEach((eventId) => impressions.set(eventId, assignedOn));
+      return { rows: [], rowCount: eventIds.length };
+    },
+  });
+
+  const readPositions = (response) => new Map(response.body.lockedCards.map((card, slotIndex) => {
+    const payload = openLockedCard(card.cardToken);
+    assert.ok(payload);
+    return [slotIndex, {
+      eventId: payload.eventId,
+      category: card.category,
+      visualSeed: card.visualSeed,
+    }];
+  }));
+
+  const first = await request(makeApp(cardsRouter), 'GET', '/v2/today');
+  const second = await request(makeApp(cardsRouter), 'GET', '/v2/today');
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+
+  const firstPositions = readPositions(first);
+  const secondPositions = readPositions(second);
+  assert.equal(firstPositions.size, 3);
+  assert.equal([...firstPositions.values()].every((slot) => slot.category === '팝업'), true);
+  assert.deepEqual(secondPositions, firstPositions);
+  assert.equal(dailySlots.size, 3);
+  assert.equal(fallbackReadCount, 1);
+  assert.deepEqual(cardDb.transactions, [
+    ['BEGIN', 'xact-lock', 'assignment', 'COMMIT', 'release'],
+    ['BEGIN', 'xact-lock', 'assignment', 'COMMIT', 'release'],
+  ]);
+  assert.equal(cardDb.connectCount, 2);
+  assert.equal(cardDb.releaseCount, 2);
+  assert.equal(cardDb.lockQueries.length, 2);
+});
+
 test('GET /api/cards/v2/today never falls back to lifetime-opened ids or dedupe aliases', async () => {
   let canonicalCalls = 0;
-  pool.query = async (sql, params = []) => {
+  mockCardClient(async (sql, params = []) => {
     const text = String(sql);
     if (text.includes('user_card_impressions')) return { rows: [] };
     if (text.includes('user_likes')) return { rows: [] };
@@ -312,13 +873,12 @@ test('GET /api/cards/v2/today never falls back to lifetime-opened ids or dedupe 
     if (text.includes('MAX(el.earn_date)')) return { rows: [] };
     if (text.includes('FROM user_ticket_earn_log el')) {
       assert.doesNotMatch(text, /earn_date\s*>=/);
-      return {
-        rows: [{ event_id: 'opened-years-ago', earn_date: '2024-01-01' }],
-      };
+      assert.match(text, /COUNT\(\*\)::int AS count/);
+      return { rows: [{ count: 0 }] };
     }
     if (text.includes('FROM canonical_events')) {
       canonicalCalls += 1;
-      assert.deepEqual(params, [todayKst(), userId, 300]);
+      assert.deepEqual(params, [todayKst(), userId, 60, 300]);
       assert.match(text, /NOT EXISTS[\s\S]*FROM user_card_opened_keys opened/);
       assert.match(text, /opened\.key_type = 'event_id'/);
       assert.match(text, /ARRAY_REMOVE\(ARRAY\[event\.content_key, event\.canonical_key\], NULL\)/);
@@ -326,7 +886,7 @@ test('GET /api/cards/v2/today never falls back to lifetime-opened ids or dedupe 
       return { rows: [] };
     }
     throw new Error(`Unexpected lifetime v2 query: ${text}`);
-  };
+  });
 
   const { status, body } = await request(makeApp(cardsRouter), 'GET', '/v2/today');
 
@@ -395,7 +955,7 @@ test('POST /api/cards/v2/open rejects a stale token after a lifetime dedupe matc
 });
 
 test('GET /api/cards/today explains weighted taste personalization', async () => {
-  pool.query = async (sql) => {
+  mockCardClient(async (sql) => {
     const text = String(sql);
     if (text.includes('user_card_impressions')) return { rows: [] };
     if (text.includes('user_likes')) {
@@ -423,7 +983,7 @@ test('GET /api/cards/today explains weighted taste personalization', async () =>
       };
     }
     throw new Error(`Unexpected query: ${text}`);
-  };
+  });
 
   const { status, body } = await request(makeApp(cardsRouter), 'GET', '/today');
 
@@ -443,7 +1003,7 @@ test('GET /api/cards/today expands nearby radius, excludes opened events, divers
   const lat = 37.5665;
   const lng = 126.9780;
   const canonicalCalls = [];
-  pool.query = async (sql, params = []) => {
+  mockCardClient(async (sql, params = []) => {
     const text = String(sql);
     if (text.includes('user_card_impressions')) return { rows: [] };
     if (text.includes('user_likes')) return { rows: [] }; // 취향 쿼리(빈 취향)
@@ -498,7 +1058,7 @@ test('GET /api/cards/today expands nearby radius, excludes opened events, divers
       };
     }
     throw new Error(`Unexpected query: ${text}`);
-  };
+  });
 
   const { status, body } = await request(makeApp(cardsRouter), 'GET', `/today?lat=${lat}&lng=${lng}`);
 
@@ -509,7 +1069,10 @@ test('GET /api/cards/today expands nearby radius, excludes opened events, divers
   assert.ok(radiiUsed.includes(3000) && radiiUsed.includes(10000) && radiiUsed.includes(50000));
   // v2 점수화는 시드로 매일 회전 → 정확한 eventId는 비결정적. 카테고리 다양성은 우선순위 고정이라 결정적.
   assert.equal(body.today.length, 3);
-  assert.deepEqual(body.today.map((card) => card.category), ['전시', '공연', '팝업']);
+  assert.deepEqual(
+    new Set(body.today.map((card) => card.category)),
+    new Set(['전시', '공연', '팝업']),
+  );
   // 위치 있으면 모든 카드에 walkMinutes(양수) 채워짐
   assert.equal(body.today.every((card) => typeof card.walkMinutes === 'number' && card.walkMinutes > 0), true);
   // 오늘 3장은 서로 다른 이벤트 & 제공된 후보에서 나옴
@@ -521,7 +1084,7 @@ test('GET /api/cards/today expands nearby radius, excludes opened events, divers
 
 test('GET /api/cards/today soft-excludes recently shown cards for fresh discovery', async () => {
   const ev = (id, cat, buzz) => ({ id, title: id, main_category: cat, venue: 'V', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: null, buzz_score: buzz, created_at: null });
-  pool.query = async (sql) => {
+  mockCardClient(async (sql) => {
     const text = String(sql);
     if (text.includes('user_card_impressions')) return { rows: [{ event_id: 'event-a' }, { event_id: 'event-b' }] };
     if (text.includes('user_likes')) return { rows: [] };
@@ -532,7 +1095,7 @@ test('GET /api/cards/today soft-excludes recently shown cards for fresh discover
       return { rows: [ev('event-a', '전시', 90), ev('event-b', '공연', 90), ev('event-c', '전시', 10), ev('event-d', '공연', 10), ev('event-e', '팝업', 10), ev('event-f', '축제', 10)] };
     }
     throw new Error(`Unexpected query: ${text}`);
-  };
+  });
 
   const { status, body } = await request(makeApp(cardsRouter), 'GET', '/today');
 
@@ -545,7 +1108,7 @@ test('GET /api/cards/today soft-excludes recently shown cards for fresh discover
 
 test('GET /api/cards/today relaxes impression exclusion when the pool would be empty', async () => {
   const ev = (id, cat) => ({ id, title: id, main_category: cat, venue: 'V', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: null, buzz_score: 10, created_at: null });
-  pool.query = async (sql) => {
+  mockCardClient(async (sql) => {
     const text = String(sql);
     if (text.includes('user_card_impressions')) return { rows: [{ event_id: 'event-a' }, { event_id: 'event-b' }, { event_id: 'event-c' }] };
     if (text.includes('user_likes')) return { rows: [] };
@@ -556,7 +1119,7 @@ test('GET /api/cards/today relaxes impression exclusion when the pool would be e
       return { rows: [ev('event-a', '전시'), ev('event-b', '공연'), ev('event-c', '팝업')] };
     }
     throw new Error(`Unexpected query: ${text}`);
-  };
+  });
 
   const { status, body } = await request(makeApp(cardsRouter), 'GET', '/today');
 
@@ -568,8 +1131,17 @@ test('GET /api/cards/today keeps partial nearby candidates and fills the rest fr
   const lat = 37.5665;
   const lng = 126.9780;
   const canonicalCalls = [];
-  pool.query = async (sql, params = []) => {
+  mockCardClient(async (sql, params = []) => {
     const text = String(sql);
+    if (text.includes('FROM user_daily_card_slots slot')) return { rows: [] };
+    if (text.includes('SELECT event_id FROM user_card_impressions')) return { rows: [] };
+    if (
+      text.includes('WITH selected AS') &&
+      text.includes('INSERT INTO user_daily_card_slots') &&
+      text.includes('INSERT INTO user_card_impressions')
+    ) {
+      return { rows: [], rowCount: params[3]?.length ?? 0 };
+    }
     if (text.includes('FROM user_tickets')) {
       return { rows: [{ ticket_count: 3, daily_earned: 2, daily_earned_date: todayKst() }] };
     }
@@ -599,19 +1171,22 @@ test('GET /api/cards/today keeps partial nearby candidates and fills the rest fr
       };
     }
     throw new Error(`Unexpected query: ${text}`);
-  };
+  });
 
   const { status, body } = await request(makeApp(cardsRouter), 'GET', `/today?lat=${lat}&lng=${lng}`);
 
   assert.equal(status, 200);
   assert.ok(canonicalCalls.some((call) => call.text.includes('distance_m')));
   assert.ok(canonicalCalls.some((call) => !call.text.includes('distance_m')));
-  assert.deepEqual(body.today.map((card) => card.eventId), ['near-1', 'near-2', 'fallback-1']);
+  assert.deepEqual(
+    new Set(body.today.map((card) => card.eventId)),
+    new Set(['near-1', 'near-2', 'fallback-1']),
+  );
 });
 
 test('GET /api/cards/today lifetime-excludes opened identities with the ledger anti-join', async () => {
   let canonicalSql = '';
-  pool.query = async (sql, params = []) => {
+  mockCardClient(async (sql, params = []) => {
     const text = String(sql);
     if (text.includes('user_card_impressions')) return { rows: [] };
     if (text.includes('user_likes')) return { rows: [] };
@@ -620,7 +1195,7 @@ test('GET /api/cards/today lifetime-excludes opened identities with the ledger a
     }
     if (text.includes('FROM canonical_events')) {
       canonicalSql = text;
-      assert.deepEqual(params, [todayKst(), userId, 300]);
+      assert.deepEqual(params, [todayKst(), userId, 60, 300]);
       assert.match(text, /NOT EXISTS[\s\S]*FROM user_card_opened_keys opened/);
       assert.match(text, /opened\.key_type = 'event_id'/);
       assert.match(text, /opened\.key_type IN \('content_key', 'canonical_key'\)/);
@@ -634,13 +1209,16 @@ test('GET /api/cards/today lifetime-excludes opened identities with the ledger a
       };
     }
     throw new Error(`Unexpected query: ${text}`);
-  };
+  });
 
   const { status, body } = await request(makeApp(cardsRouter), 'GET', '/today');
 
   assert.equal(status, 200);
   assert.ok(canonicalSql);
-  assert.deepEqual(body.today.map((card) => card.eventId), ['fresh-1', 'fresh-2', 'fresh-3']);
+  assert.deepEqual(
+    new Set(body.today.map((card) => card.eventId)),
+    new Set(['fresh-1', 'fresh-2', 'fresh-3']),
+  );
   assert.equal(body.morePool.some((card) => card.eventId === 'duplicate-old-show'), false);
 });
 

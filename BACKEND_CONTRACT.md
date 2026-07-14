@@ -47,7 +47,9 @@ Backend rules:
 - Source events use `canonical_events.is_deleted = false` and `end_at` not earlier than the current KST date.
 - When `lat/lng` are provided, candidates are selected by Haversine distance with radius expansion: 3km, then 10km, then 50km, then national fallback.
 - Location candidates require `canonical_events.lat/lng`; `walkMinutes` is `ceil(distance_m / 80)` and is `null` when distance cannot be calculated.
-- `today` prefers category diversity by selecting different normalized categories first (`전시 | 공연 | 팝업 | 축제 | 기타`) before filling remaining slots.
+- `today` guarantees one unseen `전시`, `공연`, and `팝업` when all three exist, expanding the radius before allowing a duplicate category; `축제` and `기타` are fallback categories.
+- The three primary category positions are shuffled with a user/date seed, so their order changes across days but stays stable within the same day. Opening one card replaces only that screen slot (preferring the same category) while the other unopened choices remain stable.
+- If category supply is exhausted, duplicate-category cards may fill the remaining positions; all three positions are still stored independently and remain stable across refreshes and location changes.
 - When `lat/lng` are missing or invalid, the backend uses the existing active/upcoming trending/recent fallback ordering.
 - `opened` is derived from `user_ticket_earn_log(user_id, event_id, earn_date)` for KST today.
 - Events already opened today are excluded from `today` and `morePool`.

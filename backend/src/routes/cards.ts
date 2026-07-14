@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import type { PoolClient } from 'pg';
 import { pool } from '../db';
 import { requireAuth } from '../middleware/requireAuth';
 import { calculateBoundingBox, getHaversineDistanceSQL } from '../utils/geo';
@@ -18,13 +19,14 @@ const TODAY_CARD_COUNT = 3;
 const WEEKLY_CARD_COUNT = 3;
 const CARD_POOL_LIMIT = 12;           // 최종 노출(오늘+더보기) 상한
 const CANDIDATE_LIMIT = 300;          // 헤비 유저도 하루 50장을 열 수 있는 회전 여유
-const MIN_ROTATION_POOL = 60;         // 이만큼 모이면 반경 확장 중단(회전 풀 확보)
 const IMPRESSION_COOLDOWN_DAYS = 7;   // 최근 보여준 카드 소프트 제외(매일 새 발견)
 const FRESHNESS_WINDOW_DAYS = 60;     // created_at 신선도 감쇠 창
 const TASTE_WINDOW_DAYS = 90;         // 취향 신호 집계 창
 const WALK_METERS_PER_MINUTE = 80;
 const NEARBY_RADIUS_STEPS_M = [3000, 10000, 50000] as const;
-const CATEGORY_PRIORITY = ['전시', '공연', '팝업', '축제', '기타'] as const;
+const PRIMARY_CATEGORIES = ['전시', '공연', '팝업'] as const;
+const CATEGORY_PRIORITY = [...PRIMARY_CATEGORIES, '축제', '기타'] as const;
+const CATEGORY_CANDIDATE_LIMIT = Math.ceil(CANDIDATE_LIMIT / CATEGORY_PRIORITY.length);
 // 공급 점수 가중치(합=1): 근접·신선도·일별로테이션·취향·버즈
 const W_PROXIMITY = 0.35;
 const W_FRESHNESS = 0.25;
@@ -57,16 +59,30 @@ type TasteRow = { category: string | null; n: number | string; signal_count?: nu
 type ImpressionRow = { event_id: string };
 type TasteMap = Map<string, number>;
 type WeeklyOpenedEventRow = EventRow & { earn_date: string | Date | null; total_count?: number | string };
+type DailyOpenedCountRow = { count: number | string };
+type DailySlotEventRow = EventRow & {
+  slot_index: number | string;
+  slot_category: string;
+  slot_event_id: string;
+  slot_usable: boolean;
+};
 
-type OpenedEventRow = {
-  event_id: string;
-  earn_date: string | Date | null;
+type DailyCardAssignment = {
+  slotIndex: number;
+  card: ReturnType<typeof toCard>;
 };
 
 type LocationQuery = {
   lat: number;
   lng: number;
 };
+
+async function acquireUserCardLock(client: PoolClient, userId: string): Promise<void> {
+  await client.query(
+    `SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext('culturecard-open'))`,
+    [userId],
+  );
+}
 
 function todayKst(): string {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -113,6 +129,21 @@ function normalizeCategory(category: string | null): string {
   if (category.includes('팝업')) return '팝업';
   if (category.includes('축제') || category.includes('페스티벌')) return '축제';
   return '기타';
+}
+
+function normalizedCategorySql(column: string): string {
+  return `CASE
+    WHEN ${column} IS NULL THEN '기타'
+    WHEN ${column} LIKE '%전시%' THEN '전시'
+    WHEN ${column} LIKE '%공연%'
+      OR ${column} LIKE '%뮤지컬%'
+      OR ${column} LIKE '%연극%'
+      OR ${column} LIKE '%콘서트%' THEN '공연'
+    WHEN ${column} LIKE '%팝업%' THEN '팝업'
+    WHEN ${column} LIKE '%축제%'
+      OR ${column} LIKE '%페스티벌%' THEN '축제'
+    ELSE '기타'
+  END`;
 }
 
 function parseCoordinate(value: unknown): number | null {
@@ -338,11 +369,63 @@ function dedupeRows(rows: EventRow[]): EventRow[] {
   return result;
 }
 
-function mergeRows(primary: EventRow[], secondary: EventRow[]): EventRow[] {
-  return dedupeRows([...primary, ...secondary]).slice(0, CANDIDATE_LIMIT);
+function categoryCounts(rows: EventRow[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const category = normalizeCategory(row.main_category);
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function requiredCategoryCounts(categories: readonly string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const category of categories) {
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function hasRequiredCategoryCoverage(
+  rows: EventRow[],
+  requiredCounts: ReadonlyMap<string, number>,
+): boolean {
+  const counts = categoryCounts(rows);
+  return [...requiredCounts].every(
+    ([category, required]) => (counts.get(category) ?? 0) >= required,
+  );
+}
+
+function mergeRequiredCategoryBuckets(
+  current: EventRow[],
+  incoming: EventRow[],
+  requiredCounts: ReadonlyMap<string, number>,
+): EventRow[] {
+  const counts = categoryCounts(current);
+  const underfilledCategories = new Set(
+    [...requiredCounts]
+      .filter(([category, required]) => (counts.get(category) ?? 0) < required)
+      .map(([category]) => category),
+  );
+  // 첫 반경에서는 대체 카테고리도 함께 확보한다. 이후 반경은 아직 부족한
+  // 카테고리만 넓혀 가까운 기존 슬롯 후보가 더 먼 카드에 밀리지 않게 한다.
+  const seedAlternativeBuckets = current.length < TODAY_CARD_COUNT;
+  const additions = incoming.filter((row) => (
+    seedAlternativeBuckets || underfilledCategories.has(normalizeCategory(row.main_category))
+  ));
+  return dedupeRows([...current, ...additions]).slice(0, CANDIDATE_LIMIT);
 }
 
 function pickDiverseCards(cards: ReturnType<typeof toCard>[], count: number) {
+  return pickDiverseCardsByPriority(cards, count, CATEGORY_PRIORITY);
+}
+
+function pickDiverseCardsByPriority(
+  cards: ReturnType<typeof toCard>[],
+  count: number,
+  categoryPriority: readonly string[],
+  preferredEventIds: ReadonlySet<string> = new Set<string>(),
+) {
   const selected: ReturnType<typeof toCard>[] = [];
   const selectedIds = new Set<string>();
   const byCategory = new Map<string, ReturnType<typeof toCard>[]>();
@@ -354,9 +437,12 @@ function pickDiverseCards(cards: ReturnType<typeof toCard>[], count: number) {
     byCategory.set(category, bucket);
   }
 
-  for (const category of CATEGORY_PRIORITY) {
+  for (const category of categoryPriority) {
     if (selected.length >= count) break;
-    const card = byCategory.get(category)?.find((candidate) => !selectedIds.has(candidate.eventId));
+    const bucket = byCategory.get(category) ?? [];
+    const card = bucket.find(
+      (candidate) => preferredEventIds.has(candidate.eventId) && !selectedIds.has(candidate.eventId),
+    ) ?? bucket.find((candidate) => !selectedIds.has(candidate.eventId));
     if (!card) continue;
     selected.push(card);
     selectedIds.add(card.eventId);
@@ -374,74 +460,214 @@ function pickDiverseCards(cards: ReturnType<typeof toCard>[], count: number) {
   return selected;
 }
 
-function pickDiverseTodayCards(cards: ReturnType<typeof toCard>[]) {
-  return pickDiverseCards(cards, TODAY_CARD_COUNT);
+function dailyCategoryPriority(seed: number): string[] {
+  const primary = [...PRIMARY_CATEGORIES];
+  for (let index = primary.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(
+      seededUnit(seed ^ hashStr(`culturecard-category-slot-${index}`)) * (index + 1),
+    );
+    [primary[index], primary[swapIndex]] = [primary[swapIndex]!, primary[index]!];
+  }
+  return [...primary, '축제', '기타'];
+}
+
+function buildDesiredSlotCategories(rows: DailySlotEventRow[], seed: number): string[] {
+  const desired = dailyCategoryPriority(seed).slice(0, TODAY_CARD_COUNT);
+  for (const row of rows) {
+    const slotIndex = Number(row.slot_index);
+    if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= TODAY_CARD_COUNT) continue;
+    if (!CATEGORY_PRIORITY.some((category) => category === row.slot_category)) continue;
+    desired[slotIndex] = row.slot_category;
+  }
+  return desired;
+}
+
+function getUsableDailySlotEvents(rows: DailySlotEventRow[]): DailySlotEventRow[] {
+  return rows.filter((row) => (
+    row.slot_usable === true
+    && String(row.id) === String(row.slot_event_id)
+    && normalizeCategory(row.main_category) === row.slot_category
+  ));
+}
+
+function assignTodayCardsToSlots(
+  cards: ReturnType<typeof toCard>[],
+  dailySlotRows: DailySlotEventRow[],
+  desiredCategories: readonly string[],
+  seed: number,
+): DailyCardAssignment[] {
+  const slots: Array<ReturnType<typeof toCard> | undefined> = Array(TODAY_CARD_COUNT);
+  const cardByEventId = new Map(cards.map((card) => [card.eventId, card]));
+  const selectedIds = new Set<string>();
+  const selectedCategories = new Set<string>();
+
+  for (const row of getUsableDailySlotEvents(dailySlotRows)) {
+    const slotIndex = Number(row.slot_index);
+    if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= TODAY_CARD_COUNT) continue;
+    const card = cardByEventId.get(String(row.slot_event_id));
+    if (!card || selectedIds.has(card.eventId)) continue;
+    slots[slotIndex] = card;
+    selectedIds.add(card.eventId);
+    selectedCategories.add(card.category);
+  }
+
+  const categoryPriority = dailyCategoryPriority(seed);
+  const firstAvailable = (category?: string) => cards.find((candidate) => (
+    !selectedIds.has(candidate.eventId)
+    && (category == null || candidate.category === category)
+  ));
+
+  for (let slotIndex = 0; slotIndex < TODAY_CARD_COUNT; slotIndex += 1) {
+    if (slots[slotIndex]) continue;
+    const desiredCategory = desiredCategories[slotIndex];
+    let card = firstAvailable(desiredCategory);
+
+    if (!card) {
+      for (const category of categoryPriority) {
+        if (selectedCategories.has(category)) continue;
+        card = firstAvailable(category);
+        if (card) break;
+      }
+    }
+    card ??= firstAvailable();
+    if (!card) continue;
+
+    slots[slotIndex] = card;
+    selectedIds.add(card.eventId);
+    selectedCategories.add(card.category);
+  }
+
+  return slots.flatMap((card, slotIndex) => (
+    card ? [{ slotIndex, card }] : []
+  ));
+}
+
+function preferFreshCardsByCategory<T extends { category: string; eventId: string }>(
+  cards: T[],
+  recentEventIds: ReadonlySet<string>,
+): T[] {
+  const categoriesWithFreshCards = new Set(
+    cards
+      .filter((card) => !recentEventIds.has(card.eventId))
+      .map((card) => card.category),
+  );
+  return cards.filter(
+    (card) => !recentEventIds.has(card.eventId) || !categoriesWithFreshCards.has(card.category),
+  );
+}
+
+async function recordCardAssignments(
+  db: PoolClient,
+  userId: string,
+  today: string,
+  assignments: DailyCardAssignment[],
+  logLabel: string,
+): Promise<void> {
+  const slotIndexes = assignments.map(({ slotIndex }) => slotIndex);
+  const categories = assignments.map(({ card }) => card.category);
+  const eventIds = assignments.map(({ card }) => card.eventId);
+  try {
+    await db.query(
+      `WITH selected AS (
+         SELECT slot_index, category, event_id
+         FROM unnest($3::smallint[], $4::text[], $5::text[])
+           AS slot(slot_index, category, event_id)
+       ), upserted_slots AS (
+         INSERT INTO user_daily_card_slots (user_id, slot_index, category, assigned_on, event_id)
+         SELECT $1, slot_index, category, $2::date, event_id FROM selected
+         ON CONFLICT (user_id, slot_index)
+         DO UPDATE SET assigned_on = EXCLUDED.assigned_on,
+                       category = EXCLUDED.category,
+                       event_id = EXCLUDED.event_id,
+                       updated_at = NOW()
+         RETURNING slot_index
+       ), deleted_slots AS (
+         DELETE FROM user_daily_card_slots existing
+         WHERE existing.user_id = $1
+           AND NOT EXISTS (
+             SELECT 1 FROM selected WHERE selected.slot_index = existing.slot_index
+           )
+         RETURNING existing.slot_index
+       )
+       INSERT INTO user_card_impressions (user_id, event_id, last_shown_on, shown_count)
+       SELECT $1, event_id, $2::date, 1 FROM selected
+       ON CONFLICT (user_id, event_id)
+       DO UPDATE SET last_shown_on = EXCLUDED.last_shown_on,
+                     shown_count = user_card_impressions.shown_count + 1`,
+      [userId, today, slotIndexes, categories, eventIds],
+    );
+  } catch (error: any) {
+    console.error(`[Cards] ${logLabel} assignment log failed:`, error?.message ?? error);
+    throw error;
+  }
+}
+
+async function getDailySlotEvents(
+  db: PoolClient,
+  today: string,
+  userId: string,
+): Promise<DailySlotEventRow[]> {
+  const { rows } = await db.query<DailySlotEventRow>(
+    `SELECT slot.slot_index, slot.category AS slot_category, slot.event_id AS slot_event_id,
+            event.id, event.title, event.display_title, event.content_key, event.canonical_key,
+            event.main_category, event.region, event.start_at, event.end_at, event.image_url,
+            event.venue, event.overview, event.lat, event.lng, event.buzz_score,
+            event.created_at, event.metadata,
+            (
+              event.id IS NOT NULL
+              AND event.is_deleted = false
+              AND (event.end_at IS NULL OR (event.end_at AT TIME ZONE 'Asia/Seoul')::date >= $2::date)
+              AND NOT EXISTS (
+                SELECT 1
+                FROM user_card_opened_keys opened
+                WHERE opened.user_id = $1
+                  AND (
+                    (opened.key_type = 'event_id' AND opened.key_value = event.id::text)
+                    OR (
+                      opened.key_type IN ('content_key', 'canonical_key')
+                      AND opened.key_value = ANY(
+                        ARRAY_REMOVE(ARRAY[event.content_key, event.canonical_key], NULL)
+                      )
+                    )
+                  )
+              )
+            ) AS slot_usable
+     FROM user_daily_card_slots slot
+     LEFT JOIN canonical_events event ON event.id::text = slot.event_id
+     WHERE slot.user_id = $1
+       AND slot.assigned_on = $2::date
+     ORDER BY slot.slot_index`,
+    [userId, today],
+  );
+  return rows;
 }
 
 async function getFallbackEvents(
+  db: PoolClient,
   today: string,
   userId: string,
 ): Promise<EventRow[]> {
-  const { rows } = await pool.query<EventRow>(
-    `SELECT event.id, event.title, event.display_title, event.content_key, event.canonical_key,
-            event.main_category, event.region, event.start_at, event.end_at, event.image_url,
-            event.venue, event.overview, event.lat, event.lng, event.buzz_score,
-            event.created_at, event.metadata
-     FROM canonical_events event
-     WHERE event.is_deleted = false
-       AND (event.end_at IS NULL OR (event.end_at AT TIME ZONE 'Asia/Seoul')::date >= $1::date)
-       AND NOT EXISTS (
-         SELECT 1
-         FROM user_card_opened_keys opened
-         WHERE opened.user_id = $2
-           AND (
-             (opened.key_type = 'event_id' AND opened.key_value = event.id::text)
-             OR (
-               opened.key_type IN ('content_key', 'canonical_key')
-               AND opened.key_value = ANY(
-                 ARRAY_REMOVE(ARRAY[event.content_key, event.canonical_key], NULL)
-               )
-             )
-           )
-       )
-     ORDER BY
-       CASE
-         WHEN event.start_at <= NOW() AND (event.end_at IS NULL OR event.end_at >= NOW()) THEN 0
-         WHEN event.start_at > NOW() THEN 1
-         ELSE 2
-       END,
-       CASE WHEN event.end_at IS NULL THEN 1 ELSE 0 END,
-       event.end_at ASC,
-       event.buzz_score DESC NULLS LAST
-     LIMIT $3`,
-    [today, userId, CANDIDATE_LIMIT]
-  );
-  return dedupeRows(rows).slice(0, CANDIDATE_LIMIT);
-}
-
-async function getNearbyEvents(
-  today: string,
-  location: LocationQuery,
-  userId: string,
-): Promise<EventRow[]> {
-  const distSQL = getHaversineDistanceSQL('$1', '$2');
-  let bestNearbyRows: EventRow[] = [];
-
-  for (const radiusM of NEARBY_RADIUS_STEPS_M) {
-    const box = calculateBoundingBox(location.lat, location.lng, radiusM);
-    const { rows } = await pool.query<EventRow>(
-      `SELECT event.id, event.title, event.display_title, event.content_key, event.canonical_key,
+  const categorySql = normalizedCategorySql('event.main_category');
+  const { rows } = await db.query<EventRow>(
+    `WITH eligible AS (
+       SELECT event.id, event.title, event.display_title, event.content_key, event.canonical_key,
               event.main_category, event.region, event.start_at, event.end_at, event.image_url,
               event.venue, event.overview, event.lat, event.lng, event.buzz_score,
               event.created_at, event.metadata,
-              (${distSQL}) AS distance_m
+              ${categorySql} AS normalized_category,
+              CASE
+                WHEN event.start_at <= NOW() AND (event.end_at IS NULL OR event.end_at >= NOW()) THEN 0
+                WHEN event.start_at > NOW() THEN 1
+                ELSE 2
+              END AS lifecycle_rank,
+              CASE WHEN event.end_at IS NULL THEN 1 ELSE 0 END AS open_ended_rank
        FROM canonical_events event
        WHERE event.is_deleted = false
-         AND (event.end_at IS NULL OR (event.end_at AT TIME ZONE 'Asia/Seoul')::date >= $3::date)
+         AND (event.end_at IS NULL OR (event.end_at AT TIME ZONE 'Asia/Seoul')::date >= $1::date)
          AND NOT EXISTS (
            SELECT 1
            FROM user_card_opened_keys opened
-           WHERE opened.user_id = $4
+           WHERE opened.user_id = $2
              AND (
                (opened.key_type = 'event_id' AND opened.key_value = event.id::text)
                OR (
@@ -452,12 +678,89 @@ async function getNearbyEvents(
                )
              )
          )
-         AND event.lat IS NOT NULL AND event.lng IS NOT NULL
-         AND event.lat BETWEEN $5 AND $6
-         AND event.lng BETWEEN $7 AND $8
-         AND (${distSQL}) <= $9
-       ORDER BY distance_m ASC NULLS LAST, event.buzz_score DESC NULLS LAST, event.id ASC
-       LIMIT $10`,
+     ), ranked AS (
+       SELECT eligible.*,
+              ROW_NUMBER() OVER (
+                PARTITION BY normalized_category
+                ORDER BY lifecycle_rank ASC, open_ended_rank ASC,
+                         end_at ASC NULLS LAST, buzz_score DESC NULLS LAST, id ASC
+              ) AS category_rank
+       FROM eligible
+     )
+     SELECT id, title, display_title, content_key, canonical_key,
+            main_category, region, start_at, end_at, image_url,
+            venue, overview, lat, lng, buzz_score, created_at, metadata
+     FROM ranked
+     WHERE category_rank <= $3
+     ORDER BY category_rank ASC, lifecycle_rank ASC, open_ended_rank ASC,
+              end_at ASC NULLS LAST, buzz_score DESC NULLS LAST, id ASC
+     LIMIT $4`,
+    [today, userId, CATEGORY_CANDIDATE_LIMIT, CANDIDATE_LIMIT]
+  );
+  return dedupeRows(rows).slice(0, CANDIDATE_LIMIT);
+}
+
+async function getNearbyEvents(
+  db: PoolClient,
+  today: string,
+  location: LocationQuery,
+  userId: string,
+  requiredCounts: ReadonlyMap<string, number>,
+  pinnedRows: EventRow[] = [],
+): Promise<EventRow[]> {
+  const distSQL = getHaversineDistanceSQL('$1', '$2');
+  const categorySql = normalizedCategorySql('event.main_category');
+  let stableNearbyRows = dedupeRows(pinnedRows);
+
+  if (hasRequiredCategoryCoverage(stableNearbyRows, requiredCounts)) return stableNearbyRows;
+
+  for (const radiusM of NEARBY_RADIUS_STEPS_M) {
+    const box = calculateBoundingBox(location.lat, location.lng, radiusM);
+    const { rows } = await db.query<EventRow>(
+      `WITH eligible AS (
+         SELECT event.id, event.title, event.display_title, event.content_key, event.canonical_key,
+                event.main_category, event.region, event.start_at, event.end_at, event.image_url,
+                event.venue, event.overview, event.lat, event.lng, event.buzz_score,
+                event.created_at, event.metadata,
+                (${distSQL}) AS distance_m,
+                ${categorySql} AS normalized_category
+         FROM canonical_events event
+         WHERE event.is_deleted = false
+           AND (event.end_at IS NULL OR (event.end_at AT TIME ZONE 'Asia/Seoul')::date >= $3::date)
+           AND NOT EXISTS (
+             SELECT 1
+             FROM user_card_opened_keys opened
+             WHERE opened.user_id = $4
+               AND (
+                 (opened.key_type = 'event_id' AND opened.key_value = event.id::text)
+                 OR (
+                   opened.key_type IN ('content_key', 'canonical_key')
+                   AND opened.key_value = ANY(
+                     ARRAY_REMOVE(ARRAY[event.content_key, event.canonical_key], NULL)
+                   )
+                 )
+               )
+           )
+           AND event.lat IS NOT NULL AND event.lng IS NOT NULL
+           AND event.lat BETWEEN $5 AND $6
+           AND event.lng BETWEEN $7 AND $8
+       ), within_radius AS (
+         SELECT * FROM eligible WHERE distance_m <= $9
+       ), ranked AS (
+         SELECT within_radius.*,
+                ROW_NUMBER() OVER (
+                  PARTITION BY normalized_category
+                  ORDER BY distance_m ASC NULLS LAST, buzz_score DESC NULLS LAST, id ASC
+                ) AS category_rank
+         FROM within_radius
+       )
+       SELECT id, title, display_title, content_key, canonical_key,
+              main_category, region, start_at, end_at, image_url,
+              venue, overview, lat, lng, buzz_score, created_at, metadata, distance_m
+       FROM ranked
+       WHERE category_rank <= $10
+       ORDER BY distance_m ASC NULLS LAST, buzz_score DESC NULLS LAST, id ASC
+       LIMIT $11`,
       [
         location.lat,
         location.lng,
@@ -468,22 +771,24 @@ async function getNearbyEvents(
         box.lngMin,
         box.lngMax,
         radiusM,
+        CATEGORY_CANDIDATE_LIMIT,
         CANDIDATE_LIMIT,
       ]
     );
 
     const nearbyRows = dedupeRows(rows);
-    if (nearbyRows.length > bestNearbyRows.length) bestNearbyRows = nearbyRows;
-    // 회전 풀(MIN_ROTATION_POOL)이 확보되면 반경 확장 중단 — 근처를 넓게 받아 JS에서 매일 다르게 뽑는다
-    if (nearbyRows.length >= MIN_ROTATION_POOL) return nearbyRows.slice(0, CANDIDATE_LIMIT);
+    // 좁은 반경에서 이미 확보한 카테고리는 고정하고, 없는 카테고리만 넓혀서 보충한다.
+    // 이렇게 해야 한 카테고리가 소진돼 반경이 커져도 열지 않은 다른 두 슬롯이 바뀌지 않는다.
+    stableNearbyRows = mergeRequiredCategoryBuckets(stableNearbyRows, nearbyRows, requiredCounts);
+    if (hasRequiredCategoryCoverage(stableNearbyRows, requiredCounts)) return stableNearbyRows;
   }
 
-  if (bestNearbyRows.length === 0) {
-    return getFallbackEvents(today, userId);
+  if (stableNearbyRows.length === 0) {
+    return getFallbackEvents(db, today, userId);
   }
 
-  const fallbackRows = await getFallbackEvents(today, userId);
-  return mergeRows(bestNearbyRows, fallbackRows);
+  const fallbackRows = await getFallbackEvents(db, today, userId);
+  return mergeRequiredCategoryBuckets(stableNearbyRows, fallbackRows, requiredCounts);
 }
 
 function lockedTimingLabel(dday: number | null): string {
@@ -621,16 +926,24 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
   const userRegionPromise: Promise<string | null> = location
     ? reverseGeocodeRegion(location.lat, location.lng).catch(() => null)
     : Promise.resolve(null);
+  let client: PoolClient | null = null;
+  let transactionOpen = false;
+  let destroyClient = false;
 
   try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    transactionOpen = true;
+    await acquireUserCardLock(client, userId);
     const [
       ticketResult,
-      discoveredResult,
+      dailyOpenedResult,
       tasteResult,
       impressionResult,
       weeklyOpenedResult,
+      dailySlotRows,
     ] = await Promise.all([
-      pool.query(
+      client.query(
         `WITH ensured AS (
            INSERT INTO user_tickets (user_id, ticket_count, total_earned, total_exchanged)
            VALUES ($1, 0, 0, 0)
@@ -644,14 +957,15 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
          LIMIT 1`,
         [userId],
       ),
-      // 일일 공개 수와 컬렉션 요약용 원본 이력.
-      pool.query<OpenedEventRow>(
-        `SELECT el.event_id, el.earn_date
+      // 기존 (user_id, earn_date) 인덱스로 오늘 공개 수만 집계한다.
+      client.query<DailyOpenedCountRow>(
+        `SELECT COUNT(*)::int AS count
          FROM user_ticket_earn_log el
-         WHERE el.user_id = $1`,
-        [userId],
+         WHERE el.user_id = $1
+           AND el.earn_date = $2::date`,
+        [userId, today],
       ),
-      pool.query<TasteRow>(
+      client.query<TasteRow>(
         `SELECT ce.main_category AS category,
                 SUM(src.weight)::int AS n,
                 COUNT(*)::int AS signal_count
@@ -667,16 +981,16 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
          WHERE ce.main_category IS NOT NULL
          GROUP BY ce.main_category`,
         [userId, today, TASTE_WINDOW_DAYS],
-      ).catch(() => ({ rows: [] as TasteRow[] })),
+      ),
       // 오늘 배정한 3장은 새로고침해도 유지하고, 이전 7일 노출만 소프트 제외한다.
-      pool.query<ImpressionRow>(
+      client.query<ImpressionRow>(
         `SELECT event_id FROM user_card_impressions
          WHERE user_id = $1
            AND last_shown_on >= $2::date - (($3::int - 1) * INTERVAL '1 day')
            AND last_shown_on < $2::date`,
         [userId, today, IMPRESSION_COOLDOWN_DAYS],
-      ).catch(() => ({ rows: [] as ImpressionRow[] })),
-      pool.query<WeeklyOpenedEventRow>(
+      ),
+      client.query<WeeklyOpenedEventRow>(
         `SELECT ce.id, ce.title, ce.display_title, ce.content_key, ce.canonical_key,
                 ce.main_category, ce.region, ce.start_at, ce.end_at, ce.image_url,
                 ce.venue, ce.overview, ce.lat, ce.lng, ce.buzz_score, ce.created_at, ce.metadata,
@@ -691,40 +1005,40 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
          ORDER BY MAX(el.earn_date) DESC, ce.id
          LIMIT 7`,
         [userId, weekKey],
-      ).catch(() => ({ rows: [] as WeeklyOpenedEventRow[] })),
+      ),
+      getDailySlotEvents(client, today, userId),
     ]);
 
-    const todayOpenedRows = discoveredResult.rows.filter((row) => dateOnly(row.earn_date) === today);
-    const rows = location
-      ? await getNearbyEvents(today, location, userId)
-      : await getFallbackEvents(today, userId);
     const seed = dailySeed(userId, today);
+    const desiredCategories = buildDesiredSlotCategories(dailySlotRows, seed);
+    const requiredCounts = requiredCategoryCounts(desiredCategories);
+    const pinnedRows = getUsableDailySlotEvents(dailySlotRows);
+    const rows = location
+      ? await getNearbyEvents(client, today, location, userId, requiredCounts, pinnedRows)
+      : hasRequiredCategoryCoverage(pinnedRows, requiredCounts)
+        ? pinnedRows
+        : mergeRequiredCategoryBuckets(
+            pinnedRows,
+            await getFallbackEvents(client, today, userId),
+            requiredCounts,
+          );
     const taste = buildTasteMap(tasteResult.rows);
     const scoreById = new Map<string, number>();
     for (const row of rows) scoreById.set(String(row.id), scoreRow(row, { location, taste, seed }));
 
     const cards = rows.map((row) => toCard(row, new Set<string>(), location, taste));
-    const previousImpressionIds = new Set(impressionResult.rows.map((row) => String(row.event_id)));
-    const freshCards = cards.filter((card) => !previousImpressionIds.has(card.eventId));
-    const scored = (freshCards.length >= TODAY_CARD_COUNT ? freshCards : cards)
+    const previousImpressionIds = new Set(
+      impressionResult.rows.map((row) => String(row.event_id)),
+    );
+    const scored = preferFreshCardsByCategory(cards, previousImpressionIds)
       .slice()
       .sort((a, b) => (scoreById.get(b.eventId) ?? 0) - (scoreById.get(a.eventId) ?? 0));
-    const dailyOpenCount = todayOpenedRows.length;
-    const selected = dailyOpenCount >= DAILY_OPEN_LIMIT ? [] : pickDiverseTodayCards(scored);
+    const dailyOpenCount = Number(dailyOpenedResult.rows[0]?.count ?? 0);
+    const assignments = dailyOpenCount >= DAILY_OPEN_LIMIT
+      ? []
+      : assignTodayCardsToSlots(scored, dailySlotRows, desiredCategories, seed);
 
-    const shownIds = selected.map((card) => card.eventId);
-    if (shownIds.length > 0) {
-      setImmediate(() => {
-        pool.query(
-          `INSERT INTO user_card_impressions (user_id, event_id, last_shown_on, shown_count)
-           SELECT $1, e, $2::date, 1 FROM unnest($3::text[]) AS e
-           ON CONFLICT (user_id, event_id)
-           DO UPDATE SET last_shown_on = EXCLUDED.last_shown_on,
-                         shown_count = user_card_impressions.shown_count + 1`,
-          [userId, today, shownIds],
-        ).catch((e) => console.error('[Cards] v2 impression log failed:', e?.message ?? e));
-      });
-    }
+    await recordCardAssignments(client, userId, today, assignments, 'v2');
 
     const ticketRow = ticketResult.rows[0] ?? {};
     const dailyEarnedDate = ticketRow.daily_earned_date ? String(ticketRow.daily_earned_date).slice(0, 10) : null;
@@ -732,20 +1046,25 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
     const weeklyItems = dedupeRows(weeklyOpenedResult.rows)
       .map((row) => toCard(row, weeklyOpenedIds, location, taste));
     const weeklyOpenedCount = Number(weeklyOpenedResult.rows[0]?.total_count ?? weeklyItems.length);
+    await client.query('COMMIT');
+    transactionOpen = false;
+    client.release();
+    client = null;
+    const userRegion = await userRegionPromise;
 
     return res.json({
-      lockedCards: selected.map((card, index) => toLockedPreview(
+      lockedCards: assignments.map(({ card, slotIndex }) => toLockedPreview(
         card,
         userId,
         today,
-        index,
+        slotIndex,
       )),
       ticketCount: ticketRow.ticket_count ?? 0,
       dailyEarned: dailyEarnedDate === today ? (ticketRow.daily_earned ?? 0) : 0,
       dailyLimit: DAILY_LIMIT,
       dailyOpenCount,
       dailyOpenLimit: DAILY_OPEN_LIMIT,
-      userRegion: await userRegionPromise,
+      userRegion,
       weeklyDiscovery: {
         weekKey,
         openedCount: weeklyOpenedCount,
@@ -755,8 +1074,17 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
       personalization: buildPersonalization(tasteResult.rows, taste),
     });
   } catch (err) {
+    if (client && transactionOpen) {
+      await client.query('ROLLBACK').catch((rollbackError) => {
+        console.error('[Cards] v2 today rollback failed:', rollbackError);
+        destroyClient = true;
+      });
+      transactionOpen = false;
+    }
     console.error('[Cards] v2 today error:', err);
     return res.status(500).json({ error: 'INTERNAL_ERROR' });
+  } finally {
+    client?.release(destroyClient);
   }
 });
 
@@ -840,10 +1168,17 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
   const userRegionPromise: Promise<string | null> = location
     ? reverseGeocodeRegion(location.lat, location.lng).catch(() => null)
     : Promise.resolve(null);
+  let client: PoolClient | null = null;
+  let transactionOpen = false;
+  let destroyClient = false;
 
   try {
-    const [ticketResult, tasteResult, impressionResult] = await Promise.all([
-      pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    transactionOpen = true;
+    await acquireUserCardLock(client, userId);
+    const [ticketResult, tasteResult, impressionResult, dailySlotRows] = await Promise.all([
+      client.query(
         `WITH ensured AS (
            INSERT INTO user_tickets (user_id, ticket_count, total_earned, total_exchanged)
            VALUES ($1, 0, 0, 0)
@@ -859,7 +1194,7 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
         [userId]
       ),
       // 취향 신호: 카드 열기(1) + 좋아요(3) + 도장(4). 강한 의도일수록 더 크게 반영한다.
-      pool.query<TasteRow>(
+      client.query<TasteRow>(
         `SELECT ce.main_category AS category,
                 SUM(src.weight)::int AS n,
                 COUNT(*)::int AS signal_count
@@ -875,26 +1210,40 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
          WHERE ce.main_category IS NOT NULL
          GROUP BY ce.main_category`,
         [userId, today, TASTE_WINDOW_DAYS]
-      ).catch(() => ({ rows: [] as TasteRow[] })),
+      ),
       // 최근 노출한 카드(소프트 제외용) — 테이블 없거나 실패해도 무시
-      pool.query<ImpressionRow>(
+      client.query<ImpressionRow>(
         `SELECT event_id FROM user_card_impressions
-         WHERE user_id = $1 AND last_shown_on >= $2::date - (($3::int - 1) * INTERVAL '1 day')`,
+         WHERE user_id = $1
+           AND last_shown_on >= $2::date - (($3::int - 1) * INTERVAL '1 day')
+           AND last_shown_on < $2::date`,
         [userId, today, IMPRESSION_COOLDOWN_DAYS]
-      ).catch(() => ({ rows: [] as ImpressionRow[] })),
+      ),
+      getDailySlotEvents(client, today, userId),
     ]);
 
     const ticketRow = ticketResult.rows[0] ?? {};
+    const seed = dailySeed(userId, today);
+    const desiredCategories = buildDesiredSlotCategories(dailySlotRows, seed);
+    const requiredCounts = requiredCategoryCounts(desiredCategories);
+    const pinnedRows = getUsableDailySlotEvents(dailySlotRows);
     const rows = location
-      ? await getNearbyEvents(today, location, userId)
-      : await getFallbackEvents(today, userId);
+      ? await getNearbyEvents(client, today, location, userId, requiredCounts, pinnedRows)
+      : hasRequiredCategoryCoverage(pinnedRows, requiredCounts)
+        ? pinnedRows
+        : mergeRequiredCategoryBuckets(
+            pinnedRows,
+            await getFallbackEvents(client, today, userId),
+            requiredCounts,
+          );
 
     // 점수화 v2: 근접+신선도+일별시드+취향+버즈로 재랭킹 → 매일 다른 순서·새 이벤트 우선
-    const seed = dailySeed(userId, today);
     const weekKey = weekKeyKst(today);
     const taste = buildTasteMap(tasteResult.rows);
     const personalization = buildPersonalization(tasteResult.rows, taste);
-    const recentImpressionIds = new Set(impressionResult.rows.map((row) => String(row.event_id)));
+    const previousImpressionIds = new Set(
+      impressionResult.rows.map((row) => String(row.event_id)),
+    );
     const scoreById = new Map<string, number>();
     for (const row of rows) scoreById.set(String(row.id), scoreRow(row, { location, taste, seed }));
 
@@ -902,17 +1251,21 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
       .map((row) => toCard(row, new Set<string>(), location, taste))
       .filter((card) => !card.opened);
 
-    // 최근 보여준 카드는 소프트 제외(제외 후 풀이 부족하면 완화해 빈 화면 방지)
-    const notRecentlyShown = cards.filter((card) => !recentImpressionIds.has(card.eventId));
-    const scored = (notRecentlyShown.length >= TODAY_CARD_COUNT ? notRecentlyShown : cards)
+    // 카테고리별로 새 카드를 우선하고, 해당 카테고리가 비었을 때만 최근 노출 제한을 완화한다.
+    const scored = preferFreshCardsByCategory(cards, previousImpressionIds)
       .slice()
       .sort((a, b) => (scoreById.get(b.eventId) ?? 0) - (scoreById.get(a.eventId) ?? 0));
 
-    const todayCards = pickDiverseTodayCards(scored);
+    const assignments = assignTodayCardsToSlots(
+      scored,
+      dailySlotRows,
+      desiredCategories,
+      seed,
+    );
+    const todayCards = assignments.map(({ card }) => card);
     const todayIds = new Set(todayCards.map((card) => card.eventId));
     const morePool = scored.filter((card) => !todayIds.has(card.eventId)).slice(0, CARD_POOL_LIMIT);
     const dailyEarnedDate = ticketRow.daily_earned_date ? String(ticketRow.daily_earned_date).slice(0, 10) : null;
-    const userRegion = await userRegionPromise;
     const weeklyScoreById = new Map<string, number>();
     for (const row of rows) {
       weeklyScoreById.set(String(row.id), scoreRow(row, {
@@ -928,20 +1281,13 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
       WEEKLY_CARD_COUNT,
     );
 
-    // 오늘 보여준 카드를 노출 기록(fire-and-forget) — 응답을 막지 않고 실패해도 무시
-    const shownIds = todayCards.map((card) => card.eventId);
-    if (shownIds.length > 0) {
-      setImmediate(() => {
-        pool.query(
-          `INSERT INTO user_card_impressions (user_id, event_id, last_shown_on, shown_count)
-           SELECT $1, e, $2::date, 1 FROM unnest($3::text[]) AS e
-           ON CONFLICT (user_id, event_id)
-           DO UPDATE SET last_shown_on = EXCLUDED.last_shown_on,
-                         shown_count = user_card_impressions.shown_count + 1`,
-          [userId, today, shownIds]
-        ).catch((e) => console.error('[Cards] impression log failed:', e?.message ?? e));
-      });
-    }
+    // 오늘 보여준 카드를 응답 전에 기록해 다음 조회에서도 같은 미공개 슬롯을 유지한다.
+    await recordCardAssignments(client, userId, today, assignments, 'legacy');
+    await client.query('COMMIT');
+    transactionOpen = false;
+    client.release();
+    client = null;
+    const userRegion = await userRegionPromise;
 
     return res.json({
       today: todayCards,
@@ -960,8 +1306,17 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
       personalization,
     });
   } catch (err) {
+    if (client && transactionOpen) {
+      await client.query('ROLLBACK').catch((rollbackError) => {
+        console.error('[Cards] today rollback failed:', rollbackError);
+        destroyClient = true;
+      });
+      transactionOpen = false;
+    }
     console.error('[Cards] today error:', err);
     return res.status(500).json({ error: 'INTERNAL_ERROR' });
+  } finally {
+    client?.release(destroyClient);
   }
 });
 
