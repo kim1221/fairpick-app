@@ -18,6 +18,7 @@ import { pool } from '../db';
 import { uploadEventImage } from '../lib/imageUpload';
 import { extractEventInfoEnhanced } from '../lib/aiExtractor';
 import { generateDisplayTitle } from '../utils/titleNormalizer';
+import { artmapCanonicalKey, stableArtmapEventId } from './artmapEventFields';
 
 // ─── 설정 ──────────────────────────────────────────────────────────────────
 
@@ -156,7 +157,7 @@ async function isDuplicate(
        )
      )
      AND is_deleted = false LIMIT 1`,
-    [JSON.stringify([`artmap:${artmapIdx}`]), title, venue, startAt, endAt],
+    [JSON.stringify([artmapCanonicalKey(artmapIdx)]), title, venue, startAt, endAt],
   );
   return result.rowCount! > 0;
 }
@@ -379,6 +380,7 @@ function parsePriceFromText(text: string | null): {
 // ─── DB 직접 삽입 ──────────────────────────────────────────────────────────
 
 interface InsertParams {
+  artmapIdx: string;
   title: string;
   startAt: string;
   endAt: string;
@@ -404,7 +406,8 @@ interface InsertParams {
 }
 
 async function insertEventDirect(p: InsertParams): Promise<string | null> {
-  const id = crypto.randomUUID();
+  const id = stableArtmapEventId(p.artmapIdx);
+  const canonicalKey = artmapCanonicalKey(p.artmapIdx);
   // 《》〈〉 등 장식 브래킷을 제거한 정규화 제목으로 content_key 생성
   // → "지구울림 - 헤르츠앤도우" 와 "《지구울림 - 헤르츠앤도우》" 가 동일 key를 가짐
   const normalizedTitle = generateDisplayTitle(p.title);
@@ -471,7 +474,7 @@ async function insertEventDirect(p: InsertParams): Promise<string | null> {
 
   const result = await pool.query(
     `INSERT INTO canonical_events (
-      id, content_key, title, display_title, start_at, end_at, venue, address,
+      id, canonical_key, content_key, title, display_title, start_at, end_at, venue, address,
       region, lat, lng, main_category, sub_category, image_url, is_free, price_info,
       overview, is_ending_soon, popularity_score, buzz_score, is_featured, featured_order,
       featured_at, sources, source_priority_winner, is_deleted, deleted_reason,
@@ -482,15 +485,18 @@ async function insertEventDirect(p: InsertParams): Promise<string | null> {
       metadata, created_at, updated_at
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-      $19,$20,$21,$22,$23,$24::jsonb,$25,$26,$27,
-      $28,$29,$30,$31,$32::jsonb,
-      $33,$34,$35,$36,
-      $37::jsonb,$38,$39,$40,$41::jsonb,$42::jsonb,
-      $43::jsonb,$44,$45,$46::jsonb,
-      $47::jsonb, NOW(), NOW()
-    ) RETURNING id`,
+      $19,$20,$21,$22,$23,$24,$25::jsonb,$26,$27,$28,
+      $29,$30,$31,$32,$33::jsonb,
+      $34,$35,$36,$37,
+      $38::jsonb,$39,$40,$41,$42::jsonb,$43::jsonb,
+      $44::jsonb,$45,$46,$47::jsonb,
+      $48::jsonb, NOW(), NOW()
+    )
+    ON CONFLICT (canonical_key) DO UPDATE
+    SET updated_at = NOW()
+    RETURNING id`,
     [
-      id, contentKey, p.title, null,
+      id, canonicalKey, contentKey, p.title, normalizedTitle,
       p.startAt, p.endAt, p.venue, p.address || null,
       region, lat, lng,
       '전시', null,
@@ -621,6 +627,7 @@ async function processExhibition(item: ListItem, index: number): Promise<boolean
 
   try {
     const createdId = await insertEventDirect({
+      artmapIdx: idx,
       title: item.title,
       startAt,
       endAt,

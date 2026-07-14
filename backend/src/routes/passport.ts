@@ -5,6 +5,56 @@ import { requireAuth } from '../middleware/requireAuth';
 
 const router = express.Router();
 const STAMP_BOOK_SIZE = 60;
+const DEFAULT_DISCOVERED_LIMIT = 50;
+const MAX_DISCOVERED_LIMIT = 100;
+
+type ArchiveStatus = 'active' | 'ended' | 'removed';
+
+type DiscoveredCursor = {
+  discoveredAt: string;
+  eventId: string;
+};
+
+type DiscoveredRow = {
+  event_id: string;
+  title: string;
+  display_title: string | null;
+  category: string | null;
+  region: string | null;
+  venue: string | null;
+  image_url: string | null;
+  start_at: string | Date | null;
+  end_at: string | Date | null;
+  lat: string | number | null;
+  lng: string | number | null;
+  discovered_at: string | Date;
+  status: ArchiveStatus;
+};
+
+type DiscoveredPageInfo = {
+  limit: number;
+  hasMore: boolean;
+  nextCursor: string | null;
+};
+
+type DiscoveredPage = {
+  items: ReturnType<typeof mapDiscoveredRow>[];
+  pageInfo: DiscoveredPageInfo;
+};
+
+const ARCHIVE_STATUS_SQL = `CASE
+  WHEN COALESCE(ce.deleted_reason, archive.removed_reason) = 'expired'
+    THEN 'ended'
+  WHEN ce.is_deleted = true OR archive.removed_at IS NOT NULL
+    THEN 'removed'
+  WHEN COALESCE(ce.end_at, archive.end_at) IS NOT NULL
+   AND (COALESCE(ce.end_at, archive.end_at) AT TIME ZONE 'Asia/Seoul')::date
+       < (NOW() AT TIME ZONE 'Asia/Seoul')::date
+    THEN 'ended'
+  WHEN ce.id IS NOT NULL AND ce.is_deleted = false
+    THEN 'active'
+  ELSE 'removed'
+END`;
 
 function currentKstMonthStart(): string {
   const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
@@ -54,11 +104,142 @@ function positiveInt(value: unknown, fallback: number): number {
   return Math.floor(parsed);
 }
 
+function discoveredLimit(value: unknown): number {
+  return Math.min(positiveInt(value, DEFAULT_DISCOVERED_LIMIT), MAX_DISCOVERED_LIMIT);
+}
+
+function encodeDiscoveredCursor(row: Pick<DiscoveredRow, 'discovered_at' | 'event_id'>): string {
+  const payload: DiscoveredCursor = {
+    discoveredAt: isoString(row.discovered_at),
+    eventId: String(row.event_id),
+  };
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+function decodeDiscoveredCursor(value: unknown): DiscoveredCursor | null {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (raw == null || raw === '') return null;
+  if (typeof raw !== 'string') throw new Error('INVALID_DISCOVERED_CURSOR');
+
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as Partial<DiscoveredCursor>;
+    if (
+      typeof parsed.discoveredAt !== 'string'
+      || Number.isNaN(Date.parse(parsed.discoveredAt))
+      || typeof parsed.eventId !== 'string'
+      || parsed.eventId.trim() === ''
+    ) {
+      throw new Error('INVALID_DISCOVERED_CURSOR');
+    }
+    return { discoveredAt: parsed.discoveredAt, eventId: parsed.eventId };
+  } catch {
+    throw new Error('INVALID_DISCOVERED_CURSOR');
+  }
+}
+
+function mapDiscoveredRow(row: DiscoveredRow) {
+  return {
+    eventId: row.event_id,
+    title: row.display_title?.trim() || row.title,
+    category: normalizeCategory(row.category),
+    region: row.region,
+    venue: row.venue,
+    imageUrl: row.image_url,
+    startAt: isoStringOrNull(row.start_at),
+    endAt: isoStringOrNull(row.end_at),
+    lat: numberOrNull(row.lat),
+    lng: numberOrNull(row.lng),
+    discoveredAt: isoString(row.discovered_at),
+    status: row.status,
+  };
+}
+
+async function loadDiscoveredPage(
+  userId: string,
+  limit: number,
+  cursor: DiscoveredCursor | null,
+): Promise<DiscoveredPage> {
+  const result = await pool.query<DiscoveredRow>(
+    `WITH latest_discovery AS (
+       SELECT DISTINCT ON (el.event_id)
+              el.event_id,
+              el.created_at AS discovered_at
+       FROM user_ticket_earn_log el
+       JOIN event_archive_snapshots archive ON archive.event_id = el.event_id
+       WHERE el.user_id = $1
+       ORDER BY el.event_id, el.created_at DESC, el.id DESC
+     )
+     SELECT latest.event_id,
+            COALESCE(NULLIF(BTRIM(ce.title), ''), archive.title) AS title,
+            COALESCE(NULLIF(BTRIM(ce.display_title), ''), archive.display_title) AS display_title,
+            COALESCE(ce.main_category, archive.category) AS category,
+            COALESCE(ce.region, archive.region) AS region,
+            COALESCE(ce.venue, archive.venue) AS venue,
+            COALESCE(ce.image_url, archive.image_url) AS image_url,
+            COALESCE(ce.start_at, archive.start_at) AS start_at,
+            COALESCE(ce.end_at, archive.end_at) AS end_at,
+            COALESCE(ce.lat::double precision, archive.lat) AS lat,
+            COALESCE(ce.lng::double precision, archive.lng) AS lng,
+            latest.discovered_at,
+            ${ARCHIVE_STATUS_SQL} AS status
+     FROM latest_discovery latest
+     JOIN event_archive_snapshots archive ON archive.event_id = latest.event_id
+     LEFT JOIN canonical_events ce ON ce.id::text = latest.event_id
+     WHERE (
+       $2::timestamptz IS NULL
+       OR latest.discovered_at < $2::timestamptz
+       OR (latest.discovered_at = $2::timestamptz AND latest.event_id < $3::text)
+     )
+     ORDER BY latest.discovered_at DESC, latest.event_id DESC
+     LIMIT $4`,
+    [userId, cursor?.discoveredAt ?? null, cursor?.eventId ?? null, limit + 1],
+  );
+
+  const hasMore = result.rows.length > limit;
+  const pageRows = hasMore ? result.rows.slice(0, limit) : result.rows;
+  const lastRow = pageRows.length > 0 ? pageRows[pageRows.length - 1] : undefined;
+  return {
+    items: pageRows.map(mapDiscoveredRow),
+    pageInfo: {
+      limit,
+      hasMore,
+      nextCursor: hasMore && lastRow ? encodeDiscoveredCursor(lastRow) : null,
+    },
+  };
+}
+
+/** Cursor-paginated opened Culture Cards. */
+router.get('/discovered', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const limit = discoveredLimit(req.query.limit);
+  let cursor: DiscoveredCursor | null;
+  try {
+    cursor = decodeDiscoveredCursor(req.query.cursor);
+  } catch {
+    return res.status(400).json({ error: 'INVALID_DISCOVERED_CURSOR' });
+  }
+
+  try {
+    const page = await loadDiscoveredPage(userId, limit, cursor);
+    return res.json(page);
+  } catch (err) {
+    console.error('[Passport] discovered page error:', err);
+    return res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const monthStart = currentKstMonthStart();
   const stampBook = positiveInt(req.query.stampBook, 1);
   const stampOffset = (stampBook - 1) * STAMP_BOOK_SIZE;
+  const limit = discoveredLimit(req.query.discoveredLimit);
+  let cursor: DiscoveredCursor | null;
+  try {
+    cursor = decodeDiscoveredCursor(req.query.discoveredCursor);
+  } catch {
+    return res.status(400).json({ error: 'INVALID_DISCOVERED_CURSOR' });
+  }
 
   try {
     const [
@@ -74,152 +255,131 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       tasteResult,
       stampResult,
       visitedIdsResult,
-      discoveredCardsResult,
+      discoveredPage,
     ] = await Promise.all([
       pool.query<{ count: string | number }>(
-        `SELECT COUNT(DISTINCT event_id)::int AS count
-         FROM user_ticket_earn_log
-         WHERE user_id = $1`,
-        [userId]
-      ),
-      pool.query<{ count: string | number }>(
-        `SELECT COUNT(DISTINCT event_id)::int AS count
-         FROM user_visit_log
-         WHERE user_id = $1`,
-        [userId]
-      ),
-      pool.query<{ count: string | number }>(
-        `SELECT COUNT(DISTINCT event_id)::int AS count
-         FROM user_ticket_earn_log
-         WHERE user_id = $1
-           AND earn_date >= $2::date
-           AND earn_date < ($2::date + INTERVAL '1 month')`,
-        [userId, monthStart]
-      ),
-      pool.query<{ count: string | number }>(
-        `SELECT COUNT(DISTINCT ce.region)::int AS count
+        `SELECT COUNT(DISTINCT el.event_id)::int AS count
          FROM user_ticket_earn_log el
-         JOIN canonical_events ce ON ce.id::text = el.event_id
-         WHERE el.user_id = $1
-           AND ce.is_deleted = false
-           AND ce.region IS NOT NULL`,
-        [userId]
-      ),
-      pool.query<{ category: string | null }>(
-        `SELECT DISTINCT ce.main_category AS category
-         FROM user_ticket_earn_log el
-         JOIN canonical_events ce ON ce.id::text = el.event_id
-         WHERE el.user_id = $1
-           AND ce.is_deleted = false`,
-        [userId]
-      ),
-      pool.query<{ count: string | number }>(
-        `SELECT COUNT(DISTINCT ce.region)::int AS count
-         FROM user_visit_log vl
-         JOIN canonical_events ce ON ce.id::text = vl.event_id
-         WHERE vl.user_id = $1
-           AND ce.is_deleted = false
-           AND ce.region IS NOT NULL`,
+         JOIN event_archive_snapshots archive ON archive.event_id = el.event_id
+         WHERE el.user_id = $1`,
         [userId]
       ),
       pool.query<{ count: string | number }>(
         `SELECT COUNT(DISTINCT vl.event_id)::int AS count
          FROM user_visit_log vl
-         JOIN canonical_events ce ON ce.id::text = vl.event_id
+         JOIN event_archive_snapshots archive ON archive.event_id = vl.event_id
+         WHERE vl.user_id = $1`,
+        [userId]
+      ),
+      pool.query<{ count: string | number }>(
+        `SELECT COUNT(DISTINCT el.event_id)::int AS count
+         FROM user_ticket_earn_log el
+         JOIN event_archive_snapshots archive ON archive.event_id = el.event_id
+         WHERE el.user_id = $1
+           AND el.earn_date >= $2::date
+           AND el.earn_date < ($2::date + INTERVAL '1 month')`,
+        [userId, monthStart]
+      ),
+      pool.query<{ count: string | number }>(
+        `SELECT COUNT(DISTINCT archive.region)::int AS count
+         FROM user_ticket_earn_log el
+         JOIN event_archive_snapshots archive ON archive.event_id = el.event_id
+         WHERE el.user_id = $1
+           AND archive.region IS NOT NULL`,
+        [userId]
+      ),
+      pool.query<{ category: string | null }>(
+        `SELECT DISTINCT archive.category
+         FROM user_ticket_earn_log el
+         JOIN event_archive_snapshots archive ON archive.event_id = el.event_id
+         WHERE el.user_id = $1`,
+        [userId]
+      ),
+      pool.query<{ count: string | number }>(
+        `SELECT COUNT(DISTINCT archive.region)::int AS count
+         FROM user_visit_log vl
+         JOIN event_archive_snapshots archive ON archive.event_id = vl.event_id
          WHERE vl.user_id = $1
-           AND ce.is_deleted = false
+           AND archive.region IS NOT NULL`,
+        [userId]
+      ),
+      pool.query<{ count: string | number }>(
+        `SELECT COUNT(DISTINCT vl.event_id)::int AS count
+         FROM user_visit_log vl
+         JOIN event_archive_snapshots archive ON archive.event_id = vl.event_id
+         WHERE vl.user_id = $1
            AND vl.visited_at >= ($2::date AT TIME ZONE 'Asia/Seoul')
            AND vl.visited_at < (($2::date + INTERVAL '1 month') AT TIME ZONE 'Asia/Seoul')`,
         [userId, monthStart]
       ),
       pool.query<{ region: string; count: string | number }>(
-        `SELECT ce.region, COUNT(DISTINCT vl.event_id)::int AS count
+        `SELECT archive.region, COUNT(DISTINCT vl.event_id)::int AS count
          FROM user_visit_log vl
-         JOIN canonical_events ce ON ce.id::text = vl.event_id
+         JOIN event_archive_snapshots archive ON archive.event_id = vl.event_id
          WHERE vl.user_id = $1
-           AND ce.is_deleted = false
-           AND ce.region IS NOT NULL
-         GROUP BY ce.region
-         ORDER BY count DESC, ce.region ASC
+           AND archive.region IS NOT NULL
+         GROUP BY archive.region
+         ORDER BY count DESC, archive.region ASC
          LIMIT 5`,
         [userId]
       ),
       pool.query<{ event_id: string; category: string | null; region: string | null; visited_at: string | Date }>(
-        `SELECT vl.event_id, ce.region, ce.main_category AS category, vl.visited_at
+        `SELECT vl.event_id, archive.region, archive.category, vl.visited_at
          FROM user_visit_log vl
-         JOIN canonical_events ce ON ce.id::text = vl.event_id
+         JOIN event_archive_snapshots archive ON archive.event_id = vl.event_id
          WHERE vl.user_id = $1
-           AND ce.is_deleted = false
          ORDER BY vl.visited_at ASC, vl.event_id ASC`,
         [userId]
       ),
       pool.query<{ category: string | null }>(
-        `SELECT ce.main_category AS category
+        `SELECT archive.category
          FROM user_ticket_earn_log el
-         JOIN canonical_events ce ON ce.id::text = el.event_id
+         JOIN event_archive_snapshots archive ON archive.event_id = el.event_id
          WHERE el.user_id = $1
-           AND ce.is_deleted = false
-         GROUP BY ce.main_category
-         ORDER BY COUNT(*) DESC, ce.main_category ASC
+         GROUP BY archive.category
+         ORDER BY COUNT(*) DESC, archive.category ASC
          LIMIT 3`,
-        [userId]
-      ),
-      pool.query<{ event_id: string; title: string; category: string | null; region: string | null; venue: string | null; image_url: string | null; visited_at: string | Date }>(
-        `SELECT vl.event_id, ce.title, ce.main_category AS category,
-                ce.region, ce.venue, ce.image_url, vl.visited_at
-         FROM user_visit_log vl
-         JOIN canonical_events ce ON ce.id::text = vl.event_id
-         WHERE vl.user_id = $1
-           AND ce.is_deleted = false
-         ORDER BY vl.visited_at DESC
-         LIMIT $2 OFFSET $3`,
-        [userId, STAMP_BOOK_SIZE, stampOffset]
-      ),
-      pool.query<{ event_id: string }>(
-        `SELECT DISTINCT event_id
-         FROM user_visit_log
-         WHERE user_id = $1`,
         [userId]
       ),
       pool.query<{
         event_id: string;
         title: string;
-        display_title: string | null;
         category: string | null;
         region: string | null;
         venue: string | null;
         image_url: string | null;
-        start_at: string | Date | null;
-        end_at: string | Date | null;
-        lat: string | number | null;
-        lng: string | number | null;
-        discovered_at: string | Date;
+        visited_at: string | Date;
+        status: ArchiveStatus;
       }>(
-        `SELECT *
-         FROM (
-           SELECT DISTINCT ON (el.event_id)
-                  el.event_id,
-                  ce.title,
-                  ce.display_title,
-                  ce.main_category AS category,
-                  ce.region,
-                  ce.venue,
-                  ce.image_url,
-                  ce.start_at,
-                  ce.end_at,
-                  ce.lat,
-                  ce.lng,
-                  el.created_at AS discovered_at
-           FROM user_ticket_earn_log el
-           JOIN canonical_events ce ON ce.id::text = el.event_id
-           WHERE el.user_id = $1
-             AND ce.is_deleted = false
-           ORDER BY el.event_id, el.created_at DESC
-         ) discovered
-         ORDER BY discovered_at DESC
-         LIMIT 50`,
+        `SELECT vl.event_id,
+                COALESCE(
+                  NULLIF(BTRIM(ce.display_title), ''),
+                  archive.display_title,
+                  NULLIF(BTRIM(ce.title), ''),
+                  archive.title
+                ) AS title,
+                COALESCE(ce.main_category, archive.category) AS category,
+                COALESCE(ce.region, archive.region) AS region,
+                COALESCE(ce.venue, archive.venue) AS venue,
+                COALESCE(ce.image_url, archive.image_url) AS image_url,
+                vl.visited_at,
+                ${ARCHIVE_STATUS_SQL} AS status
+         FROM user_visit_log vl
+         JOIN event_archive_snapshots archive ON archive.event_id = vl.event_id
+         LEFT JOIN canonical_events ce ON ce.id::text = vl.event_id
+         WHERE vl.user_id = $1
+         ORDER BY vl.visited_at DESC, vl.event_id DESC
+         LIMIT $2 OFFSET $3`,
+        [userId, STAMP_BOOK_SIZE, stampOffset]
+      ),
+      pool.query<{ event_id: string }>(
+        `SELECT DISTINCT vl.event_id
+         FROM user_visit_log vl
+         JOIN event_archive_snapshots archive ON archive.event_id = vl.event_id
+         WHERE vl.user_id = $1`,
         [userId]
       ),
+      loadDiscoveredPage(userId, limit, cursor),
     ]);
 
     const visitedCount = countFrom(visitedResult.rows[0]);
@@ -270,21 +430,11 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         visitedAt: isoString(row.visited_at),
         isFirstInRegion: firstInRegion.has(String(row.event_id)),
         isFirstInCategory: firstInCategory.has(String(row.event_id)),
+        status: row.status,
       })),
       visitedEventIds: visitedIdsResult.rows.map((row) => String(row.event_id)),
-      discoveredCards: discoveredCardsResult.rows.map((row) => ({
-        eventId: row.event_id,
-        title: row.display_title?.trim() || row.title,
-        category: normalizeCategory(row.category),
-        region: row.region,
-        venue: row.venue,
-        imageUrl: row.image_url,
-        startAt: isoStringOrNull(row.start_at),
-        endAt: isoStringOrNull(row.end_at),
-        lat: numberOrNull(row.lat),
-        lng: numberOrNull(row.lng),
-        discoveredAt: isoString(row.discovered_at),
-      })),
+      discoveredCards: discoveredPage.items,
+      discoveredPageInfo: discoveredPage.pageInfo,
     });
   } catch (err) {
     console.error('[Passport] summary error:', err);

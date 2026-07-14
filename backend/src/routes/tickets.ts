@@ -4,7 +4,7 @@
  *
  * Phase 2 보강:
  * - GET  /config              : 프로모션 코드 등 정책 설정 반환 (requireAuth)
- * - POST /earn                : cooldown + daily_limit 서버 방어 (단일 트랜잭션)
+ * - POST /earn                : 구형 지급 경로 종료 (Culture Card open API로 통합)
  * - POST /exchange            : pending 생성 (티켓 미차감, 중복 pending 재사용)
  * - POST /exchange/confirm    : 소유권 검증 → 티켓 차감 → completed (단일 트랜잭션)
  */
@@ -15,8 +15,6 @@ import { requireAuth } from '../middleware/requireAuth';
 import {
   DAILY_OPEN_LIMIT,
   DAILY_TICKET_LIMIT,
-  grantTicketsForEvent,
-  TicketGrantError,
 } from '../services/ticketGrant';
 
 const router = express.Router();
@@ -318,46 +316,16 @@ router.post('/ad-attempt-events', requireAuth, async (req: Request, res: Respons
 
 /**
  * POST /api/tickets/earn
- * 광고 시청 완료 후 티켓 조각 획득
  *
- * 트랜잭션 흐름 (동시 요청 race condition 방지):
- * 1. earn_log INSERT ON CONFLICT DO NOTHING — unique index가 실제 중복 게이트
- * 2. RETURNING 없으면 → ROLLBACK + 409 (이미 오늘 이 이벤트에서 받음)
- * 3. user_tickets FOR UPDATE lock → daily_limit 검사
- * 4. daily_limit 초과 → ROLLBACK (earn_log INSERT도 함께 취소)
- * 5. earned 산출 → user_tickets 갱신 → earn_log earned 업데이트 → COMMIT
+ * eventId만으로 지급을 요청하던 구형 경로는 카드 토큰·광고 보상
+ * 검증을 우회할 수 있어 종료했다. 지급은 POST /api/cards/v2/open에서만
+ * 카드 공개와 하나의 트랜잭션으로 처리한다.
  */
-router.post('/earn', requireAuth, async (req: Request, res: Response) => {
-  const userId = req.user!.userId;
-  const { eventId, adAttemptId } = req.body as { eventId?: string; adAttemptId?: string };
-  if (!eventId) {
-    return res.status(400).json({ error: 'MISSING_EVENT_ID' });
-  }
-  const normalizedAdAttemptId = cleanOptionalString(adAttemptId, 128);
-  const today = todayKst();
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await grantTicketsForEvent(client, {
-      userId,
-      eventId,
-      today,
-      adAttemptId: normalizedAdAttemptId,
-    });
-    await client.query('COMMIT');
-    console.log(`[Tickets] 🎟 earn: user=${userId} event=${eventId} earned=${result.earned} opens=${result.dailyOpenCount}/${result.dailyOpenLimit}`);
-    return res.json(result);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    if (err instanceof TicketGrantError) {
-      return res.status(err.status).json({ error: err.code, ...err.details });
-    }
-    console.error('[Tickets] earn error:', err);
-    return res.status(500).json({ error: 'INTERNAL_ERROR' });
-  } finally {
-    client.release();
-  }
+router.post('/earn', requireAuth, (_req: Request, res: Response) => {
+  return res.status(410).json({
+    error: 'LEGACY_TICKET_EARN_RETIRED',
+    replacement: '/api/cards/v2/open',
+  });
 });
 
 /**

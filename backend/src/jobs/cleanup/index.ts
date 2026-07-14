@@ -1,6 +1,7 @@
 import { pool } from '../../db';
 import crypto from 'crypto';
 import { deleteEventImage } from '../../lib/imageUpload';
+import { snapshotOpenedCardAliasesBeforeDelete } from '../../services/openedCardIdentity';
 
 /**
  * ============================================================
@@ -201,6 +202,20 @@ export async function runCleanupJob(): Promise<void> {
     if (expiredIds.rowCount && expiredIds.rowCount > 0) {
       const ids = expiredIds.rows.map((r: any) => r.id);
 
+      // Preserve why an event disappeared before its canonical row is removed,
+      // and clear its thumbnail so historical cards use an intentional fallback
+      // instead of keeping a URL whose backing file/source may disappear.
+      await pool.query(`
+        UPDATE event_archive_snapshots archive
+        SET removed_at = COALESCE(ce.deleted_at, NOW()),
+            removed_reason = ce.deleted_reason,
+            image_url = NULL,
+            updated_at = NOW()
+        FROM canonical_events ce
+        WHERE ce.id = ANY($1::uuid[])
+          AND archive.event_id = ce.id::text
+      `, [ids]);
+
       // R2 이미지 삭제 (DB 삭제 전 처리)
       const imageRows = await pool.query<{ id: string; image_key: string }>(`
         SELECT id, image_key
@@ -254,19 +269,54 @@ export async function runCleanupJob(): Promise<void> {
         );
       }
 
-      // 연관 레코드 먼저 삭제 (FK 없는 테이블)
-      await pool.query(`DELETE FROM user_likes   WHERE event_id = ANY($1)`, [ids]);
-      await pool.query(`DELETE FROM user_recent  WHERE event_id = ANY($1)`, [ids]);
-      await pool.query(`DELETE FROM user_events  WHERE event_id = ANY($1)`, [ids]);
+      const hardDeleteClient = await pool.connect();
+      try {
+        await hardDeleteClient.query('BEGIN');
 
-      // canonical_events 완전 삭제 (CASCADE로 event_actions, event_views 자동 삭제)
-      const hardResult = await pool.query(`
-        DELETE FROM canonical_events WHERE id = ANY($1)
-      `, [ids]);
+        // hard delete 직전 canonical row를 잠그고, 각 이벤트를 서로 섞지 않은
+        // 채 현재 event_id/content_key/canonical_key를 공개한 모든 사용자의
+        // 영구 ledger에 snapshot한다.
+        await snapshotOpenedCardAliasesBeforeDelete(hardDeleteClient, ids);
 
-      hardDeletedCount = hardResult.rowCount || 0;
+        // 연관 레코드 먼저 삭제 (FK 없는 테이블)
+        await hardDeleteClient.query(`DELETE FROM user_likes   WHERE event_id = ANY($1)`, [ids]);
+        await hardDeleteClient.query(`DELETE FROM user_recent  WHERE event_id = ANY($1)`, [ids]);
+        await hardDeleteClient.query(`DELETE FROM user_events  WHERE event_id = ANY($1)`, [ids]);
+
+        // canonical_events 완전 삭제 (CASCADE로 event_actions, event_views 자동 삭제)
+        const hardResult = await hardDeleteClient.query(`
+          DELETE FROM canonical_events WHERE id = ANY($1)
+        `, [ids]);
+
+        hardDeletedCount = hardResult.rowCount || 0;
+        await hardDeleteClient.query('COMMIT');
+      } catch (error) {
+        await hardDeleteClient.query('ROLLBACK');
+        throw error;
+      } finally {
+        hardDeleteClient.release();
+      }
       console.log(`[CleanupJob] Hard deleted ${hardDeletedCount} events (30d+ after soft delete)`);
     }
+
+    // A snapshot is shared across users, so it is safe to remove only when no
+    // open, visit, or saved record references its event anymore.
+    const orphanArchives = await pool.query(`
+      DELETE FROM event_archive_snapshots archive
+      WHERE NOT EXISTS (
+              SELECT 1 FROM user_ticket_earn_log el
+              WHERE el.event_id = archive.event_id
+            )
+        AND NOT EXISTS (
+              SELECT 1 FROM user_visit_log vl
+              WHERE vl.event_id = archive.event_id
+            )
+        AND NOT EXISTS (
+              SELECT 1 FROM user_likes likes
+              WHERE likes.event_id = archive.event_id
+            )
+    `);
+    console.log(`[CleanupJob] Deleted ${orphanArchives.rowCount || 0} orphan event archive snapshots`);
 
   } catch (error: any) {
     finalStatus = 'failed';

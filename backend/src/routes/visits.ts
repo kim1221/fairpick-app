@@ -1,6 +1,8 @@
 import express, { Request, Response } from 'express';
+import type { PoolClient } from 'pg';
 import { pool } from '../db';
 import { requireAuth } from '../middleware/requireAuth';
+import { upsertEventArchive } from '../services/eventArchive';
 
 /**
  * 문화 여권(추억 책자) 방문 도장 — 자기신고 방식.
@@ -16,11 +18,15 @@ function cleanEventId(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
-async function countStamps(userId: string): Promise<number> {
-  const { rows } = await pool.query<{ count: string | number }>(
-    `SELECT COUNT(DISTINCT event_id)::int AS count
-     FROM user_visit_log
-     WHERE user_id = $1`,
+async function countStamps(
+  client: Pick<PoolClient, 'query'>,
+  userId: string,
+): Promise<number> {
+  const { rows } = await client.query<{ count: string | number }>(
+    `SELECT COUNT(DISTINCT vl.event_id)::int AS count
+     FROM user_visit_log vl
+     JOIN event_archive_snapshots archive ON archive.event_id = vl.event_id
+     WHERE vl.user_id = $1`,
     [userId]
   );
   return Number(rows[0]?.count ?? 0);
@@ -37,23 +43,33 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'MISSING_EVENT_ID' });
   }
 
+  let client: PoolClient | null = null;
   try {
-    const { rows: inserted } = await pool.query<{ id: string }>(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await upsertEventArchive(client, eventId);
+    const { rows: inserted } = await client.query<{ id: string }>(
       `INSERT INTO user_visit_log (user_id, event_id, bonus_tickets)
        VALUES ($1, $2, 0)
        ON CONFLICT (user_id, event_id) DO NOTHING
        RETURNING id`,
       [userId, eventId]
     );
-    const stampCount = await countStamps(userId);
+    const stampCount = await countStamps(client, userId);
+    await client.query('COMMIT');
     return res.json({
       ok: true,
       alreadyVisited: inserted.length === 0,
       stampCount,
     });
   } catch (err) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
     console.error('[visits] self-report error:', err);
     return res.status(500).json({ error: 'INTERNAL_ERROR' });
+  } finally {
+    client?.release();
   }
 });
 
@@ -72,7 +88,7 @@ router.delete('/:eventId', requireAuth, async (req: Request, res: Response) => {
       `DELETE FROM user_visit_log WHERE user_id = $1 AND event_id = $2`,
       [userId, eventId]
     );
-    const stampCount = await countStamps(userId);
+    const stampCount = await countStamps(pool, userId);
     return res.json({ ok: true, stampCount });
   } catch (err) {
     console.error('[visits] delete error:', err);
@@ -87,7 +103,10 @@ router.get('/ids', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   try {
     const { rows } = await pool.query<{ event_id: string }>(
-      `SELECT DISTINCT event_id FROM user_visit_log WHERE user_id = $1`,
+      `SELECT DISTINCT vl.event_id
+       FROM user_visit_log vl
+       JOIN event_archive_snapshots archive ON archive.event_id = vl.event_id
+       WHERE vl.user_id = $1`,
       [userId]
     );
     return res.json({ eventIds: rows.map((r) => String(r.event_id)) });

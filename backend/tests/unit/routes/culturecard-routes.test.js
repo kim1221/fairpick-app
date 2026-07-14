@@ -11,6 +11,7 @@ const cardsRouter = require('../../../src/routes/cards').default;
 const visitsRouter = require('../../../src/routes/visits').default;
 const passportRouter = require('../../../src/routes/passport').default;
 const ticketsRouter = require('../../../src/routes/tickets').default;
+const { sealLockedCard } = require('../../../src/services/cardToken');
 
 const userId = '00000000-0000-4000-8000-000000000001';
 
@@ -81,6 +82,17 @@ function todayKst() {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+test('POST /api/tickets/earn retires the unverified legacy reward path', async () => {
+  const response = await request(ticketsRouter, 'POST', '/earn', {
+    eventId: 'arbitrary-event-id',
+    adAttemptId: 'unverified-attempt',
+  });
+
+  assert.equal(response.status, 410);
+  assert.equal(response.body.error, 'LEGACY_TICKET_EARN_RETIRED');
+  assert.equal(response.body.replacement, '/api/cards/v2/open');
+});
+
 test('GET /api/cards/today returns three unopened cards, morePool, and ticket totals', async () => {
   const canonicalSql = [];
   pool.query = async (sql, params) => {
@@ -96,10 +108,12 @@ test('GET /api/cards/today returns three unopened cards, morePool, and ticket to
     if (text.includes('FROM canonical_events')) {
       canonicalSql.push(text);
       assert.deepEqual(params.slice(-1), [300]);
+      assert.equal(params[1], userId);
+      assert.match(text, /NOT EXISTS[\s\S]*FROM user_card_opened_keys opened/);
       return {
+        // SQL anti-join이 실행된 DB 결과처럼 이미 연 event-2는 포함하지 않는다.
         rows: [
           { id: 'event-1', title: '전시 하나', main_category: '전시', venue: 'A관', region: '서울', start_at: isoDaysFromNow(-2), end_at: isoDaysFromNow(2), image_url: 'https://img/1.jpg', overview: '첫 줄 소개\n둘째 줄', buzz_score: 50 },
-          { id: 'event-2', title: '공연 둘', main_category: '공연', venue: null, region: null, start_at: null, end_at: isoDaysFromNow(5), image_url: null, overview: null, buzz_score: 40 },
           { id: 'event-3', title: '팝업 셋', main_category: '팝업', venue: '팝업존', region: '부산', start_at: isoDaysFromNow(1), end_at: null, image_url: null, overview: '팝업 소개', buzz_score: 30 },
           { id: 'event-4', title: '축제 넷', main_category: '축제', venue: '광장', region: '대구', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(9), image_url: null, overview: '축제 소개', buzz_score: 20 },
           { id: 'event-5', title: '클래스 다섯', main_category: '클래스', venue: '스튜디오', region: '제주', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(10), image_url: null, overview: '기타 소개', buzz_score: 10 },
@@ -170,7 +184,11 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
     if (text.includes('FROM user_ticket_earn_log el')) {
       return { rows: [{ event_id: opened.id, earn_date: todayKst(), dedupe_key: opened.content_key }] };
     }
-    if (text.includes('FROM canonical_events')) return { rows: [opened, ...fresh] };
+    if (text.includes('FROM canonical_events')) {
+      assert.match(text, /FROM user_card_opened_keys opened/);
+      // opened-weekly는 ledger anti-join에서 제외되고 신규 후보만 반환된다.
+      return { rows: fresh };
+    }
     throw new Error(`Unexpected v2 query: ${text}`);
   };
 
@@ -194,9 +212,12 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
 
   await new Promise((resolve) => setImmediate(resolve));
   const token = todayResponse.body.lockedCards.find((card) => card.category === '전시').cardToken;
+  const cappedToken = todayResponse.body.lockedCards.find((card) => card.category === '공연').cardToken;
   let grantOpenCount = 1;
+  let archiveUpsertCount = 0;
+  let ledgerClaimCount = 0;
   const client = {
-    async query(sql) {
+    async query(sql, params = []) {
       const text = String(sql);
       if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [], rowCount: 0 };
       if (text.includes('FROM ad_reward_attempts')) {
@@ -204,8 +225,36 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
         assert.match(text, /metadata->>'cardToken'/);
         return { rows: [{ attempt_id: 'attempt-v2' }], rowCount: 1 };
       }
+      if (text.includes('INSERT INTO event_archive_snapshots')) {
+        archiveUpsertCount += 1;
+        assert.match(text, /ON CONFLICT \(event_id\) DO UPDATE/);
+        return { rows: [{ event_id: 'locked-a' }], rowCount: 1 };
+      }
       if (text.includes('FROM canonical_events')) {
-        return { rows: [fresh[0]], rowCount: 1 };
+        const event = fresh.find((item) => item.id === params[0]);
+        return { rows: event ? [event] : [], rowCount: event ? 1 : 0 };
+      }
+      if (text.includes('pg_advisory_xact_lock')) {
+        assert.deepEqual(params, [userId]);
+        assert.match(text, /culturecard-open/);
+        return { rows: [{}], rowCount: 1 };
+      }
+      if (text.includes('SELECT 1') && text.includes('FROM user_card_opened_keys')) {
+        assert.equal(params[0], userId);
+        assert.ok(['locked-a', 'locked-b'].includes(params[1]));
+        assert.ok(['a', 'b'].includes(params[2]));
+        assert.equal(params[3], null);
+        assert.match(text, /key_type IN \('content_key', 'canonical_key'\)/);
+        return { rows: [], rowCount: 0 };
+      }
+      if (text.includes('INSERT INTO user_card_opened_keys')) {
+        ledgerClaimCount += 1;
+        assert.equal(params[0], userId);
+        assert.ok(['locked-a', 'locked-b'].includes(params[1]));
+        assert.ok(['a', 'b'].includes(params[2]));
+        assert.equal(params[3], null);
+        assert.match(text, /ON CONFLICT DO NOTHING/);
+        return { rows: [{ expected_count: 2, inserted_count: 2 }], rowCount: 1 };
       }
       if (text.includes('INSERT INTO user_ticket_earn_log')) return { rows: [{ id: 'earn-v2' }], rowCount: 1 };
       if (text.includes('INSERT INTO user_tickets')) return { rows: [], rowCount: 1 };
@@ -237,15 +286,112 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
   assert.ok(openedResponse.body.earned >= 1 && openedResponse.body.earned <= 3);
   assert.equal(openedResponse.body.dailyOpenCount, 1);
   assert.equal(openedResponse.body.dailyOpenLimit, 50);
+  assert.equal(archiveUpsertCount, 1);
+  assert.equal(ledgerClaimCount, 1);
 
   grantOpenCount = 51;
   const cappedResponse = await request(makeApp(cardsRouter), 'POST', '/v2/open', {
-    cardToken: token,
+    cardToken: cappedToken,
     adAttemptId: 'attempt-v2-cap',
   });
   assert.equal(cappedResponse.status, 429);
   assert.equal(cappedResponse.body.error, 'DAILY_OPEN_LIMIT_REACHED');
   assert.equal(cappedResponse.body.dailyOpenLimit, 50);
+  assert.equal(ledgerClaimCount, 2);
+});
+
+test('GET /api/cards/v2/today never falls back to lifetime-opened ids or dedupe aliases', async () => {
+  let canonicalCalls = 0;
+  pool.query = async (sql, params = []) => {
+    const text = String(sql);
+    if (text.includes('user_card_impressions')) return { rows: [] };
+    if (text.includes('user_likes')) return { rows: [] };
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 2, daily_earned: 0, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('MAX(el.earn_date)')) return { rows: [] };
+    if (text.includes('FROM user_ticket_earn_log el')) {
+      assert.doesNotMatch(text, /earn_date\s*>=/);
+      return {
+        rows: [{ event_id: 'opened-years-ago', earn_date: '2024-01-01' }],
+      };
+    }
+    if (text.includes('FROM canonical_events')) {
+      canonicalCalls += 1;
+      assert.deepEqual(params, [todayKst(), userId, 300]);
+      assert.match(text, /NOT EXISTS[\s\S]*FROM user_card_opened_keys opened/);
+      assert.match(text, /opened\.key_type = 'event_id'/);
+      assert.match(text, /ARRAY_REMOVE\(ARRAY\[event\.content_key, event\.canonical_key\], NULL\)/);
+      // SQL anti-join이 event id와 same-culture alias 모두를 걸러낸 실제 DB 결과.
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected lifetime v2 query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(cardsRouter), 'GET', '/v2/today');
+
+  assert.equal(status, 200);
+  assert.deepEqual(body.lockedCards, []);
+  assert.equal(body.dailyOpenCount, 0);
+  assert.equal(canonicalCalls, 1);
+});
+
+test('POST /api/cards/v2/open rejects a stale token after a lifetime dedupe match', async () => {
+  const cardToken = sealLockedCard({
+    userId,
+    eventId: 'new-row-same-content',
+    assignedOn: todayKst(),
+    walkMinutes: null,
+    reasonTags: [],
+  });
+  let rewardMutationAttempted = false;
+  const client = {
+    async query(sql, params = []) {
+      const text = String(sql);
+      if (text === 'BEGIN' || text === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (text.includes('FROM ad_reward_attempts')) {
+        return { rows: [{ attempt_id: 'stale-attempt' }], rowCount: 1 };
+      }
+      if (text.includes('FROM canonical_events') && text.includes('WHERE id::text = $1')) {
+        return {
+          rows: [{
+            id: 'new-row-same-content',
+            title: '동일 콘텐츠의 새 row',
+            content_key: 'same-culture',
+            canonical_key: null,
+            main_category: '전시',
+            end_at: isoDaysFromNow(10),
+          }],
+          rowCount: 1,
+        };
+      }
+      if (text.includes('pg_advisory_xact_lock')) {
+        assert.deepEqual(params, [userId]);
+        assert.match(text, /culturecard-open/);
+        return { rows: [{}], rowCount: 1 };
+      }
+      if (text.includes('SELECT 1') && text.includes('FROM user_card_opened_keys')) {
+        assert.deepEqual(params, [userId, 'new-row-same-content', 'same-culture', null]);
+        assert.match(text, /key_type IN \('content_key', 'canonical_key'\)/);
+        return { rows: [{ '?column?': 1 }], rowCount: 1 };
+      }
+      if (/INSERT INTO user_card_opened_keys|INSERT INTO user_ticket_earn_log|UPDATE user_tickets/.test(text)) {
+        rewardMutationAttempted = true;
+      }
+      throw new Error(`Unexpected stale-token query: ${text}`);
+    },
+    release() {},
+  };
+  pool.connect = async () => client;
+
+  const { status, body } = await request(makeApp(cardsRouter), 'POST', '/v2/open', {
+    cardToken,
+    adAttemptId: 'stale-attempt',
+  });
+
+  assert.equal(status, 409);
+  assert.equal(body.error, 'EVENT_ALREADY_OPENED');
+  assert.equal(rewardMutationAttempted, false);
 });
 
 test('GET /api/cards/today explains weighted taste personalization', async () => {
@@ -315,15 +461,16 @@ test('GET /api/cards/today expands nearby radius, excludes opened events, divers
       assert.match(text, /distance_m/i);
       assert.match(text, /lat IS NOT NULL/i);
       assert.match(text, /lng IS NOT NULL/i);
+      assert.match(text, /NOT EXISTS[\s\S]*FROM user_card_opened_keys opened/);
       assert.equal(params[0], lat);
       assert.equal(params[1], lng);
+      assert.equal(params[3], userId);
 
       if (canonicalCalls.length === 1) {
         assert.ok(params.includes(3000));
         return {
           rows: [
             { id: 'event-near-exhibition', title: '가까운 전시', main_category: '전시', venue: 'A관', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '전시 소개', distance_m: 160, buzz_score: 20 },
-            { id: 'event-opened', title: '이미 연 공연', main_category: '공연', venue: 'B홀', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '제외 대상', distance_m: 240, buzz_score: 90 },
           ],
         };
       }
@@ -341,7 +488,6 @@ test('GET /api/cards/today expands nearby radius, excludes opened events, divers
           { id: 'event-performance', title: '근처 공연', main_category: '공연', venue: 'D홀', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '공연 소개', distance_m: 400, buzz_score: 70 },
           { id: 'event-popup', title: '근처 팝업', main_category: '팝업', venue: 'E존', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '팝업 소개', distance_m: 800, buzz_score: 60 },
           { id: 'event-festival', title: '근처 축제', main_category: '축제', venue: 'F광장', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '축제 소개', distance_m: 1200, buzz_score: 50 },
-          { id: 'event-opened', title: '이미 연 공연', main_category: '공연', venue: 'B홀', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '제외 대상', distance_m: 240, buzz_score: 90 },
           { id: 'event-etc', title: '기타 문화', main_category: '클래스', venue: 'G실', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '기타 소개', distance_m: 1600, buzz_score: 40 },
           { id: 'event-more-1', title: '더보기 1', main_category: '전시', venue: 'H관', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: null, distance_m: 2000, buzz_score: 30 },
           { id: 'event-more-2', title: '더보기 2', main_category: '공연', venue: 'I홀', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: null, distance_m: 2400, buzz_score: 30 },
@@ -463,21 +609,23 @@ test('GET /api/cards/today keeps partial nearby candidates and fills the rest fr
   assert.deepEqual(body.today.map((card) => card.eventId), ['near-1', 'near-2', 'fallback-1']);
 });
 
-test('GET /api/cards/today applies a recent-open cooldown, not just today opened ids', async () => {
-  let earnLogSql = '';
+test('GET /api/cards/today lifetime-excludes opened identities with the ledger anti-join', async () => {
+  let canonicalSql = '';
   pool.query = async (sql, params = []) => {
     const text = String(sql);
+    if (text.includes('user_card_impressions')) return { rows: [] };
+    if (text.includes('user_likes')) return { rows: [] };
     if (text.includes('FROM user_tickets')) {
       return { rows: [{ ticket_count: 5, daily_earned: 1, daily_earned_date: todayKst() }] };
     }
-    if (text.includes('FROM user_ticket_earn_log')) {
-      earnLogSql = text;
-      assert.equal(params[0], userId);
-      return { rows: [{ event_id: 'recent-1', dedupe_key: 'same-show' }] };
-    }
     if (text.includes('FROM canonical_events')) {
-      assert.match(text, /COALESCE\(content_key,\s*canonical_key,\s*id::text\)/);
+      canonicalSql = text;
+      assert.deepEqual(params, [todayKst(), userId, 300]);
+      assert.match(text, /NOT EXISTS[\s\S]*FROM user_card_opened_keys opened/);
+      assert.match(text, /opened\.key_type = 'event_id'/);
+      assert.match(text, /opened\.key_type IN \('content_key', 'canonical_key'\)/);
       return {
+        // duplicate-old-show는 same-show ledger alias로 SQL에서 이미 제외된 결과다.
         rows: [
           { id: 'fresh-1', content_key: 'fresh-1', canonical_key: null, title: '새 전시', main_category: '전시', venue: 'A관', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '신규 후보', buzz_score: 30 },
           { id: 'fresh-2', content_key: 'fresh-2', canonical_key: null, title: '새 공연', main_category: '공연', venue: 'B홀', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: '신규 후보', buzz_score: 20 },
@@ -491,25 +639,39 @@ test('GET /api/cards/today applies a recent-open cooldown, not just today opened
   const { status, body } = await request(makeApp(cardsRouter), 'GET', '/today');
 
   assert.equal(status, 200);
-  assert.match(earnLogSql, /earn_date\s*>=/);
+  assert.ok(canonicalSql);
   assert.deepEqual(body.today.map((card) => card.eventId), ['fresh-1', 'fresh-2', 'fresh-3']);
+  assert.equal(body.morePool.some((card) => card.eventId === 'duplicate-old-show'), false);
 });
 
 test('POST /api/visits records a self-report stamp without location or reward', async () => {
   const queries = [];
-  pool.query = async (sql, params) => {
-    const text = String(sql);
-    queries.push(text);
-    if (text.includes('INSERT INTO user_visit_log')) {
-      assert.equal(params[0], userId);
-      assert.equal(params[1], 'event-visit-1');
-      return { rows: [{ id: 'visit-1' }], rowCount: 1 };
-    }
-    if (text.includes('COUNT(DISTINCT event_id)') && text.includes('FROM user_visit_log')) {
-      return { rows: [{ count: '5' }], rowCount: 1 };
-    }
-    throw new Error(`Unexpected query: ${text}`);
+  const client = {
+    async query(sql, params = []) {
+      const text = String(sql);
+      queries.push(text);
+      if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') {
+        return { rows: [], rowCount: 0 };
+      }
+      if (text.includes('INSERT INTO event_archive_snapshots')) {
+        assert.equal(params[0], 'event-visit-1');
+        assert.match(text, /ON CONFLICT \(event_id\) DO UPDATE/);
+        return { rows: [{ event_id: 'event-visit-1' }], rowCount: 1 };
+      }
+      if (text.includes('INSERT INTO user_visit_log')) {
+        assert.equal(params[0], userId);
+        assert.equal(params[1], 'event-visit-1');
+        return { rows: [{ id: 'visit-1' }], rowCount: 1 };
+      }
+      if (text.includes('COUNT(DISTINCT vl.event_id)') && text.includes('FROM user_visit_log')) {
+        assert.match(text, /JOIN event_archive_snapshots/);
+        return { rows: [{ count: '5' }], rowCount: 1 };
+      }
+      throw new Error(`Unexpected query: ${text}`);
+    },
+    release() {},
   };
+  pool.connect = async () => client;
 
   const { status, body } = await request(makeApp(visitsRouter), 'POST', '/', { eventId: 'event-visit-1' });
 
@@ -517,19 +679,27 @@ test('POST /api/visits records a self-report stamp without location or reward', 
   assert.equal(body.ok, true);
   assert.equal(body.alreadyVisited, false);
   assert.equal(body.stampCount, 5);
-  // 자기신고: 위치/보상/트랜잭션/티켓업데이트 없음
+  // 자기신고: 위치/보상/티켓 업데이트 없음. 기록+snapshot만 원자 처리.
   assert.equal(body.bonusTickets, undefined);
   assert.equal(body.verified, undefined);
-  assert.equal(queries.some((sql) => /FOR UPDATE|UPDATE user_tickets|FROM canonical_events/i.test(sql)), false);
+  assert.equal(queries.some((sql) => /FOR UPDATE|UPDATE user_tickets/i.test(sql)), false);
+  assert.equal(queries.includes('BEGIN'), true);
+  assert.equal(queries.includes('COMMIT'), true);
 });
 
 test('POST /api/visits is idempotent for an already stamped event', async () => {
-  pool.query = async (sql) => {
-    const text = String(sql);
-    if (text.includes('INSERT INTO user_visit_log')) return { rows: [], rowCount: 0 };
-    if (text.includes('COUNT(DISTINCT event_id)') && text.includes('FROM user_visit_log')) return { rows: [{ count: '5' }], rowCount: 1 };
-    throw new Error(`Unexpected query: ${text}`);
+  const client = {
+    async query(sql) {
+      const text = String(sql);
+      if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (text.includes('INSERT INTO event_archive_snapshots')) return { rows: [{ event_id: 'event-visit-1' }], rowCount: 1 };
+      if (text.includes('INSERT INTO user_visit_log')) return { rows: [], rowCount: 0 };
+      if (text.includes('COUNT(DISTINCT vl.event_id)') && text.includes('FROM user_visit_log')) return { rows: [{ count: '5' }], rowCount: 1 };
+      throw new Error(`Unexpected query: ${text}`);
+    },
+    release() {},
   };
+  pool.connect = async () => client;
 
   const { status, body } = await request(makeApp(visitsRouter), 'POST', '/', { eventId: 'event-visit-1' });
 
@@ -551,7 +721,8 @@ test('POST /api/visits requires an eventId', async () => {
 test('GET /api/visits/ids returns the visited event id set', async () => {
   pool.query = async (sql) => {
     const text = String(sql);
-    if (text.includes('SELECT DISTINCT event_id') && text.includes('FROM user_visit_log')) {
+    if (text.includes('SELECT DISTINCT vl.event_id') && text.includes('FROM user_visit_log')) {
+      assert.match(text, /JOIN event_archive_snapshots/);
       return { rows: [{ event_id: 'a' }, { event_id: 'b' }], rowCount: 2 };
     }
     throw new Error(`Unexpected query: ${text}`);
@@ -569,24 +740,25 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
   const stampParams = [];
   pool.query = async (sql, params) => {
     const text = String(sql);
-    if (text.includes('COUNT(DISTINCT event_id)') && text.includes('FROM user_ticket_earn_log') && !text.includes('earn_date >=')) {
+    if (text.includes('COUNT(DISTINCT el.event_id)') && text.includes('FROM user_ticket_earn_log el') && !text.includes('earn_date >=')) {
+      assert.match(text, /JOIN event_archive_snapshots/);
       return { rows: [{ count: '5' }] };
     }
-    if (text.includes('COUNT(DISTINCT event_id)') && text.includes('FROM user_visit_log')) {
+    if (text.includes('COUNT(DISTINCT vl.event_id)') && text.includes('FROM user_visit_log vl') && !text.includes('visited_at') && !text.includes('GROUP BY archive.region')) {
       return { rows: [{ count: '3' }] };
     }
-    if (text.includes('earn_date >=') && text.includes('FROM user_ticket_earn_log')) {
+    if (text.includes('earn_date >=') && text.includes('FROM user_ticket_earn_log el')) {
       seenParams.push(params);
       assert.match(params[1], /^\d{4}-\d{2}-01$/);
       return { rows: [{ count: '3' }] };
     }
-    if (text.includes('COUNT(DISTINCT ce.region)') && text.includes('FROM user_ticket_earn_log el')) {
+    if (text.includes('COUNT(DISTINCT archive.region)') && text.includes('FROM user_ticket_earn_log el')) {
       return { rows: [{ count: '3' }] };
     }
-    if (text.includes('SELECT DISTINCT ce.main_category AS category') && text.includes('FROM user_ticket_earn_log el')) {
+    if (text.includes('SELECT DISTINCT archive.category') && text.includes('FROM user_ticket_earn_log el')) {
       return { rows: [{ category: '전시회' }, { category: '미디어 전시' }, { category: '뮤지컬' }, { category: '클래스' }] };
     }
-    if (text.includes('COUNT(DISTINCT ce.region)') && text.includes('FROM user_visit_log vl')) {
+    if (text.includes('COUNT(DISTINCT archive.region)') && text.includes('FROM user_visit_log vl')) {
       return { rows: [{ count: '2' }] };
     }
     if (text.includes('COUNT(DISTINCT vl.event_id)') && text.includes('vl.visited_at')) {
@@ -594,7 +766,7 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
       assert.match(params[1], /^\d{4}-\d{2}-01$/);
       return { rows: [{ count: '2' }] };
     }
-    if (text.includes('SELECT ce.region, COUNT(DISTINCT vl.event_id)::int AS count')) {
+    if (text.includes('SELECT archive.region, COUNT(DISTINCT vl.event_id)::int AS count')) {
       return { rows: [{ region: '성동구', count: '2' }, { region: '용산구', count: '1' }] };
     }
     if (text.includes('ORDER BY vl.visited_at ASC, vl.event_id ASC')) {
@@ -606,13 +778,14 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
         ],
       };
     }
-    if (text.includes('GROUP BY') && text.includes('canonical_events')) {
+    if (text.includes('GROUP BY archive.category') && text.includes('user_ticket_earn_log')) {
       return { rows: [{ category: '전시' }, { category: '팝업' }, { category: '기타' }] };
     }
-    if (text.includes('SELECT DISTINCT event_id') && text.includes('FROM user_visit_log')) {
+    if (text.includes('SELECT DISTINCT vl.event_id') && text.includes('FROM user_visit_log')) {
       return { rows: [{ event_id: 'event-1' }, { event_id: 'event-2' }, { event_id: 'event-4' }, { event_id: 'event-old' }] };
     }
-    if (text.includes('FROM user_ticket_earn_log el') && text.includes('DISTINCT ON')) {
+    if (text.includes('WITH latest_discovery AS')) {
+      assert.deepEqual(params, [userId, null, null, 51]);
       return {
         rows: [
           {
@@ -627,17 +800,18 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
             lat: 37.544,
             lng: 127.055,
             discovered_at: '2026-07-02T03:00:00.000Z',
+            status: 'active',
           },
         ],
       };
     }
-    if (text.includes('FROM user_visit_log') && text.includes('JOIN canonical_events')) {
+    if (text.includes('FROM user_visit_log vl') && text.includes('LEFT JOIN canonical_events')) {
       stampParams.push(params);
       return {
         rows: [
-          { event_id: 'event-4', title: '전시 넷', category: '미디어 전시', region: '성동구', venue: '언더스탠드에비뉴', image_url: null, visited_at: '2026-07-02T03:00:00.000Z' },
-          { event_id: 'event-2', title: '공연 둘', category: '공연', region: '용산구', venue: '노들섬', image_url: 'http://img/2.jpg', visited_at: '2026-07-01T03:00:00.000Z' },
-          { event_id: 'event-1', title: '전시 하나', category: '전시', region: '성동구', venue: '성수 코사이어티', image_url: null, visited_at: '2026-06-30T03:00:00.000Z' },
+          { event_id: 'event-4', title: '전시 넷', category: '미디어 전시', region: '성동구', venue: '언더스탠드에비뉴', image_url: null, visited_at: '2026-07-02T03:00:00.000Z', status: 'ended' },
+          { event_id: 'event-2', title: '공연 둘', category: '공연', region: '용산구', venue: '노들섬', image_url: 'http://img/2.jpg', visited_at: '2026-07-01T03:00:00.000Z', status: 'active' },
+          { event_id: 'event-1', title: '전시 하나', category: '전시', region: '성동구', venue: '성수 코사이어티', image_url: null, visited_at: '2026-06-30T03:00:00.000Z', status: 'removed' },
         ],
       };
     }
@@ -661,9 +835,9 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
   ]);
   assert.deepEqual(body.tasteCategories, ['전시', '팝업', '기타']);
   assert.deepEqual(body.stamps, [
-    { eventId: 'event-4', title: '전시 넷', category: '전시', region: '성동구', venue: '언더스탠드에비뉴', imageUrl: null, visitedAt: '2026-07-02T03:00:00.000Z', isFirstInRegion: false, isFirstInCategory: false },
-    { eventId: 'event-2', title: '공연 둘', category: '공연', region: '용산구', venue: '노들섬', imageUrl: 'http://img/2.jpg', visitedAt: '2026-07-01T03:00:00.000Z', isFirstInRegion: true, isFirstInCategory: true },
-    { eventId: 'event-1', title: '전시 하나', category: '전시', region: '성동구', venue: '성수 코사이어티', imageUrl: null, visitedAt: '2026-06-30T03:00:00.000Z', isFirstInRegion: true, isFirstInCategory: true },
+    { eventId: 'event-4', title: '전시 넷', category: '전시', region: '성동구', venue: '언더스탠드에비뉴', imageUrl: null, visitedAt: '2026-07-02T03:00:00.000Z', isFirstInRegion: false, isFirstInCategory: false, status: 'ended' },
+    { eventId: 'event-2', title: '공연 둘', category: '공연', region: '용산구', venue: '노들섬', imageUrl: 'http://img/2.jpg', visitedAt: '2026-07-01T03:00:00.000Z', isFirstInRegion: true, isFirstInCategory: true, status: 'active' },
+    { eventId: 'event-1', title: '전시 하나', category: '전시', region: '성동구', venue: '성수 코사이어티', imageUrl: null, visitedAt: '2026-06-30T03:00:00.000Z', isFirstInRegion: true, isFirstInCategory: true, status: 'removed' },
   ]);
   assert.deepEqual(body.visitedEventIds, ['event-1', 'event-2', 'event-4', 'event-old']);
   assert.equal(body.stampBook, 1);
@@ -683,8 +857,10 @@ test('GET /api/passport returns lifetime, KST monthly, taste, and recent stamp s
       lat: 37.544,
       lng: 127.055,
       discoveredAt: '2026-07-02T03:00:00.000Z',
+      status: 'active',
     },
   ]);
+  assert.deepEqual(body.discoveredPageInfo, { limit: 50, hasMore: false, nextCursor: null });
   assert.equal(seenParams.length, 1);
   assert.equal(monthVisitedParams.length, 1);
 });
@@ -693,28 +869,28 @@ test('GET /api/passport loads older stamp books by query', async () => {
   let stampParams = null;
   pool.query = async (sql, params) => {
     const text = String(sql);
-    if (text.includes('COUNT(DISTINCT event_id)') && text.includes('FROM user_ticket_earn_log') && !text.includes('earn_date >=')) {
+    if (text.includes('COUNT(DISTINCT el.event_id)') && text.includes('FROM user_ticket_earn_log el') && !text.includes('earn_date >=')) {
       return { rows: [{ count: '0' }] };
     }
-    if (text.includes('COUNT(DISTINCT event_id)') && text.includes('FROM user_visit_log')) {
+    if (text.includes('COUNT(DISTINCT vl.event_id)') && text.includes('FROM user_visit_log vl') && !text.includes('visited_at') && !text.includes('GROUP BY archive.region')) {
       return { rows: [{ count: '72' }] };
     }
-    if (text.includes('earn_date >=') && text.includes('FROM user_ticket_earn_log')) {
+    if (text.includes('earn_date >=') && text.includes('FROM user_ticket_earn_log el')) {
       return { rows: [{ count: '0' }] };
     }
-    if (text.includes('COUNT(DISTINCT ce.region)') && text.includes('FROM user_ticket_earn_log el')) {
+    if (text.includes('COUNT(DISTINCT archive.region)') && text.includes('FROM user_ticket_earn_log el')) {
       return { rows: [{ count: '0' }] };
     }
-    if (text.includes('SELECT DISTINCT ce.main_category AS category') && text.includes('FROM user_ticket_earn_log el')) {
+    if (text.includes('SELECT DISTINCT archive.category') && text.includes('FROM user_ticket_earn_log el')) {
       return { rows: [] };
     }
-    if (text.includes('COUNT(DISTINCT ce.region)') && text.includes('FROM user_visit_log vl')) {
+    if (text.includes('COUNT(DISTINCT archive.region)') && text.includes('FROM user_visit_log vl')) {
       return { rows: [{ count: '1' }] };
     }
     if (text.includes('COUNT(DISTINCT vl.event_id)') && text.includes('vl.visited_at')) {
       return { rows: [{ count: '0' }] };
     }
-    if (text.includes('SELECT ce.region, COUNT(DISTINCT vl.event_id)::int AS count')) {
+    if (text.includes('SELECT archive.region, COUNT(DISTINCT vl.event_id)::int AS count')) {
       return { rows: [{ region: '서울', count: '72' }] };
     }
     if (text.includes('ORDER BY vl.visited_at ASC, vl.event_id ASC')) {
@@ -729,16 +905,16 @@ test('GET /api/passport loads older stamp books by query', async () => {
         ],
       };
     }
-    if (text.includes('GROUP BY') && text.includes('canonical_events')) {
+    if (text.includes('GROUP BY archive.category') && text.includes('user_ticket_earn_log')) {
       return { rows: [] };
     }
-    if (text.includes('SELECT DISTINCT event_id') && text.includes('FROM user_visit_log')) {
+    if (text.includes('SELECT DISTINCT vl.event_id') && text.includes('FROM user_visit_log')) {
       return { rows: [{ event_id: 'event-old' }] };
     }
-    if (text.includes('FROM user_ticket_earn_log el') && text.includes('DISTINCT ON')) {
+    if (text.includes('WITH latest_discovery AS')) {
       return { rows: [] };
     }
-    if (text.includes('FROM user_visit_log') && text.includes('JOIN canonical_events')) {
+    if (text.includes('FROM user_visit_log vl') && text.includes('LEFT JOIN canonical_events')) {
       stampParams = params;
       return {
         rows: [
@@ -750,6 +926,7 @@ test('GET /api/passport loads older stamp books by query', async () => {
             venue: '갤러리',
             image_url: null,
             visited_at: '2026-01-01T03:00:00.000Z',
+            status: 'ended',
           },
         ],
       };
@@ -765,6 +942,102 @@ test('GET /api/passport loads older stamp books by query', async () => {
   assert.equal(body.stampBookCount, 2);
   assert.equal(body.stampBookSize, 60);
   assert.deepEqual(body.stamps.map((stamp) => stamp.eventId), ['event-old']);
+});
+
+test('GET /api/passport/discovered cursor-paginates archived ended and removed cards', async () => {
+  const firstDiscoveredAt = '2026-07-10T03:00:00.000Z';
+  let call = 0;
+  pool.query = async (sql, params) => {
+    const text = String(sql);
+    assert.match(text, /WITH latest_discovery AS/);
+    assert.match(text, /JOIN event_archive_snapshots/);
+    assert.match(text, /LEFT JOIN canonical_events/);
+    call += 1;
+
+    if (call === 1) {
+      assert.deepEqual(params, [userId, null, null, 2]);
+      return {
+        rows: [
+          {
+            event_id: 'event-ended',
+            title: '종료된 전시',
+            display_title: null,
+            category: '전시',
+            region: '서울',
+            venue: '미술관',
+            image_url: null,
+            start_at: null,
+            end_at: '2026-07-01T03:00:00.000Z',
+            lat: null,
+            lng: null,
+            discovered_at: firstDiscoveredAt,
+            status: 'ended',
+          },
+          {
+            event_id: 'event-extra',
+            title: '다음 카드',
+            display_title: null,
+            category: '공연',
+            region: null,
+            venue: null,
+            image_url: null,
+            start_at: null,
+            end_at: null,
+            lat: null,
+            lng: null,
+            discovered_at: '2026-07-09T03:00:00.000Z',
+            status: 'removed',
+          },
+        ],
+      };
+    }
+
+    assert.equal(params[1], firstDiscoveredAt);
+    assert.equal(params[2], 'event-ended');
+    assert.equal(params[3], 2);
+    return {
+      rows: [
+        {
+          event_id: 'event-removed',
+          title: '제공 종료 행사',
+          display_title: null,
+          category: '기타',
+          region: null,
+          venue: null,
+          image_url: null,
+          start_at: null,
+          end_at: null,
+          lat: null,
+          lng: null,
+          discovered_at: '2026-07-08T03:00:00.000Z',
+          status: 'removed',
+        },
+      ],
+    };
+  };
+
+  const first = await request(makeApp(passportRouter), 'GET', '/discovered?limit=1');
+  assert.equal(first.status, 200);
+  assert.equal(first.body.items.length, 1);
+  assert.equal(first.body.items[0].status, 'ended');
+  assert.equal(first.body.pageInfo.hasMore, true);
+  assert.equal(typeof first.body.pageInfo.nextCursor, 'string');
+
+  const second = await request(
+    makeApp(passportRouter),
+    'GET',
+    `/discovered?limit=1&cursor=${encodeURIComponent(first.body.pageInfo.nextCursor)}`,
+  );
+  assert.equal(second.status, 200);
+  assert.deepEqual(second.body.items.map((item) => item.status), ['removed']);
+  assert.deepEqual(second.body.pageInfo, { limit: 1, hasMore: false, nextCursor: null });
+});
+
+test('GET /api/passport/discovered rejects malformed cursors before querying', async () => {
+  pool.query = async () => { throw new Error('must not query for an invalid cursor'); };
+  const { status, body } = await request(makeApp(passportRouter), 'GET', '/discovered?cursor=not-a-cursor');
+  assert.equal(status, 400);
+  assert.equal(body.error, 'INVALID_DISCOVERED_CURSOR');
 });
 
 test('GET /api/tickets/history includes visit stamp bonuses from user_visit_log', async () => {

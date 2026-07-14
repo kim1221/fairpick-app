@@ -19,7 +19,6 @@ const WEEKLY_CARD_COUNT = 3;
 const CARD_POOL_LIMIT = 12;           // 최종 노출(오늘+더보기) 상한
 const CANDIDATE_LIMIT = 300;          // 헤비 유저도 하루 50장을 열 수 있는 회전 여유
 const MIN_ROTATION_POOL = 60;         // 이만큼 모이면 반경 확장 중단(회전 풀 확보)
-const RECENT_OPEN_COOLDOWN_DAYS = 14; // 연(광고 본) 카드 재등장 방지
 const IMPRESSION_COOLDOWN_DAYS = 7;   // 최근 보여준 카드 소프트 제외(매일 새 발견)
 const FRESHNESS_WINDOW_DAYS = 60;     // created_at 신선도 감쇠 창
 const TASTE_WINDOW_DAYS = 90;         // 취향 신호 집계 창
@@ -62,7 +61,6 @@ type WeeklyOpenedEventRow = EventRow & { earn_date: string | Date | null; total_
 type OpenedEventRow = {
   event_id: string;
   earn_date: string | Date | null;
-  dedupe_key: string | null;
 };
 
 type LocationQuery = {
@@ -213,12 +211,6 @@ function weekKeyKst(today: string): string {
   return date.toISOString().slice(0, 10);
 }
 
-function dateKeyDaysBefore(dateKey: string, days: number): string {
-  const date = new Date(`${dateKey}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() - days);
-  return date.toISOString().slice(0, 10);
-}
-
 function weeklySeed(userId: string, weekKey: string): number {
   return hashStr(`${userId}|week|${weekKey}`);
 }
@@ -334,16 +326,6 @@ function toCard(
   };
 }
 
-function filterExcludedRows(
-  rows: EventRow[],
-  excludedEventIds: Set<string>,
-  excludedDedupeKeys: Set<string>
-): EventRow[] {
-  return rows.filter((row) => (
-    !excludedEventIds.has(String(row.id)) && !excludedDedupeKeys.has(getEventDedupeKey(row))
-  ));
-}
-
 function dedupeRows(rows: EventRow[]): EventRow[] {
   const seen = new Set<string>();
   const result: EventRow[] = [];
@@ -398,66 +380,89 @@ function pickDiverseTodayCards(cards: ReturnType<typeof toCard>[]) {
 
 async function getFallbackEvents(
   today: string,
-  excludedEventIds: Set<string>,
-  excludedDedupeKeys: Set<string>
+  userId: string,
 ): Promise<EventRow[]> {
-  const excludedIds = Array.from(excludedEventIds);
-  const excludedKeys = Array.from(excludedDedupeKeys);
   const { rows } = await pool.query<EventRow>(
-    `SELECT id, title, display_title, content_key, canonical_key, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng, buzz_score, created_at, metadata
-     FROM canonical_events
-     WHERE is_deleted = false
-       AND (end_at IS NULL OR (end_at AT TIME ZONE 'Asia/Seoul')::date >= $1::date)
-       AND NOT (id::text = ANY($2::text[]))
-       AND NOT (COALESCE(content_key, canonical_key, id::text) = ANY($3::text[]))
+    `SELECT event.id, event.title, event.display_title, event.content_key, event.canonical_key,
+            event.main_category, event.region, event.start_at, event.end_at, event.image_url,
+            event.venue, event.overview, event.lat, event.lng, event.buzz_score,
+            event.created_at, event.metadata
+     FROM canonical_events event
+     WHERE event.is_deleted = false
+       AND (event.end_at IS NULL OR (event.end_at AT TIME ZONE 'Asia/Seoul')::date >= $1::date)
+       AND NOT EXISTS (
+         SELECT 1
+         FROM user_card_opened_keys opened
+         WHERE opened.user_id = $2
+           AND (
+             (opened.key_type = 'event_id' AND opened.key_value = event.id::text)
+             OR (
+               opened.key_type IN ('content_key', 'canonical_key')
+               AND opened.key_value = ANY(
+                 ARRAY_REMOVE(ARRAY[event.content_key, event.canonical_key], NULL)
+               )
+             )
+           )
+       )
      ORDER BY
        CASE
-         WHEN start_at <= NOW() AND (end_at IS NULL OR end_at >= NOW()) THEN 0
-         WHEN start_at > NOW() THEN 1
+         WHEN event.start_at <= NOW() AND (event.end_at IS NULL OR event.end_at >= NOW()) THEN 0
+         WHEN event.start_at > NOW() THEN 1
          ELSE 2
        END,
-       CASE WHEN end_at IS NULL THEN 1 ELSE 0 END,
-       end_at ASC,
-       buzz_score DESC NULLS LAST
-     LIMIT $4`,
-    [today, excludedIds, excludedKeys, CANDIDATE_LIMIT]
+       CASE WHEN event.end_at IS NULL THEN 1 ELSE 0 END,
+       event.end_at ASC,
+       event.buzz_score DESC NULLS LAST
+     LIMIT $3`,
+    [today, userId, CANDIDATE_LIMIT]
   );
-  return dedupeRows(filterExcludedRows(rows, excludedEventIds, excludedDedupeKeys)).slice(0, CANDIDATE_LIMIT);
+  return dedupeRows(rows).slice(0, CANDIDATE_LIMIT);
 }
 
 async function getNearbyEvents(
   today: string,
   location: LocationQuery,
-  excludedEventIds: Set<string>,
-  excludedDedupeKeys: Set<string>
+  userId: string,
 ): Promise<EventRow[]> {
   const distSQL = getHaversineDistanceSQL('$1', '$2');
-  const excludedIds = Array.from(excludedEventIds);
-  const excludedKeys = Array.from(excludedDedupeKeys);
   let bestNearbyRows: EventRow[] = [];
 
   for (const radiusM of NEARBY_RADIUS_STEPS_M) {
     const box = calculateBoundingBox(location.lat, location.lng, radiusM);
     const { rows } = await pool.query<EventRow>(
-      `SELECT id, title, display_title, content_key, canonical_key, main_category, region, start_at, end_at, image_url, venue, overview, lat, lng, buzz_score, created_at, metadata,
+      `SELECT event.id, event.title, event.display_title, event.content_key, event.canonical_key,
+              event.main_category, event.region, event.start_at, event.end_at, event.image_url,
+              event.venue, event.overview, event.lat, event.lng, event.buzz_score,
+              event.created_at, event.metadata,
               (${distSQL}) AS distance_m
-       FROM canonical_events
-       WHERE is_deleted = false
-         AND (end_at IS NULL OR (end_at AT TIME ZONE 'Asia/Seoul')::date >= $3::date)
-         AND NOT (id::text = ANY($4::text[]))
-         AND NOT (COALESCE(content_key, canonical_key, id::text) = ANY($5::text[]))
-         AND lat IS NOT NULL AND lng IS NOT NULL
-         AND lat BETWEEN $6 AND $7
-         AND lng BETWEEN $8 AND $9
-         AND (${distSQL}) <= $10
-       ORDER BY distance_m ASC NULLS LAST, buzz_score DESC NULLS LAST, id ASC
-       LIMIT $11`,
+       FROM canonical_events event
+       WHERE event.is_deleted = false
+         AND (event.end_at IS NULL OR (event.end_at AT TIME ZONE 'Asia/Seoul')::date >= $3::date)
+         AND NOT EXISTS (
+           SELECT 1
+           FROM user_card_opened_keys opened
+           WHERE opened.user_id = $4
+             AND (
+               (opened.key_type = 'event_id' AND opened.key_value = event.id::text)
+               OR (
+                 opened.key_type IN ('content_key', 'canonical_key')
+                 AND opened.key_value = ANY(
+                   ARRAY_REMOVE(ARRAY[event.content_key, event.canonical_key], NULL)
+                 )
+               )
+             )
+         )
+         AND event.lat IS NOT NULL AND event.lng IS NOT NULL
+         AND event.lat BETWEEN $5 AND $6
+         AND event.lng BETWEEN $7 AND $8
+         AND (${distSQL}) <= $9
+       ORDER BY distance_m ASC NULLS LAST, event.buzz_score DESC NULLS LAST, event.id ASC
+       LIMIT $10`,
       [
         location.lat,
         location.lng,
         today,
-        excludedIds,
-        excludedKeys,
+        userId,
         box.latMin,
         box.latMax,
         box.lngMin,
@@ -467,25 +472,17 @@ async function getNearbyEvents(
       ]
     );
 
-    const nearbyRows = dedupeRows(filterExcludedRows(rows, excludedEventIds, excludedDedupeKeys));
+    const nearbyRows = dedupeRows(rows);
     if (nearbyRows.length > bestNearbyRows.length) bestNearbyRows = nearbyRows;
     // 회전 풀(MIN_ROTATION_POOL)이 확보되면 반경 확장 중단 — 근처를 넓게 받아 JS에서 매일 다르게 뽑는다
     if (nearbyRows.length >= MIN_ROTATION_POOL) return nearbyRows.slice(0, CANDIDATE_LIMIT);
   }
 
   if (bestNearbyRows.length === 0) {
-    return getFallbackEvents(today, excludedEventIds, excludedDedupeKeys);
+    return getFallbackEvents(today, userId);
   }
 
-  const fillExcludedIds = new Set([
-    ...Array.from(excludedEventIds),
-    ...bestNearbyRows.map((row) => String(row.id)),
-  ]);
-  const fillExcludedKeys = new Set([
-    ...Array.from(excludedDedupeKeys),
-    ...bestNearbyRows.map(getEventDedupeKey),
-  ]);
-  const fallbackRows = await getFallbackEvents(today, fillExcludedIds, fillExcludedKeys);
+  const fallbackRows = await getFallbackEvents(today, userId);
   return mergeRows(bestNearbyRows, fallbackRows);
 }
 
@@ -533,7 +530,6 @@ function chooseStable<T>(items: T[], seed: number): T {
 
 function buildTeaserCopy(
   card: ReturnType<typeof toCard>,
-  isRevisit: boolean,
   seed: number,
 ): { eyebrow: string; headline: string; palette: CardNewsPalette } {
   const category = card.category || '기타';
@@ -543,12 +539,6 @@ function buildTeaserCopy(
   const hasTasteReason = card.reasonTags.some((reason) => reason.startsWith('취향 '));
   const isFresh = card.reasonTags.includes('새로 등록');
 
-  if (isRevisit) {
-    hooks.push(
-      { eyebrow: '다시 추천', headline: `지금 다시 떠오른\n${category} 한 곳` },
-      { eyebrow: '놓치기 아까워서', headline: `한 번 더 골라본\n가까운 ${category}` },
-    );
-  }
   if (card.dday != null && card.dday >= 0 && card.dday <= 7) {
     hooks.push(
       { eyebrow: `${card.dday === 0 ? '오늘' : `${card.dday}일 안에`} 마감`, headline: `이번 주가 지나기 전에\n열어볼 ${category}` },
@@ -592,10 +582,9 @@ function toLockedPreview(
   card: ReturnType<typeof toCard>,
   userId: string,
   today: string,
-  isRevisit: boolean,
   variant: number,
 ) {
-  const teaser = buildTeaserCopy(card, isRevisit, hashStr(`${card.eventId}|${today}|${variant}`));
+  const teaser = buildTeaserCopy(card, hashStr(`${card.eventId}|${today}|${variant}`));
   return {
     cardToken: sealLockedCard({
       userId,
@@ -615,7 +604,8 @@ function toLockedPreview(
     teaserEyebrow: teaser.eyebrow,
     teaserHeadline: teaser.headline,
     palette: teaser.palette,
-    isRevisit,
+    // 연 카드는 평생 재추천하지 않는다. 클라이언 하위 호환을 위해 필드는 유지한다.
+    isRevisit: false,
   };
 }
 
@@ -633,7 +623,13 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
     : Promise.resolve(null);
 
   try {
-    const [ticketResult, discoveredResult, tasteResult, impressionResult, weeklyOpenedResult] = await Promise.all([
+    const [
+      ticketResult,
+      discoveredResult,
+      tasteResult,
+      impressionResult,
+      weeklyOpenedResult,
+    ] = await Promise.all([
       pool.query(
         `WITH ensured AS (
            INSERT INTO user_tickets (user_id, ticket_count, total_earned, total_exchanged)
@@ -648,13 +644,10 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
          LIMIT 1`,
         [userId],
       ),
-      // 미발견을 최우선으로 고르고, 공급이 부족할 때만 오래된 발견을 다시 추천한다.
+      // 일일 공개 수와 컬렉션 요약용 원본 이력.
       pool.query<OpenedEventRow>(
-        `SELECT el.event_id,
-                el.earn_date,
-                COALESCE(ce.content_key, ce.canonical_key, ce.id::text) AS dedupe_key
+        `SELECT el.event_id, el.earn_date
          FROM user_ticket_earn_log el
-         LEFT JOIN canonical_events ce ON ce.id::text = el.event_id::text
          WHERE el.user_id = $1`,
         [userId],
       ),
@@ -701,39 +694,10 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
       ).catch(() => ({ rows: [] as WeeklyOpenedEventRow[] })),
     ]);
 
-    const discoveredEventIds = new Set(discoveredResult.rows.map((row) => String(row.event_id)));
-    const discoveredDedupeKeys = new Set(
-      discoveredResult.rows.map((row) => row.dedupe_key).filter((key): key is string => !!key),
-    );
     const todayOpenedRows = discoveredResult.rows.filter((row) => dateOnly(row.earn_date) === today);
-    const recentCutoff = dateKeyDaysBefore(today, RECENT_OPEN_COOLDOWN_DAYS - 1);
-    const recentOpenedRows = discoveredResult.rows.filter((row) => {
-      const openedOn = dateOnly(row.earn_date);
-      return openedOn != null && openedOn >= recentCutoff;
-    });
-    const setsFor = (openedRows: OpenedEventRow[]) => ({
-      ids: new Set(openedRows.map((row) => String(row.event_id))),
-      keys: new Set(openedRows.map((row) => row.dedupe_key).filter((key): key is string => !!key)),
-    });
-    const todayOpened = setsFor(todayOpenedRows);
-    const recentOpened = setsFor(recentOpenedRows);
-    const loadRows = (ids: Set<string>, keys: Set<string>) => (
-      location ? getNearbyEvents(today, location, ids, keys) : getFallbackEvents(today, ids, keys)
-    );
-
-    // 1) 평생 미발견 우선 → 2) 14일 지난 발견 허용 → 3) 오늘만 제외해 빈 화면 방지.
-    let rows = await loadRows(discoveredEventIds, discoveredDedupeKeys);
-    if (rows.length < TODAY_CARD_COUNT) {
-      rows = mergeRows(rows, await loadRows(recentOpened.ids, recentOpened.keys));
-    }
-    if (rows.length < TODAY_CARD_COUNT) {
-      rows = mergeRows(rows, await loadRows(todayOpened.ids, todayOpened.keys));
-    }
-    const revisitEventIds = new Set(rows
-      .filter((row) => (
-        discoveredEventIds.has(String(row.id)) || discoveredDedupeKeys.has(getEventDedupeKey(row))
-      ))
-      .map((row) => String(row.id)));
+    const rows = location
+      ? await getNearbyEvents(today, location, userId)
+      : await getFallbackEvents(today, userId);
     const seed = dailySeed(userId, today);
     const taste = buildTasteMap(tasteResult.rows);
     const scoreById = new Map<string, number>();
@@ -774,7 +738,6 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
         card,
         userId,
         today,
-        revisitEventIds.has(card.eventId),
         index,
       )),
       ticketCount: ticketRow.ticket_count ?? 0,
@@ -833,9 +796,10 @@ router.post('/v2/open', requireAuth, async (req: Request, res: Response) => {
               start_at, end_at, image_url, venue, overview, lat, lng, buzz_score, created_at, metadata
        FROM canonical_events
        WHERE id::text = $1
-         AND is_deleted = false
-         AND (end_at IS NULL OR (end_at AT TIME ZONE 'Asia/Seoul')::date >= $2::date)
-       LIMIT 1`,
+       AND is_deleted = false
+       AND (end_at IS NULL OR (end_at AT TIME ZONE 'Asia/Seoul')::date >= $2::date)
+       LIMIT 1
+       FOR SHARE`,
       [tokenPayload.eventId, today],
     );
     if (eventResult.rowCount === 0) {
@@ -843,6 +807,7 @@ router.post('/v2/open', requireAuth, async (req: Request, res: Response) => {
       return res.status(410).json({ error: 'CARD_EVENT_UNAVAILABLE' });
     }
 
+    const event = eventResult.rows[0]!;
     const reward = await grantTicketsForEvent(client, {
       userId,
       eventId: tokenPayload.eventId,
@@ -851,7 +816,7 @@ router.post('/v2/open', requireAuth, async (req: Request, res: Response) => {
     });
     await client.query('COMMIT');
 
-    const fullCard = toCard(eventResult.rows[0]!, new Set([tokenPayload.eventId]), null, new Map());
+    const fullCard = toCard(event, new Set([tokenPayload.eventId]), null, new Map());
     fullCard.walkMinutes = tokenPayload.walkMinutes;
     fullCard.reasonTags = tokenPayload.reasonTags;
     return res.json({ card: fullCard, ...reward });
@@ -877,7 +842,7 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
     : Promise.resolve(null);
 
   try {
-    const [ticketResult, openedResult, tasteResult, impressionResult] = await Promise.all([
+    const [ticketResult, tasteResult, impressionResult] = await Promise.all([
       pool.query(
         `WITH ensured AS (
            INSERT INTO user_tickets (user_id, ticket_count, total_earned, total_exchanged)
@@ -892,16 +857,6 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
          WHERE user_id = $1
          LIMIT 1`,
         [userId]
-      ),
-      pool.query<OpenedEventRow>(
-        `SELECT el.event_id,
-                el.earn_date,
-                COALESCE(ce.content_key, ce.canonical_key, ce.id::text) AS dedupe_key
-         FROM user_ticket_earn_log el
-         LEFT JOIN canonical_events ce ON ce.id::text = el.event_id::text
-         WHERE el.user_id = $1
-           AND el.earn_date >= $2::date - (($3::int - 1) * INTERVAL '1 day')`,
-        [userId, today, RECENT_OPEN_COOLDOWN_DAYS]
       ),
       // 취향 신호: 카드 열기(1) + 좋아요(3) + 도장(4). 강한 의도일수록 더 크게 반영한다.
       pool.query<TasteRow>(
@@ -930,20 +885,9 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
     ]);
 
     const ticketRow = ticketResult.rows[0] ?? {};
-    const todayOpenedRows = openedResult.rows.filter((row) => dateOnly(row.earn_date) === today);
-    const openedEventIds = new Set(todayOpenedRows.map((row) => String(row.event_id)));
-    const openedDedupeKeys = new Set(todayOpenedRows.map((row) => row.dedupe_key).filter((key): key is string => !!key));
-    const recentEventIds = new Set(openedResult.rows.map((row) => String(row.event_id)));
-    const recentDedupeKeys = new Set(openedResult.rows.map((row) => row.dedupe_key).filter((key): key is string => !!key));
-    const loadRows = async (eventIds: Set<string>, dedupeKeys: Set<string>) => (
-      location
-        ? getNearbyEvents(today, location, eventIds, dedupeKeys)
-        : getFallbackEvents(today, eventIds, dedupeKeys)
-    );
-    let rows = await loadRows(recentEventIds, recentDedupeKeys);
-    if (rows.length < TODAY_CARD_COUNT && recentEventIds.size > openedEventIds.size) {
-      rows = await loadRows(openedEventIds, openedDedupeKeys);
-    }
+    const rows = location
+      ? await getNearbyEvents(today, location, userId)
+      : await getFallbackEvents(today, userId);
 
     // 점수화 v2: 근접+신선도+일별시드+취향+버즈로 재랭킹 → 매일 다른 순서·새 이벤트 우선
     const seed = dailySeed(userId, today);
@@ -955,7 +899,7 @@ router.get('/today', requireAuth, async (req: Request, res: Response) => {
     for (const row of rows) scoreById.set(String(row.id), scoreRow(row, { location, taste, seed }));
 
     const cards = rows
-      .map((row) => toCard(row, openedEventIds, location, taste))
+      .map((row) => toCard(row, new Set<string>(), location, taste))
       .filter((card) => !card.opened);
 
     // 최근 보여준 카드는 소프트 제외(제외 후 풀이 부족하면 완화해 빈 화면 방지)

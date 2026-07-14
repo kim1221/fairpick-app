@@ -7,6 +7,10 @@
  */
 
 import { pool } from '../db';
+import {
+  OpenedCardIdentityDb,
+  propagateOpenedCardAliasesForMerge,
+} from '../services/openedCardIdentity';
 
 interface DuplicateGroup {
   content_key: string;
@@ -76,11 +80,17 @@ async function findDuplicateGroups(): Promise<DuplicateGroup[]> {
 /**
  * 레코드 조회
  */
-async function getEventRecords(ids: string[]): Promise<EventRecord[]> {
-  const result = await pool.query(`
+async function getEventRecords(
+  ids: string[],
+  db: OpenedCardIdentityDb = pool,
+  lockForUpdate = false,
+): Promise<EventRecord[]> {
+  const result = await db.query(`
     SELECT id, title, image_url, sources
     FROM canonical_events
     WHERE id = ANY($1)
+    ORDER BY id
+    ${lockForUpdate ? 'FOR UPDATE' : ''}
   `, [ids]);
 
   return result.rows.map(row => ({
@@ -149,7 +159,8 @@ function mergeSources(records: EventRecord[]): unknown[] {
 async function updateMasterRecord(
   masterId: string,
   mergedSources: unknown[],
-  bestImageUrl: string | null
+  bestImageUrl: string | null,
+  db: OpenedCardIdentityDb = pool,
 ): Promise<void> {
   const updates: string[] = ['sources = $1', 'updated_at = NOW()'];
   const params: unknown[] = [JSON.stringify(mergedSources)];
@@ -161,7 +172,7 @@ async function updateMasterRecord(
 
   params.push(masterId);
 
-  await pool.query(
+  await db.query(
     `UPDATE canonical_events SET ${updates.join(', ')} WHERE id = $${params.length}`,
     params
   );
@@ -170,9 +181,12 @@ async function updateMasterRecord(
 /**
  * 레코드 삭제
  */
-async function deleteRecords(ids: string[]): Promise<void> {
+async function deleteRecords(
+  ids: string[],
+  db: OpenedCardIdentityDb = pool,
+): Promise<void> {
   if (ids.length === 0) return;
-  await pool.query(`DELETE FROM canonical_events WHERE id = ANY($1)`, [ids]);
+  await db.query(`DELETE FROM canonical_events WHERE id = ANY($1)`, [ids]);
 }
 
 /**
@@ -193,43 +207,72 @@ export async function cleanupDuplicates(dryRun = true): Promise<{
   let recordsUpdated = 0;
 
   for (const group of groups) {
-    const records = await getEventRecords(group.ids);
-    if (records.length < 2) continue;
+    const client = dryRun ? null : await pool.connect();
+    try {
+      if (client) await client.query('BEGIN');
+      const db: OpenedCardIdentityDb = client ?? pool;
+      const records = await getEventRecords(group.ids, db, !!client);
+      if (records.length < 2) {
+        if (client) await client.query('COMMIT');
+        continue;
+      }
 
-    const master = selectMasterRecord(records);
-    if (!master) {
-      console.warn(`[CleanupDuplicates] No master found for group, skipping`);
-      continue;
-    }
-    const others = records.filter(r => r.id !== master.id);
-    const mergedSources = mergeSources(records);
+      const master = selectMasterRecord(records);
+      if (!master) {
+        console.warn(`[CleanupDuplicates] No master found for group, skipping`);
+        if (client) await client.query('COMMIT');
+        continue;
+      }
+      const others = records.filter(r => r.id !== master.id);
+      const mergedSources = mergeSources(records);
 
-    // 이미지 보강: master에 이미지가 없으면 다른 레코드에서 가져옴
-    let bestImageUrl = master.image_url;
-    if (!bestImageUrl || bestImageUrl.includes('placeholder') || bestImageUrl === '') {
-      for (const other of others) {
-        if (other.image_url && !other.image_url.includes('placeholder') && other.image_url !== '') {
-          bestImageUrl = other.image_url;
-          break;
+      // 이미지 보강: master에 이미지가 없으면 다른 레코드에서 가져옴
+      let bestImageUrl = master.image_url;
+      if (!bestImageUrl || bestImageUrl.includes('placeholder') || bestImageUrl === '') {
+        for (const other of others) {
+          if (other.image_url && !other.image_url.includes('placeholder') && other.image_url !== '') {
+            bestImageUrl = other.image_url;
+            break;
+          }
         }
       }
+
+      const displayTitle = group.display_title || '(no display_title)';
+      console.log(`[CleanupDuplicates] Group: "${displayTitle.substring(0, 30)}"`);
+      console.log(`  Keep: ${master.id.substring(0, 8)} (${master.title.substring(0, 25)})`);
+      console.log(`  Delete: ${others.map(o => o.id.substring(0, 8)).join(', ')}`);
+      console.log(`  Image: ${bestImageUrl ? 'YES' : 'NO'}`);
+
+      if (client) {
+        // 공개한 사용자의 alias를 병합 그룹 전체로 먼저 확장한다. 같은
+        // transaction 안에서만 master 업데이트/duplicate 삭제를 허용한다.
+        const propagation = await propagateOpenedCardAliasesForMerge(
+          client,
+          records.map((record) => record.id),
+          master.id,
+          { contentKey: group.content_key },
+        );
+        if (new Set(propagation.lockedEventIds).size !== records.length) {
+          throw new Error(
+            `[CleanupDuplicates] canonical group changed concurrently: ` +
+            `expected=${records.length}, locked=${propagation.lockedEventIds.length}`,
+          );
+        }
+
+        await updateMasterRecord(master.id, mergedSources, bestImageUrl, client);
+        await deleteRecords(others.map(o => o.id), client);
+        await client.query('COMMIT');
+        recordsUpdated++;
+        recordsDeleted += others.length;
+      }
+
+      groupsProcessed++;
+    } catch (error) {
+      if (client) await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client?.release();
     }
-
-    const displayTitle = group.display_title || '(no display_title)';
-    console.log(`[CleanupDuplicates] Group: "${displayTitle.substring(0, 30)}"`);
-    console.log(`  Keep: ${master.id.substring(0, 8)} (${master.title.substring(0, 25)})`);
-    console.log(`  Delete: ${others.map(o => o.id.substring(0, 8)).join(', ')}`);
-    console.log(`  Image: ${bestImageUrl ? 'YES' : 'NO'}`);
-
-    if (!dryRun) {
-      // 실제 업데이트 및 삭제
-      await updateMasterRecord(master.id, mergedSources, bestImageUrl);
-      await deleteRecords(others.map(o => o.id));
-      recordsUpdated++;
-      recordsDeleted += others.length;
-    }
-
-    groupsProcessed++;
   }
 
   console.log(`[CleanupDuplicates] Complete!`);

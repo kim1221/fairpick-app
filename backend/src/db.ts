@@ -1,4 +1,4 @@
-import { Pool, types } from 'pg';
+import { Pool, types, type PoolClient } from 'pg';
 import { config } from './config';
 
 // TIMESTAMP WITHOUT TIME ZONE (OID 1114):
@@ -745,6 +745,7 @@ export interface CanonicalEventUpdateFields {
 export async function updateCanonicalEventAfterRemerge(
   id: string,
   fields: CanonicalEventUpdateFields,
+  db: Pick<PoolClient, 'query'> = pool,
 ) {
   const updates: string[] = [];
   const params: unknown[] = [];
@@ -783,17 +784,20 @@ export async function updateCanonicalEventAfterRemerge(
   updates.push(`updated_at = NOW()`);
   params.push(id);
 
-  await pool.query(
+  await db.query(
     `UPDATE canonical_events SET ${updates.join(', ')} WHERE id = $${paramIndex}`,
     params,
   );
 }
 
 // Canonical 이벤트 삭제 (여러 개)
-export async function deleteCanonicalEvents(ids: string[]) {
+export async function deleteCanonicalEvents(
+  ids: string[],
+  db: Pick<PoolClient, 'query'> = pool,
+) {
   if (ids.length === 0) return;
 
-  await pool.query(
+  await db.query(
     `DELETE FROM canonical_events WHERE id = ANY($1)`,
     [ids],
   );

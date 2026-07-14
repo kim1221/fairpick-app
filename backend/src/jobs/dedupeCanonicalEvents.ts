@@ -12,6 +12,7 @@ import {
   CanonicalEventForRemerge,
   pool,
 } from '../db';
+import { propagateOpenedCardAliasesForMerge } from '../services/openedCardIdentity';
 import { generateContentKey, generateDisplayTitle } from '../utils/titleNormalizer';
 
 /**
@@ -1362,7 +1363,6 @@ async function runPhase3CanonicalRemerge(): Promise<{ candidatesCount: number; g
 
   let groupsMerged = 0;
   let deletedCount = 0;
-  const allIdsToDelete: string[] = [];
 
   for (const [groupKey, events] of duplicateGroups) {
     // 4. venue 병합 가능 여부 검사 - 모든 쌍에 대해 검사
@@ -1418,20 +1418,46 @@ async function runPhase3CanonicalRemerge(): Promise<{ candidatesCount: number; g
         master.main_category,
       );
 
-      // 9. Master 업데이트
-      await updateCanonicalEventAfterRemerge(master.id, {
-        venue: bestVenue,
-        imageUrl: bestImageUrl || undefined,
-        sources: mergedSources,
-        displayTitle,
-        contentKey,
-      });
-
-      // 10. 나머지 삭제
+      // 9. 공개 이력의 모든 기존/신규 identity alias를 먼저 영구 보존한 뒤,
+      // 같은 transaction에서 master 업데이트와 duplicate 삭제를 수행한다.
+      // canonical row가 먼저 바뀌거나 사라지면 과거 공개 카드가 다시 Home에
+      // 노출될 수 있으므로 이 순서를 바꾸면 안 된다.
       const idsToDelete = others.map(e => e.id);
-      allIdsToDelete.push(...idsToDelete);
+      const mergeEventIds = mergeableEvents.map(e => e.id);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const propagation = await propagateOpenedCardAliasesForMerge(
+          client,
+          mergeEventIds,
+          master.id,
+          { contentKey, canonicalKey: master.canonical_key },
+        );
+        if (new Set(propagation.lockedEventIds).size !== new Set(mergeEventIds).size) {
+          throw new Error(
+            `[Dedupe][Phase3] canonical merge group changed concurrently: ` +
+            `expected=${mergeEventIds.length}, locked=${propagation.lockedEventIds.length}`,
+          );
+        }
+
+        await updateCanonicalEventAfterRemerge(master.id, {
+          venue: bestVenue,
+          imageUrl: bestImageUrl || undefined,
+          sources: mergedSources,
+          displayTitle,
+          contentKey,
+        }, client);
+        await deleteCanonicalEvents(idsToDelete, client);
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
 
       groupsMerged++;
+      deletedCount += idsToDelete.length;
 
       // 로그 출력 (처음 20개만 상세 출력)
       if (groupsMerged <= 20) {
@@ -1441,12 +1467,6 @@ async function runPhase3CanonicalRemerge(): Promise<{ candidatesCount: number; g
         console.log(`  venue: ${venueList}`);
       }
     }
-  }
-
-  // 11. 일괄 삭제
-  if (allIdsToDelete.length > 0) {
-    await deleteCanonicalEvents(allIdsToDelete);
-    deletedCount = allIdsToDelete.length;
   }
 
   const phase3ElapsedMs = Date.now() - phase3Start;
