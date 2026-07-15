@@ -2,18 +2,17 @@ import React, { useMemo, useState } from 'react';
 import { ImageBackground, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { manilaTagTexture } from '../../assets';
 import type { SavedTicketItem } from '../saved/SavedTicketRow';
+import { CachedCollectionImageBackground } from './CachedCollectionImageBackground';
 import {
   formatSavedTicketMeta,
   getDdayBadge,
   normalizeSavedCategory,
-  SAVED_CATEGORY_DARK_COLORS,
 } from '../saved/savedTicketUtils';
 
 const TEXT = '#171717';
 const MUTED = '#716D66';
 const RED = '#A52822';
 const PAPER = '#EFE9D8';
-const FALLBACKS = ['#28272C', '#6C2D2B', '#4C5147', '#7A6754'] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type CollectionCardFilter = 'all' | 'active' | 'saved' | 'past';
@@ -304,7 +303,7 @@ function ActionButtons({
   );
 }
 
-function PosterCard({
+export function CollectionPosterCard({
   card,
   status,
   label,
@@ -347,8 +346,6 @@ function PosterCard({
       </View>
     </>
   );
-  const fallback = SAVED_CATEGORY_DARK_COLORS[category] ?? FALLBACKS[0];
-
   return (
     <Pressable
       accessibilityRole="button"
@@ -360,13 +357,14 @@ function PosterCard({
         status !== 'active' ? styles.posterPast : null,
       ]}
     >
-      {card.imageUrl ? (
-        <ImageBackground source={{ uri: card.imageUrl }} style={styles.posterImage} resizeMode="cover">
-          {content}
-        </ImageBackground>
-      ) : (
-        <View style={[styles.posterImage, { backgroundColor: fallback }]}>{content}</View>
-      )}
+      <CachedCollectionImageBackground
+        uri={card.imageUrl}
+        category={card.category}
+        subCategory={card.subCategory}
+        style={styles.posterImage}
+      >
+        {content}
+      </CachedCollectionImageBackground>
     </Pressable>
   );
 }
@@ -435,7 +433,7 @@ function FullWidthListButton({
   );
 }
 
-function ArchiveSnapshotModal({
+export function CollectionArchiveSnapshotModal({
   card,
   referenceDate,
   onClose,
@@ -461,13 +459,14 @@ function ArchiveSnapshotModal({
         onPress={onClose}
       >
         <Pressable style={styles.modalCard} onPress={() => {}}>
-          {card.imageUrl ? (
-            <ImageBackground source={{ uri: card.imageUrl }} style={styles.modalPhoto} resizeMode="cover">
-              {body}
-            </ImageBackground>
-          ) : (
-            <View style={[styles.modalPhoto, styles.modalPhotoFallback]}>{body}</View>
-          )}
+          <CachedCollectionImageBackground
+            uri={card.imageUrl}
+            category={card.category}
+            subCategory={card.subCategory}
+            style={styles.modalPhoto}
+          >
+            {body}
+          </CachedCollectionImageBackground>
           <View style={styles.modalBody}>
             <Text style={styles.modalEyebrow}>COLLECTION ARCHIVE</Text>
             <Text style={styles.modalTitle}>{card.title}</Text>
@@ -488,7 +487,7 @@ function ArchiveSnapshotModal({
   );
 }
 
-const FILTERS: ReadonlyArray<{ key: CollectionCardFilter; label: string }> = [
+export const COLLECTION_CARD_FILTERS: ReadonlyArray<{ key: CollectionCardFilter; label: string }> = [
   { key: 'all', label: '전체' },
   { key: 'active', label: '진행 중' },
   { key: 'saved', label: '저장' },
@@ -617,7 +616,7 @@ export function CollectionOverviewSections({
                 >
                   {theme.cards.map((card) => (
                     <View key={card.id} style={styles.themeCardCell}>
-                      <PosterCard
+                      <CollectionPosterCard
                         card={card}
                         status="active"
                         label={themeCardLabel(theme.key, card, referenceDate)}
@@ -640,7 +639,7 @@ export function CollectionOverviewSections({
           description={`${counts.all}장의 공개 기록을 모았어요.`}
         />
         <View style={styles.filters}>
-          {FILTERS.map((item) => {
+          {COLLECTION_CARD_FILTERS.map((item) => {
             const selected = item.key === activeFilter;
             return (
               <Pressable
@@ -663,7 +662,7 @@ export function CollectionOverviewSections({
               const status = getCollectionCardStatus(card, referenceDate);
               return (
                 <View key={card.id} style={styles.gridCell}>
-                  <PosterCard
+                  <CollectionPosterCard
                     card={card}
                     status={status}
                     compact
@@ -682,7 +681,7 @@ export function CollectionOverviewSections({
           </View>
         )}
         <FullWidthListButton
-          title="열린 카드 더 보기"
+          title="열린 카드 전체보기"
           unit="장"
           visibleCount={shownOpened.length}
           availableCount={filtered.length}
@@ -702,7 +701,7 @@ export function CollectionOverviewSections({
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.visitList}>
             {shownVisits.map(({ card, record }) => (
               <View key={`${record.eventId}-${record.visitedAt}`} style={styles.visitCell}>
-                <PosterCard
+                <CollectionPosterCard
                   card={card}
                   status={getCollectionCardStatus(card, referenceDate)}
                   compact
@@ -724,7 +723,7 @@ export function CollectionOverviewSections({
           </View>
         )}
         <FullWidthListButton
-          title="방문 기록 더 보기"
+          title="방문 기록 전체보기"
           unit="개"
           visibleCount={shownVisits.length}
           availableCount={recentVisits.length}
@@ -753,7 +752,11 @@ export function CollectionOverviewSections({
         </ImageBackground>
       </Pressable>
 
-      <ArchiveSnapshotModal card={archiveCard} referenceDate={referenceDate} onClose={() => setArchiveCard(null)} />
+      <CollectionArchiveSnapshotModal
+        card={archiveCard}
+        referenceDate={referenceDate}
+        onClose={() => setArchiveCard(null)}
+      />
     </View>
   );
 }

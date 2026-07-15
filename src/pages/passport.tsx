@@ -16,27 +16,37 @@ import {
 import { BottomTabBar } from '../components/BottomTabBar';
 import {
   CollectionOverviewSections,
-  filterCollectionCards,
-  getCollectionCardStatus,
   type CollectionCardFilter,
   type CollectionOverviewCard,
-  type CollectionVisitRecord,
 } from '../components/passport/CollectionOverviewSections';
+import {
+  mergeDiscoveredCards,
+  mergeCollectionSessionSnapshots,
+  mergeVisitStamps,
+  toCollectionOverviewCards,
+  toCollectionVisitRecords,
+  uniqueDiscoveredCards,
+} from '../components/passport/collectionData';
+import { prefetchCollectionImageUrls } from '../components/passport/CachedCollectionImageBackground';
 import { SavedVisitToast, type SavedVisitToastMessage } from '../components/saved/SavedVisitToast';
 import { useAuth } from '../hooks/useAuth';
+import {
+  getCollectionSession,
+  getCollectionSessionKey,
+  setCollectionSession,
+  type CollectionSessionCache,
+} from '../lib/collectionSessionCache';
 import http from '../lib/http';
 import {
-  getDiscoveredCards,
   getPassport,
-  type PassportCollectionStatus,
   type PassportDiscoveredCard,
   type PassportDiscoveredPageInfo,
   type PassportResponse,
   type PassportStamp,
 } from '../services/passportService';
+import { loadCollectionSavedEventIds } from '../services/collectionService';
 import userEventService from '../services/userEventService';
-import { markVisited, unmarkVisited } from '../services/visitService';
-import type { GetLikesResponse } from '../types/serverSync';
+import { markVisited, subscribeVisitChange, unmarkVisited } from '../services/visitService';
 import { openNaverMap } from '../utils/mapLinks';
 import { getLikesV2, subscribeStorageChange, toggleLike } from '../utils/storage';
 
@@ -49,28 +59,8 @@ const TEXT = '#171717';
 const MUTED = '#716D66';
 const RED = '#A52822';
 const PAGE_SIZE = 100;
-const OPENED_PREVIEW_STEP = 12;
-const VISIT_PREVIEW_STEP = 6;
-
-type CollectionSessionCache = {
-  passport: PassportResponse;
-  openedCards: PassportDiscoveredCard[];
-  pageInfo: PassportDiscoveredPageInfo | null;
-  visitStamps: PassportStamp[];
-  nextStampBook: number;
-  savedEventIds: string[];
-  visitedEventIds: string[];
-  openedPreviewLimit: number;
-  visitPreviewLimit: number;
-  activeFilter: CollectionCardFilter;
-  fetchedAt: number;
-};
-
-const collectionSessionCache = new Map<string, CollectionSessionCache>();
-
-function collectionCacheKey(isLoggedIn: boolean, userId?: string): string {
-  return isLoggedIn && userId ? `user:${userId}` : 'guest';
-}
+const OPENED_PREVIEW_LIMIT = 12;
+const VISIT_PREVIEW_LIMIT = 6;
 
 function addId(setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) {
   setter((previous) => {
@@ -90,64 +80,13 @@ function removeId(setter: React.Dispatch<React.SetStateAction<Set<string>>>, id:
   });
 }
 
-function toLastKnownStatus(status: PassportCollectionStatus | undefined): CollectionOverviewCard['lastKnownStatus'] {
-  if (status === 'removed') return 'deleted';
-  if (status === 'ended') return 'ended';
-  return 'active';
-}
-
-function uniqueDiscoveredCards(cards: readonly PassportDiscoveredCard[]): PassportDiscoveredCard[] {
-  return Array.from(new Map(cards.map((card) => [card.eventId, card])).values());
-}
-
-function mergeDiscoveredCards(
-  previous: readonly PassportDiscoveredCard[],
-  incoming: readonly PassportDiscoveredCard[]
-): PassportDiscoveredCard[] {
-  return uniqueDiscoveredCards([...previous, ...incoming]);
-}
-
-function mergeStamps(previous: readonly PassportStamp[], incoming: readonly PassportStamp[]): PassportStamp[] {
-  const byKey = new Map<string, PassportStamp>();
-  for (const stamp of [...previous, ...incoming]) {
-    byKey.set(`${stamp.eventId}:${stamp.visitedAt}`, stamp);
-  }
-  return Array.from(byKey.values()).sort((a, b) => new Date(b.visitedAt).getTime() - new Date(a.visitedAt).getTime());
-}
-
-function discoveredCardMatchesFilter(
-  card: PassportDiscoveredCard,
-  filter: CollectionCardFilter,
-  savedIds: ReadonlySet<string>,
-  referenceDate: Date
-): boolean {
-  if (filter === 'all') return true;
-  if (filter === 'saved') return savedIds.has(card.eventId);
-  const status = getCollectionCardStatus(
-    { endAt: card.endAt, lastKnownStatus: toLastKnownStatus(card.status) },
-    referenceDate
-  );
-  return filter === 'active' ? status === 'active' : status !== 'active';
-}
-
-async function loadSavedEventIds(isLoggedIn: boolean): Promise<Set<string>> {
-  const local = await getLikesV2();
-  if (!isLoggedIn) return new Set(local.items.map((item) => item.id));
-  try {
-    const { data } = await http.get<GetLikesResponse>('/users/me/likes');
-    return new Set(data.items.map((item) => item.eventId));
-  } catch {
-    return new Set(local.items.map((item) => item.id));
-  }
-}
-
-function PassportPage() {
+export function PassportPage() {
   const navigation = Route.useNavigation();
   const dialog = useDialog();
   const { isLoggedIn, user, isLoading: authLoading } = useAuth();
-  const initialCacheKey = collectionCacheKey(isLoggedIn, user?.id);
+  const initialCacheKey = getCollectionSessionKey(isLoggedIn, user?.id);
   const initialCacheRef = useRef<CollectionSessionCache | null>(
-    authLoading ? null : collectionSessionCache.get(initialCacheKey) ?? null
+    authLoading ? null : getCollectionSession(initialCacheKey)
   );
   const initialCache = initialCacheRef.current;
   const activeCacheKeyRef = useRef(initialCacheKey);
@@ -156,6 +95,7 @@ function PassportPage() {
   const markingIdsRef = useRef(new Set<string>());
   const toastOpacity = useRef(new Animated.Value(0));
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadRequestSequenceRef = useRef(0);
 
   const [passport, setPassport] = useState<PassportResponse | null>(initialCache?.passport ?? null);
   const [openedCards, setOpenedCards] = useState<PassportDiscoveredCard[]>(() => initialCache?.openedCards ?? []);
@@ -167,13 +107,7 @@ function PassportPage() {
   const [loading, setLoading] = useState(!initialCache);
   const [error, setError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [loadingMoreOpened, setLoadingMoreOpened] = useState(false);
-  const [loadingMoreVisits, setLoadingMoreVisits] = useState(false);
-  const [openedPreviewLimit, setOpenedPreviewLimit] = useState(
-    initialCache?.openedPreviewLimit ?? OPENED_PREVIEW_STEP
-  );
-  const [visitPreviewLimit, setVisitPreviewLimit] = useState(initialCache?.visitPreviewLimit ?? VISIT_PREVIEW_STEP);
-  const [activeFilter, setActiveFilter] = useState<CollectionCardFilter>(initialCache?.activeFilter ?? 'all');
+  const [activeFilter, setActiveFilter] = useState<CollectionCardFilter>('all');
   const [referenceDate, setReferenceDate] = useState(() => new Date());
   const [toastMessage, setToastMessage] = useState<SavedVisitToastMessage | null>(null);
   const [dataOwnerKey, setDataOwnerKey] = useState<string | null>(initialCache ? initialCacheKey : null);
@@ -213,26 +147,22 @@ function PassportPage() {
     setNextStampBook(cache.nextStampBook);
     setSavedIds(new Set(cache.savedEventIds));
     setVisitedIds(new Set(cache.visitedEventIds));
-    setOpenedPreviewLimit(cache.openedPreviewLimit);
-    setVisitPreviewLimit(cache.visitPreviewLimit);
-    setActiveFilter(cache.activeFilter);
     setDataOwnerKey(key);
-    setLoadingMoreOpened(false);
-    setLoadingMoreVisits(false);
     setError(false);
     setLoading(false);
   }, []);
 
   const loadCollection = useCallback(
     async ({ preservePages = false }: { preservePages?: boolean } = {}) => {
-      const requestKey = collectionCacheKey(isLoggedIn, user?.id);
+      const requestKey = getCollectionSessionKey(isLoggedIn, user?.id);
+      const requestId = ++loadRequestSequenceRef.current;
       setError(false);
       try {
         const [nextPassport, nextSavedIds] = await Promise.all([
           getPassport({ stampBook: 1, discoveredLimit: PAGE_SIZE }),
-          loadSavedEventIds(isLoggedIn),
+          loadCollectionSavedEventIds(isLoggedIn),
         ]);
-        if (activeCacheKeyRef.current !== requestKey) return;
+        if (activeCacheKeyRef.current !== requestKey || loadRequestSequenceRef.current !== requestId) return;
 
         const nextVisitedIds = new Set(nextPassport.visitedEventIds.map(String));
         const nextRootPageInfo = nextPassport.discoveredPageInfo ?? {
@@ -250,7 +180,7 @@ function PassportPage() {
         setVisitedIds(nextVisitedIds);
         setVisitStamps((previous) =>
           preservePages
-            ? mergeStamps(
+            ? mergeVisitStamps(
                 previous.filter((stamp) => nextVisitedIds.has(stamp.eventId)),
                 nextPassport.stamps
               )
@@ -261,17 +191,15 @@ function PassportPage() {
           setOpenedCards((previous) => mergeDiscoveredCards(previous, nextPassport.discoveredCards));
         } else {
           setOpenedCards(uniqueDiscoveredCards(nextPassport.discoveredCards));
-          setOpenedPreviewLimit(OPENED_PREVIEW_STEP);
-          setVisitPreviewLimit(VISIT_PREVIEW_STEP);
         }
         setPageInfo(hasPreservedPages ? pageInfoRef.current ?? nextRootPageInfo : nextRootPageInfo);
         lastFetchedAtRef.current = Date.now();
         setDataOwnerKey(requestKey);
       } catch (loadError) {
-        if (activeCacheKeyRef.current === requestKey) setError(true);
+        if (activeCacheKeyRef.current === requestKey && loadRequestSequenceRef.current === requestId) setError(true);
         if (__DEV__) console.error('[PassportPage][loadCollection]', loadError);
       } finally {
-        if (activeCacheKeyRef.current === requestKey) setLoading(false);
+        if (activeCacheKeyRef.current === requestKey && loadRequestSequenceRef.current === requestId) setLoading(false);
       }
     },
     [isLoggedIn, user?.id]
@@ -279,8 +207,8 @@ function PassportPage() {
 
   useEffect(() => {
     if (authLoading) return;
-    const nextKey = collectionCacheKey(isLoggedIn, user?.id);
-    const cached = collectionSessionCache.get(nextKey);
+    const nextKey = getCollectionSessionKey(isLoggedIn, user?.id);
+    const cached = getCollectionSession(nextKey);
     activeCacheKeyRef.current = nextKey;
 
     if (cached) {
@@ -299,11 +227,7 @@ function PassportPage() {
     setNextStampBook(2);
     setSavedIds(new Set());
     setVisitedIds(new Set());
-    setOpenedPreviewLimit(OPENED_PREVIEW_STEP);
-    setVisitPreviewLimit(VISIT_PREVIEW_STEP);
     setActiveFilter('all');
-    setLoadingMoreOpened(false);
-    setLoadingMoreVisits(false);
     setDataOwnerKey(null);
     setError(false);
     setLoading(true);
@@ -312,9 +236,9 @@ function PassportPage() {
 
   useEffect(() => {
     if (authLoading || !passport) return;
-    const currentKey = collectionCacheKey(isLoggedIn, user?.id);
+    const currentKey = getCollectionSessionKey(isLoggedIn, user?.id);
     if (dataOwnerKey !== currentKey || activeCacheKeyRef.current !== currentKey) return;
-    collectionSessionCache.set(currentKey, {
+    const incoming: CollectionSessionCache = {
       passport,
       openedCards: [...openedCards],
       pageInfo,
@@ -322,24 +246,22 @@ function PassportPage() {
       nextStampBook,
       savedEventIds: [...savedIds],
       visitedEventIds: [...visitedIds],
-      openedPreviewLimit,
-      visitPreviewLimit,
-      activeFilter,
       fetchedAt: lastFetchedAtRef.current || Date.now(),
-    });
+    };
+    setCollectionSession(
+      currentKey,
+      mergeCollectionSessionSnapshots(getCollectionSession(currentKey), incoming),
+    );
   }, [
-    activeFilter,
     authLoading,
     dataOwnerKey,
     isLoggedIn,
     nextStampBook,
     openedCards,
-    openedPreviewLimit,
     pageInfo,
     passport,
     savedIds,
     user?.id,
-    visitPreviewLimit,
     visitStamps,
     visitedIds,
   ]);
@@ -347,8 +269,19 @@ function PassportPage() {
   useEffect(() => {
     const unsubscribe = subscribeStorageChange((event) => {
       if (event.type !== 'likes') return;
-      const requestKey = collectionCacheKey(isLoggedIn, user?.id);
-      loadSavedEventIds(isLoggedIn)
+      if (event.id && event.action === 'add') {
+        addId(setSavedIds, event.id);
+        return;
+      }
+      if (event.id && event.action === 'remove') {
+        removeId(setSavedIds, event.id);
+        return;
+      }
+      const requestKey = getCollectionSessionKey(isLoggedIn, user?.id);
+      // update처럼 항목 단위로 확정할 수 없는 이벤트만 전체 목록을 다시 읽는다.
+      // add/remove 직후 서버 GET을 하면 상세 화면의 비동기 POST보다 먼저 도착해
+      // 방금 누른 저장 상태를 되돌릴 수 있다.
+      loadCollectionSavedEventIds(isLoggedIn)
         .then((next) => {
           if (activeCacheKeyRef.current === requestKey) setSavedIds(next);
         })
@@ -356,6 +289,24 @@ function PassportPage() {
     });
     return unsubscribe;
   }, [isLoggedIn, user?.id]);
+
+  useEffect(() => {
+    return subscribeVisitChange((event) => {
+      if (event.visited) addId(setVisitedIds, event.eventId);
+      else removeId(setVisitedIds, event.eventId);
+    });
+  }, []);
+
+  useEffect(() => {
+    return navigation.addListener('focus', () => {
+      if (authLoading) return;
+      const key = getCollectionSessionKey(isLoggedIn, user?.id);
+      const cached = getCollectionSession(key);
+      if (cached && cached.fetchedAt > lastFetchedAtRef.current) hydrateCollectionCache(key, cached);
+      // 상세 화면에서 저장/방문 상태를 바꿨을 수 있다. 캐시 화면은 유지한 채 뒤에서만 갱신한다.
+      loadCollection({ preservePages: true }).catch(() => {});
+    });
+  }, [authLoading, hydrateCollectionCache, isLoggedIn, loadCollection, navigation, user?.id]);
 
   useEffect(() => {
     let midnightTimer: ReturnType<typeof setTimeout> | null = null;
@@ -384,48 +335,20 @@ function PassportPage() {
     []
   );
 
-  const visitDateById = useMemo(
-    () => new Map(visitStamps.map((stamp) => [stamp.eventId, stamp.visitedAt])),
-    [visitStamps]
-  );
-
   const overviewCards = useMemo<CollectionOverviewCard[]>(
-    () =>
-      openedCards.map((card) => ({
-        id: card.eventId,
-        title: card.title,
-        category: card.category,
-        region: card.region,
-        venue: card.venue,
-        imageUrl: card.imageUrl,
-        startAt: card.startAt,
-        endAt: card.endAt,
-        lat: card.lat,
-        lng: card.lng,
-        lastKnownStatus: toLastKnownStatus(card.status),
-        openedAt: card.discoveredAt,
-        isSaved: savedIds.has(card.eventId),
-        isVisited: visitedIds.has(card.eventId),
-        visitedAt: visitDateById.get(card.eventId) ?? null,
-      })),
-    [openedCards, savedIds, visitDateById, visitedIds]
+    () => toCollectionOverviewCards(openedCards, savedIds, visitedIds, visitStamps),
+    [openedCards, savedIds, visitStamps, visitedIds]
   );
 
-  const visitRecords = useMemo<CollectionVisitRecord[]>(
-    () =>
-      visitStamps.map((stamp) => ({
-        eventId: stamp.eventId,
-        title: stamp.title,
-        category: stamp.category,
-        region: stamp.region,
-        venue: stamp.venue,
-        imageUrl: stamp.imageUrl,
-        visitedAt: stamp.visitedAt,
-        status: stamp.status,
-      })),
-    [visitStamps]
-  );
+  const visitRecords = useMemo(() => toCollectionVisitRecords(visitStamps), [visitStamps]);
   const savedOpenedCount = useMemo(() => overviewCards.filter((card) => card.isSaved).length, [overviewCards]);
+
+  useEffect(() => {
+    void prefetchCollectionImageUrls([
+      ...overviewCards.slice(0, OPENED_PREVIEW_LIMIT).map((card) => card.imageUrl),
+      ...visitRecords.slice(0, VISIT_PREVIEW_LIMIT).map((record) => record.imageUrl),
+    ]);
+  }, [overviewCards, visitRecords]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -535,113 +458,22 @@ function PassportPage() {
     [showToast]
   );
 
-  const handleViewMoreOpened = useCallback(
-    async (filter: CollectionCardFilter) => {
-      if (loadingMoreOpened) return;
-      const filteredCount = filterCollectionCards(overviewCards, filter, referenceDate).length;
-      if (openedPreviewLimit < filteredCount) {
-        setOpenedPreviewLimit((previous) => previous + OPENED_PREVIEW_STEP);
-        return;
-      }
-      if (!pageInfo?.hasMore || !pageInfo.nextCursor) return;
-
-      const requestKey = activeCacheKeyRef.current;
-      setLoadingMoreOpened(true);
-      try {
-        let mergedCards = openedCardsRef.current;
-        let nextPageInfo = pageInfo;
-        let nextCursor: string | null = pageInfo.nextCursor;
-        const visibleBefore = mergedCards.filter((card) => (
-          discoveredCardMatchesFilter(card, filter, savedIds, referenceDate)
-        )).length;
-
-        // 저장/지난 문화처럼 희소한 필터는 다음 한 묶음에 결과가 없을 수 있다.
-        // 한 번의 탭에서 최대 세 묶음까지 찾아 체감상 무반응인 경로를 줄인다.
-        for (let attempt = 0; attempt < 3 && nextCursor; attempt += 1) {
-          const requestedCursor: string = nextCursor;
-          const next = await getDiscoveredCards({ limit: PAGE_SIZE, cursor: requestedCursor });
-          if (activeCacheKeyRef.current !== requestKey) return;
-          mergedCards = mergeDiscoveredCards(mergedCards, next.items);
-          nextPageInfo = next.pageInfo;
-          nextCursor = next.pageInfo.hasMore ? next.pageInfo.nextCursor : null;
-
-          const visibleAfter = mergedCards.filter((card) => (
-            discoveredCardMatchesFilter(card, filter, savedIds, referenceDate)
-          )).length;
-          if (visibleAfter > visibleBefore || !nextPageInfo.hasMore) break;
-          if (!nextCursor || nextCursor === requestedCursor) break;
-        }
-
-        const visibleAfter = mergedCards.filter((card) => (
-          discoveredCardMatchesFilter(card, filter, savedIds, referenceDate)
-        )).length;
-        openedCardsRef.current = mergedCards;
-        pageInfoRef.current = nextPageInfo;
-        setOpenedCards(mergedCards);
-        setPageInfo(nextPageInfo);
-        if (visibleAfter > visibleBefore) {
-          setOpenedPreviewLimit((previous) => previous + OPENED_PREVIEW_STEP);
-        } else {
-          showToast({
-            title: nextPageInfo.hasMore ? '이 조건의 카드를 더 찾고 있어요' : '이 조건의 카드는 여기까지예요',
-            description: nextPageInfo.hasMore ? '버튼을 한 번 더 누르면 더 지난 기록을 찾아봐요.' : undefined,
-          });
-        }
-      } catch (paginationError) {
-        showToast({ title: '지난 카드를 더 불러오지 못했어요' });
-        if (__DEV__) console.error('[PassportPage][loadMoreOpened]', paginationError);
-      } finally {
-        setLoadingMoreOpened(false);
-      }
+  const handleViewAllOpened = useCallback(
+    (filter: CollectionCardFilter) => {
+      (navigation.navigate as (route: string, params?: Record<string, string>) => void)(
+        '/passport/opened',
+        { filter },
+      );
     },
-    [
-      loadingMoreOpened,
-      openedPreviewLimit,
-      overviewCards,
-      pageInfo,
-      referenceDate,
-      savedIds,
-      showToast,
-    ]
+    [navigation],
   );
 
-  const handleViewMoreVisits = useCallback(async () => {
-    if (loadingMoreVisits) return;
-    if (visitPreviewLimit < visitStamps.length) {
-      setVisitPreviewLimit((previous) => previous + VISIT_PREVIEW_STEP);
-      return;
-    }
-    if (!passport || nextStampBook > passport.stampBookCount) return;
+  const handleViewAllVisits = useCallback(() => {
+    (navigation.navigate as (route: string) => void)('/passport/visits');
+  }, [navigation]);
 
-    const requestKey = activeCacheKeyRef.current;
-    setLoadingMoreVisits(true);
-    try {
-      const next = await getPassport({ stampBook: nextStampBook, discoveredLimit: 1 });
-      if (activeCacheKeyRef.current !== requestKey) return;
-      const merged = mergeStamps(visitStamps, next.stamps);
-      setVisitStamps(merged);
-      setPassport((previous) => previous ? {
-        ...previous,
-        visitedCount: next.visitedCount,
-        stampBookCount: next.stampBookCount,
-      } : next);
-      setNextStampBook((previous) => previous + 1);
-      if (merged.length > visitStamps.length) {
-        setVisitPreviewLimit((previous) => previous + VISIT_PREVIEW_STEP);
-      } else {
-        showToast({ title: '방문 기록은 여기까지예요' });
-      }
-    } catch (paginationError) {
-      showToast({ title: '지난 방문 기록을 더 불러오지 못했어요' });
-      if (__DEV__) console.error('[PassportPage][loadMoreVisits]', paginationError);
-    } finally {
-      setLoadingMoreVisits(false);
-    }
-  }, [loadingMoreVisits, nextStampBook, passport, showToast, visitPreviewLimit, visitStamps]);
-
-  const hasMoreVisits = Boolean(
-    visitPreviewLimit < visitStamps.length || (passport && nextStampBook <= passport.stampBookCount)
-  );
+  const hasMoreVisits = Boolean(passport && nextStampBook <= passport.stampBookCount);
+  const ownsCurrentData = dataOwnerKey === getCollectionSessionKey(isLoggedIn, user?.id);
 
   return (
     <View style={styles.container}>
@@ -659,21 +491,25 @@ function PassportPage() {
 
         <View style={styles.summaryCard}>
           <View style={styles.summaryMain}>
-            <Text style={styles.summaryValue}>{passport?.discoveredCount ?? openedCards.length}</Text>
+            <Text style={styles.summaryValue}>
+              {ownsCurrentData ? passport?.discoveredCount ?? openedCards.length : 0}
+            </Text>
             <Text style={styles.summaryLabel}>장의 문화 카드</Text>
           </View>
           <View style={styles.summaryDivider} />
           <View style={styles.summaryMetric}>
-            <Text style={styles.summaryMetricValue}>{passport?.visitedCount ?? visitedIds.size}</Text>
+            <Text style={styles.summaryMetricValue}>
+              {ownsCurrentData ? passport?.visitedCount ?? visitedIds.size : 0}
+            </Text>
             <Text style={styles.summaryMetricLabel}>방문</Text>
           </View>
           <View style={styles.summaryMetric}>
-            <Text style={styles.summaryMetricValue}>{savedOpenedCount}</Text>
+            <Text style={styles.summaryMetricValue}>{ownsCurrentData ? savedOpenedCount : 0}</Text>
             <Text style={styles.summaryMetricLabel}>저장</Text>
           </View>
         </View>
 
-        {loading && openedCards.length === 0 ? (
+        {!ownsCurrentData || (loading && openedCards.length === 0) ? (
           <View style={styles.stateCard}>
             <ActivityIndicator color={RED} />
             <Text style={styles.stateTitle}>컬렉션을 불러오고 있어요</Text>
@@ -691,23 +527,18 @@ function PassportPage() {
             openedCards={overviewCards}
             visitRecords={visitRecords}
             filter={activeFilter}
-            onFilterChange={(next) => {
-              setActiveFilter(next);
-              setOpenedPreviewLimit(OPENED_PREVIEW_STEP);
-            }}
-            openedPreviewLimit={openedPreviewLimit}
-            visitPreviewLimit={visitPreviewLimit}
+            onFilterChange={setActiveFilter}
+            openedPreviewLimit={OPENED_PREVIEW_LIMIT}
+            visitPreviewLimit={VISIT_PREVIEW_LIMIT}
             referenceDate={referenceDate}
             hasMoreOpened={Boolean(pageInfo?.hasMore && pageInfo.nextCursor)}
-            isLoadingMoreOpened={loadingMoreOpened}
             hasMoreVisits={hasMoreVisits}
-            isLoadingMoreVisits={loadingMoreVisits}
             onPressActiveCard={(card) => navigation.navigate('/events/:id', { id: card.id })}
             onToggleSave={handleToggleSave}
             onToggleVisit={handleToggleVisit}
             onDirections={handleDirections}
-            onViewAllOpened={handleViewMoreOpened}
-            onViewAllVisits={hasMoreVisits ? handleViewMoreVisits : undefined}
+            onViewAllOpened={handleViewAllOpened}
+            onViewAllVisits={handleViewAllVisits}
             onOpenNewCard={() => (navigation.replace as (route: string) => void)('/')}
           />
         )}

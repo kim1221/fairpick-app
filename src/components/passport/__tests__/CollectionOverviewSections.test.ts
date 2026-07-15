@@ -240,7 +240,7 @@ describe('collection overview pure logic', () => {
     );
 
     expect(screen.getByText('2장 표시 · 3장 더 볼 수 있어요')).toBeTruthy();
-    fireEvent.press(screen.getByLabelText('열린 카드 더 보기, 2장 표시 · 3장 더 볼 수 있어요'));
+    fireEvent.press(screen.getByLabelText('열린 카드 전체보기, 2장 표시 · 3장 더 볼 수 있어요'));
 
     expect(onViewAllOpened).toHaveBeenCalledTimes(1);
     expect(onViewAllOpened).toHaveBeenCalledWith('active');
@@ -266,7 +266,7 @@ describe('collection overview pure logic', () => {
     );
 
     expect(screen.getByText('2개 표시 · 2개 더 볼 수 있어요')).toBeTruthy();
-    fireEvent.press(screen.getByLabelText('방문 기록 더 보기, 2개 표시 · 2개 더 볼 수 있어요'));
+    fireEvent.press(screen.getByLabelText('방문 기록 전체보기, 2개 표시 · 2개 더 볼 수 있어요'));
 
     expect(onViewAllVisits).toHaveBeenCalledTimes(1);
   });
@@ -288,7 +288,7 @@ describe('collection overview pure logic', () => {
 
     expect(screen.getByText('1장 표시 · 지난 기록을 더 불러올 수 있어요')).toBeTruthy();
     fireEvent.press(
-      screen.getByLabelText('열린 카드 더 보기, 1장 표시 · 지난 기록을 더 불러올 수 있어요')
+      screen.getByLabelText('열린 카드 전체보기, 1장 표시 · 지난 기록을 더 불러올 수 있어요')
     );
     expect(onViewAllOpened).toHaveBeenCalledWith('all');
   });
