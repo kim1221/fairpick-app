@@ -2,7 +2,32 @@ import type { PoolClient } from 'pg';
 import { upsertEventArchive } from './eventArchive';
 
 export const DAILY_OPEN_LIMIT = 50;
-export const DAILY_TICKET_LIMIT = DAILY_OPEN_LIMIT * 3;
+// 광고 1회 = 티켓 1개 고정(스펙 2026-07-19 §2.3). 랜덤성은 교환 금액 쪽으로 이동했다.
+export const TICKETS_PER_OPEN = 1;
+export const DAILY_TICKET_LIMIT = DAILY_OPEN_LIMIT * TICKETS_PER_OPEN;
+
+// 교환(10티켓=1회) 지급액 추첨 테이블 — 기대값 20.0원(스펙 §2.4).
+// "최대 금액" 방식 프로모션은 SDK에 보낸 amount가 그대로 지급되므로 서버가 추첨한다(금액 서버권위).
+// 콘솔 프로모션 최대 금액은 이 테이블의 최대치(500원) 이상이어야 한다.
+export const EXCHANGE_AMOUNT_TABLE: ReadonlyArray<{ amount: number; weight: number }> = [
+  { amount: 10, weight: 500 },
+  { amount: 15, weight: 200 },
+  { amount: 20, weight: 120 },
+  { amount: 30, weight: 100 },
+  { amount: 50, weight: 60 },
+  { amount: 100, weight: 16 },
+  { amount: 500, weight: 4 },
+];
+
+export function drawExchangeAmount(rand: () => number = Math.random): number {
+  const totalWeight = EXCHANGE_AMOUNT_TABLE.reduce((sum, entry) => sum + entry.weight, 0);
+  let remaining = rand() * totalWeight;
+  for (const entry of EXCHANGE_AMOUNT_TABLE) {
+    remaining -= entry.weight;
+    if (remaining < 0) return entry.amount;
+  }
+  return EXCHANGE_AMOUNT_TABLE[0].amount;
+}
 
 export type TicketGrantResult = {
   earned: number;
@@ -27,13 +52,6 @@ export class TicketGrantError extends Error {
   ) {
     super(code);
   }
-}
-
-function randomTickets(): number {
-  const r = Math.random();
-  if (r < 0.50) return 1;
-  if (r < 0.85) return 2;
-  return 3;
 }
 
 /**
@@ -181,7 +199,7 @@ export async function grantTicketsForEvent(
     });
   }
 
-  const earned = Math.min(randomTickets(), remaining);
+  const earned = Math.min(TICKETS_PER_OPEN, remaining);
   const newDailyEarned = currentDailyEarned + earned;
   const { rows: updated } = await client.query(
     `UPDATE user_tickets

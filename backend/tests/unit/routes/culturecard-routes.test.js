@@ -193,7 +193,7 @@ test('GET /api/cards/today returns three unopened cards, morePool, and ticket to
   assert.equal(body.morePool.every((card) => card.opened === false), true);
   assert.equal(body.ticketCount, 7);
   assert.equal(body.dailyEarned, 4);
-  assert.equal(body.dailyLimit, 150);
+  assert.equal(body.dailyLimit, 50);
   assert.match(body.weeklyCuration.weekKey, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(body.weeklyCuration.title, '이번 주 문화 3선');
   assert.equal(body.weeklyCuration.items.length, 3);
@@ -340,7 +340,7 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
   assert.equal(openedResponse.body.card.eventId, 'locked-a');
   assert.equal(openedResponse.body.card.title, '비밀 전시');
   assert.equal(openedResponse.body.card.opened, true);
-  assert.ok(openedResponse.body.earned >= 1 && openedResponse.body.earned <= 3);
+  assert.equal(openedResponse.body.earned, 1);
   assert.equal(openedResponse.body.dailyOpenCount, 1);
   assert.equal(openedResponse.body.dailyOpenLimit, 50);
   assert.equal(archiveUpsertCount, 1);
@@ -1712,4 +1712,37 @@ test('GET /api/tickets/history keeps balance and available history when legacy s
       occurredAt: new Date('2026-07-07T01:00:00.000Z'),
     },
   ]);
+});
+
+// ── 경제 상수·교환 금액 추첨 (스펙 2026-07-19 §2.3·§2.4) ──────────────────────
+
+const {
+  DAILY_OPEN_LIMIT: ECON_DAILY_OPEN_LIMIT,
+  DAILY_TICKET_LIMIT: ECON_DAILY_TICKET_LIMIT,
+  TICKETS_PER_OPEN,
+  EXCHANGE_AMOUNT_TABLE,
+  drawExchangeAmount,
+} = require('../../../src/services/ticketGrant');
+
+test('tickets are fixed at 1 per open and the daily ticket limit follows the open limit', () => {
+  assert.equal(TICKETS_PER_OPEN, 1);
+  assert.equal(ECON_DAILY_TICKET_LIMIT, ECON_DAILY_OPEN_LIMIT);
+});
+
+test('exchange amount table has EV 20.0 and the draw maps rand boundaries to table entries', () => {
+  const totalWeight = EXCHANGE_AMOUNT_TABLE.reduce((sum, e) => sum + e.weight, 0);
+  const ev = EXCHANGE_AMOUNT_TABLE.reduce((sum, e) => sum + e.amount * e.weight, 0) / totalWeight;
+  assert.equal(ev, 20.0);
+
+  // 누적 가중치 경계에서의 매핑 (weights: 500/200/120/100/60/16/4, total 1000)
+  assert.equal(drawExchangeAmount(() => 0), 10);
+  assert.equal(drawExchangeAmount(() => 0.4999), 10);
+  assert.equal(drawExchangeAmount(() => 0.5), 15);
+  assert.equal(drawExchangeAmount(() => 0.9999), 500);
+
+  // 어떤 rand에서도 테이블 밖 금액은 나오지 않는다
+  const allowed = new Set(EXCHANGE_AMOUNT_TABLE.map((e) => e.amount));
+  for (let i = 0; i < 200; i += 1) {
+    assert.ok(allowed.has(drawExchangeAmount()));
+  }
 });

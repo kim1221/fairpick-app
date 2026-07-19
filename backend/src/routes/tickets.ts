@@ -1,6 +1,6 @@
 /**
  * 티켓 조각 API
- * 광고 시청 → 티켓 조각 1~3개 랜덤 적립 → 10개 = 1포인트 교환
+ * 광고 시청 → 티켓 1개 적립 → 10개 = 포인트 뽑기(서버 추첨 랜덤 금액) 1회
  *
  * Phase 2 보강:
  * - GET  /config              : 프로모션 코드 등 정책 설정 반환 (requireAuth)
@@ -15,6 +15,7 @@ import { requireAuth } from '../middleware/requireAuth';
 import {
   DAILY_OPEN_LIMIT,
   DAILY_TICKET_LIMIT,
+  drawExchangeAmount,
 } from '../services/ticketGrant';
 
 const router = express.Router();
@@ -22,15 +23,10 @@ const router = express.Router();
 const TICKETS_PER_EXCHANGE = 10;
 /**
  * [정책 확정]
- * DAILY_LIMIT: 50회 × 최대 3티켓을 모두 지급하기 위한 안전 상한 (KST 자정 기준 리셋)
+ * DAILY_LIMIT: 오픈 50회 × 티켓 1개 고정 = 50 (KST 자정 기준 리셋)
  * - 광고 fill rate 부족(failedToShow)과 정책 한도 도달은 의미가 다르므로 별도 처리
  * - DAILY_LIMIT_REACHED 응답 시에만 "오늘 티켓을 모두 모았어요" 문구 사용
  * - 광고 없음/오류는 "지금은 광고를 불러올 수 없어요" 문구로 분리
- *
- * DAILY_LIMIT clamp 정책(정상 v2 흐름에서는 50회 제한이 먼저 적용됨):
- * - remaining=1일 때 randomTickets()=3이면 1조각 지급 (0장보다 나은 UX)
- * - 광고를 끝까지 본 사용자가 0장 받는 경험을 방지
- * - 정책 상한(30개)은 절대 초과하지 않음
  */
 const DAILY_LIMIT = DAILY_TICKET_LIMIT;
 // cooldown 없음: 리워드 광고 자체가 자연 속도 제한이며 daily_limit으로 총량 방어
@@ -359,30 +355,34 @@ router.post('/exchange', requireAuth, async (req: Request, res: Response) => {
     [userId]
   );
 
+  // 지급액은 서버가 추첨한다(금액 서버권위, 스펙 §2.4).
+  // pending에 저장된 amount를 클라가 grantPromotionReward에 그대로 전달한다.
+  const drawnAmount = drawExchangeAmount();
+
   // 원자적 INSERT + ON CONFLICT — 동시 요청 시 DB 레벨에서 pending 중복 생성 차단
   const { rows: inserted } = await pool.query(
     `INSERT INTO user_ticket_exchanges (user_id, promotion_code, amount, expires_at)
-     VALUES ($1, $2, 1, NOW() + ($3 || ' hours')::INTERVAL)
+     VALUES ($1, $2, $3, NOW() + ($4 || ' hours')::INTERVAL)
      ON CONFLICT (user_id) WHERE status = 'pending' DO NOTHING
-     RETURNING id`,
-    [userId, promotionCode, String(EXCHANGE_EXPIRES_HOURS)]
+     RETURNING id, amount`,
+    [userId, promotionCode, drawnAmount, String(EXCHANGE_EXPIRES_HOURS)]
   );
 
   if (inserted.length > 0) {
-    console.log(`[Tickets] 🆕 exchange pending: user=${userId} exchangeId=${inserted[0].id}`);
-    return res.json({ exchangeId: inserted[0].id });
+    console.log(`[Tickets] 🆕 exchange pending: user=${userId} exchangeId=${inserted[0].id} amount=${inserted[0].amount}`);
+    return res.json({ exchangeId: inserted[0].id, amount: inserted[0].amount });
   }
 
-  // INSERT 충돌 → 유효한 pending 재사용 (동시 요청의 정상 경로)
+  // INSERT 충돌 → 유효한 pending 재사용 (동시 요청의 정상 경로, 이미 추첨된 금액 유지)
   const { rows: existing } = await pool.query(
-    `SELECT id FROM user_ticket_exchanges
+    `SELECT id, amount FROM user_ticket_exchanges
      WHERE user_id = $1 AND status = 'pending' AND expires_at > NOW()
      LIMIT 1`,
     [userId]
   );
   if (existing.length > 0) {
-    console.log(`[Tickets] 🔄 exchange reuse: user=${userId} exchangeId=${existing[0].id}`);
-    return res.json({ exchangeId: existing[0].id });
+    console.log(`[Tickets] 🔄 exchange reuse: user=${userId} exchangeId=${existing[0].id} amount=${existing[0].amount}`);
+    return res.json({ exchangeId: existing[0].id, amount: existing[0].amount });
   }
 
   // cleanup 후 INSERT가 충돌 없이 성공해야 하므로 이론상 도달 불가
@@ -409,7 +409,7 @@ router.post('/exchange/confirm', requireAuth, async (req: Request, res: Response
 
     // exchange 레코드 잠금 (동시 confirm 직렬화)
     const { rows: exchangeRows } = await client.query(
-      `SELECT id, user_id, status, expires_at
+      `SELECT id, user_id, status, expires_at, amount
        FROM user_ticket_exchanges
        WHERE id = $1
        FOR UPDATE`,
@@ -437,7 +437,7 @@ router.post('/exchange/confirm', requireAuth, async (req: Request, res: Response
         [userId]
       );
       console.log(`[Tickets] ✅ exchange already completed (idempotent): user=${userId} exchangeId=${exchangeId}`);
-      return res.json({ success: true, ticketCount: tc[0]?.ticket_count ?? 0 });
+      return res.json({ success: true, ticketCount: tc[0]?.ticket_count ?? 0, amount: ex.amount });
     }
 
     // 만료 체크
@@ -484,8 +484,8 @@ router.post('/exchange/confirm', requireAuth, async (req: Request, res: Response
 
     await client.query('COMMIT');
 
-    console.log(`[Tickets] 💰 exchange confirmed: user=${userId} exchangeId=${exchangeId}`);
-    return res.json({ success: true, ticketCount: finalTicket[0]?.ticket_count ?? 0 });
+    console.log(`[Tickets] 💰 exchange confirmed: user=${userId} exchangeId=${exchangeId} amount=${ex.amount}`);
+    return res.json({ success: true, ticketCount: finalTicket[0]?.ticket_count ?? 0, amount: ex.amount });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[Tickets] exchange confirm error:', err);

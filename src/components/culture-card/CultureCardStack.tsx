@@ -181,7 +181,7 @@ export function CultureCardStack({
             <View style={styles.rewardStub}>
               <View style={styles.perforation} />
               <View style={styles.rewardCopy}>
-                <Text style={styles.rewardAmount}>1~3</Text>
+                <Text style={styles.rewardAmount}>1</Text>
                 <Text style={styles.rewardUnit}>티켓</Text>
               </View>
               <Text style={styles.stubSerial}>{getTicketSerial(visualKey).slice(-3)}</Text>

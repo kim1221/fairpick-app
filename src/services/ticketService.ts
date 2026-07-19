@@ -139,19 +139,20 @@ export async function earnTickets(eventId: string, adAttemptId?: string): Promis
  *
  * grantPromotionReward() 실패 시 confirm 미호출 → 티켓 미차감 보장
  */
-export async function exchangeTickets(): Promise<{ success: boolean; ticketCount: number }> {
+export async function exchangeTickets(): Promise<{ success: boolean; ticketCount: number; amount: number }> {
   // 교환 직전 서버에서 promotionCode 수신 (하드코딩 없음)
   const { promotionCode } = await getTicketConfig();
 
-  // 1. pending 생성 (티켓 미차감)
-  const { data: exchangeData } = await http.post<{ exchangeId: string }>('/api/tickets/exchange');
+  // 1. pending 생성 (티켓 미차감) — 지급 금액은 서버가 추첨해 내려준다(금액 서버권위)
+  const { data: exchangeData } = await http.post<{ exchangeId: string; amount?: number }>('/api/tickets/exchange');
   const { exchangeId } = exchangeData;
+  const amount = exchangeData.amount ?? 1;
 
-  // 2. 토스 포인트 지급
+  // 2. 토스 포인트 지급 — "최대 금액" 방식 프로모션은 여기 보낸 amount가 그대로 지급된다
   const result = await grantPromotionReward({
     params: {
       promotionCode,
-      amount: 1,
+      amount,
     },
   });
 
@@ -169,11 +170,11 @@ export async function exchangeTickets(): Promise<{ success: boolean; ticketCount
     : undefined;
 
   // 3. 지급 성공 확인 후 confirm (티켓 차감 확정)
-  const { data } = await http.post<{ success: boolean; ticketCount: number }>('/api/tickets/exchange/confirm', {
+  const { data } = await http.post<{ success: boolean; ticketCount: number; amount?: number }>('/api/tickets/exchange/confirm', {
     exchangeId,
     grantResultKey,
   });
 
   rememberTicketCount(data.ticketCount);
-  return data;
+  return { ...data, amount: data.amount ?? amount };
 }
