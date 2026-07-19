@@ -1099,9 +1099,17 @@ export async function dedupeCanonicalEvents() {
   console.log(`  - Candidates: ${phase3Result.candidatesCount}`);
   console.log(`  - Merged: ${phase3Result.groupsMerged}`);
 
+  // ========== Phase 4: 겹치는 재등록 병합 ==========
+  console.log('\n[Dedupe][Phase4] Starting overlapping-run re-merge...');
+  const phase4Result = await runPhase4OverlappingRunRemerge();
+  console.log(`[Dedupe][Phase4] Completed`);
+  console.log(`  - Candidates: ${phase4Result.candidatesCount}`);
+  console.log(`  - Merged: ${phase4Result.groupsMerged}`);
+
+  const totalDeleted = phase3Result.deletedCount + phase4Result.deletedCount;
   console.log('\n[Dedupe] All phases complete!');
-  console.log(`  - Final canonical events: ${savedCount - phase3Result.deletedCount}`);
-  console.log(`  - Total deduplication ratio: ${((1 - (savedCount - phase3Result.deletedCount) / allRawEvents.length) * 100).toFixed(1)}%`);
+  console.log(`  - Final canonical events: ${savedCount - totalDeleted}`);
+  console.log(`  - Total deduplication ratio: ${((1 - (savedCount - totalDeleted) / allRawEvents.length) * 100).toFixed(1)}%`);
 
   // 병합 후 검증 SQL 출력
   console.log('\n[Dedupe] Verification SQL (run manually to check for remaining duplicates):');
@@ -1472,6 +1480,188 @@ async function runPhase3CanonicalRemerge(): Promise<{ candidatesCount: number; g
   const phase3ElapsedMs = Date.now() - phase3Start;
   const phase3MemEnd = Math.round(process.memoryUsage().rss / 1024 / 1024);
   console.log(`[INSTRUMENT][DEDUPE][PHASE3] END   ts=${new Date().toISOString()} elapsed=${phase3ElapsedMs}ms mem=${phase3MemEnd}MB count=${candidatesCount}`);
+
+  return { candidatesCount, groupsMerged, deletedCount };
+}
+
+// ========== Phase 4: 겹치는 재등록(같은 공연·다른 날짜 범위) 병합 ==========
+// KOPIS는 공연일이 추가·정정되면 기존 등록을 고치지 않고 새 ID로 재등록하는 경우가 있다.
+// content_key는 날짜를 포함하므로(별개 회차 분리를 위한 의도된 설계) 이런 재등록을 못 잡는다.
+// 제목·공연장·지역·카테고리가 같고 날짜 범위가 "겹치는" 것만 같은 공연으로 병합한다.
+// 날짜가 분리된 항목(어린이극 월간 회차 등)은 별개 회차이므로 절대 병합하지 않는다.
+
+/**
+ * Phase 4 그룹 키. venue가 비어 있으면 동명 이벤트 오병합 위험이 커서 null(대상 제외)을 반환한다.
+ */
+export function overlapRemergeGroupKey(event: {
+  title: string | null;
+  venue: string | null;
+  region: string | null;
+  main_category: string | null;
+}): string | null {
+  const title = normalizeTitle(event.title);
+  const venue = normalizeVenueForRemerge(event.venue);
+  if (!title || !venue) return null;
+  return [title, venue, normalizeRegion(event.region), (event.main_category || '').toLowerCase()].join('||');
+}
+
+type DateSpan = { startMs: number; endMs: number };
+
+function toDateSpan(startAt: unknown, endAt: unknown): DateSpan | null {
+  if (!startAt) return null;
+  const startMs = new Date(startAt as string | number | Date).getTime();
+  if (!Number.isFinite(startMs)) return null;
+  const endRaw = endAt ? new Date(endAt as string | number | Date).getTime() : NaN;
+  const endMs = Number.isFinite(endRaw) ? Math.max(endRaw, startMs) : startMs;
+  return { startMs, endMs };
+}
+
+/**
+ * 같은 그룹 안에서 날짜 범위가 겹치는 항목끼리 클러스터로 묶는다(경계일 공유 포함).
+ * start_at이 없는 항목은 겹침을 판단할 수 없으므로 제외한다.
+ */
+export function clusterByDateOverlap<T extends { start_at: unknown; end_at: unknown }>(
+  events: T[],
+): T[][] {
+  const dated = events
+    .map((event) => ({ event, span: toDateSpan(event.start_at, event.end_at) }))
+    .filter((entry): entry is { event: T; span: DateSpan } => entry.span !== null)
+    .sort((a, b) => a.span.startMs - b.span.startMs);
+
+  const clusters: T[][] = [];
+  let current: T[] = [];
+  let currentEndMs = -Infinity;
+
+  for (const { event, span } of dated) {
+    if (current.length > 0 && span.startMs <= currentEndMs) {
+      current.push(event);
+      currentEndMs = Math.max(currentEndMs, span.endMs);
+    } else {
+      if (current.length > 1) clusters.push(current);
+      current = [event];
+      currentEndMs = span.endMs;
+    }
+  }
+  if (current.length > 1) clusters.push(current);
+  return clusters;
+}
+
+function toIsoOrUndefined(ms: number): string | undefined {
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
+}
+
+export async function runPhase4OverlappingRunRemerge(): Promise<{ candidatesCount: number; groupsMerged: number; deletedCount: number }> {
+  const phase4Start = Date.now();
+  console.log(`[INSTRUMENT][DEDUPE][PHASE4] START ts=${new Date().toISOString()}`);
+
+  // Phase 3 병합 결과가 반영된 최신 상태에서 다시 조회한다.
+  const allCanonical = await getAllCanonicalEventsForRemerge();
+
+  const groups = new Map<string, CanonicalEventForRemerge[]>();
+  for (const event of allCanonical) {
+    const groupKey = overlapRemergeGroupKey(event);
+    if (!groupKey) continue;
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey)!.push(event);
+  }
+
+  let candidatesCount = 0;
+  let groupsMerged = 0;
+  let deletedCount = 0;
+
+  for (const [, events] of groups) {
+    if (events.length < 2) continue;
+
+    for (const cluster of clusterByDateOverlap(events)) {
+      candidatesCount += cluster.length;
+
+      const master = selectMasterCanonical([...cluster]);
+      const others = cluster.filter((e) => e.id !== master.id);
+      const mergedSources = mergeSources(cluster);
+
+      let bestVenue = master.venue || '';
+      for (const other of others) {
+        if (other.venue && other.venue.length > bestVenue.length) bestVenue = other.venue;
+      }
+
+      let bestImageUrl = master.image_url;
+      if (!bestImageUrl || bestImageUrl.includes('placeholder')) {
+        for (const other of others) {
+          if (other.image_url && !other.image_url.includes('placeholder')) {
+            bestImageUrl = other.image_url;
+            break;
+          }
+        }
+      }
+
+      // 재등록으로 나뉜 날짜 범위를 유니온으로 흡수한다(예: 8/1~8/2 + 7/31~8/2 → 7/31~8/2).
+      const spans = cluster
+        .map((e) => toDateSpan(e.start_at, e.end_at))
+        .filter((span): span is DateSpan => span !== null);
+      const unionStartMs = Math.min(...spans.map((s) => s.startMs));
+      const unionEndMs = Math.max(...spans.map((s) => s.endMs));
+      const unionStart = toIsoOrUndefined(unionStartMs);
+      const unionEnd = toIsoOrUndefined(unionEndMs);
+
+      const displayTitle = generateDisplayTitle(master.title);
+      const contentKey = generateContentKey(
+        master.title,
+        unionStart ?? master.start_at,
+        unionEnd ?? master.end_at,
+        bestVenue,
+        master.region,
+        master.main_category,
+      );
+
+      // Phase 3과 동일한 안전 순서: 공개 이력 alias 보존 → master 갱신 → 중복 삭제 (같은 트랜잭션).
+      const idsToDelete = others.map((e) => e.id);
+      const mergeEventIds = cluster.map((e) => e.id);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const propagation = await propagateOpenedCardAliasesForMerge(
+          client,
+          mergeEventIds,
+          master.id,
+          { contentKey, canonicalKey: master.canonical_key },
+        );
+        if (new Set(propagation.lockedEventIds).size !== new Set(mergeEventIds).size) {
+          throw new Error(
+            `[Dedupe][Phase4] canonical merge group changed concurrently: ` +
+            `expected=${mergeEventIds.length}, locked=${propagation.lockedEventIds.length}`,
+          );
+        }
+
+        await updateCanonicalEventAfterRemerge(master.id, {
+          venue: bestVenue,
+          imageUrl: bestImageUrl || undefined,
+          sources: mergedSources,
+          displayTitle,
+          contentKey,
+          startAt: unionStart,
+          endAt: unionEnd,
+        }, client);
+        await deleteCanonicalEvents(idsToDelete, client);
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      groupsMerged++;
+      deletedCount += idsToDelete.length;
+
+      if (groupsMerged <= 20) {
+        const ranges = cluster.map((e) => `${String(e.start_at).slice(0, 10)}~${String(e.end_at).slice(0, 10)}`).join(' + ');
+        console.log(`[Dedupe][Phase4] Overlapping runs merged: '${master.title}' (${ranges})`);
+      }
+    }
+  }
+
+  const phase4ElapsedMs = Date.now() - phase4Start;
+  console.log(`[INSTRUMENT][DEDUPE][PHASE4] END   ts=${new Date().toISOString()} elapsed=${phase4ElapsedMs}ms merged=${groupsMerged} deleted=${deletedCount}`);
 
   return { candidatesCount, groupsMerged, deletedCount };
 }

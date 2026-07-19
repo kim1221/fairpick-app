@@ -740,6 +740,8 @@ export interface CanonicalEventUpdateFields {
   sourcePriorityWinner?: string;
   displayTitle?: string;
   contentKey?: string;
+  startAt?: string;
+  endAt?: string;
 }
 
 export async function updateCanonicalEventAfterRemerge(
@@ -777,6 +779,16 @@ export async function updateCanonicalEventAfterRemerge(
   if (fields.contentKey !== undefined) {
     updates.push(`content_key = $${paramIndex++}`);
     params.push(fields.contentKey);
+  }
+  if (fields.startAt !== undefined) {
+    // manually_edited_fields->start_at 보호
+    updates.push(`start_at = CASE WHEN (manually_edited_fields->>'start_at')::boolean = true THEN start_at ELSE $${paramIndex++} END`);
+    params.push(fields.startAt);
+  }
+  if (fields.endAt !== undefined) {
+    // manually_edited_fields->end_at 보호
+    updates.push(`end_at = CASE WHEN (manually_edited_fields->>'end_at')::boolean = true THEN end_at ELSE $${paramIndex++} END`);
+    params.push(fields.endAt);
   }
 
   if (updates.length === 0) return;
