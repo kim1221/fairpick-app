@@ -104,7 +104,7 @@ test('allows a genuinely empty source only at the API parser boundary', async ()
   assert.deepEqual(result, []);
 });
 
-test('rejects a contradictory empty page and changing pagination totals', async () => {
+test('rejects a contradictory empty page at the parser boundary', () => {
   assert.throws(
     () => parsePopgaListResponse(listBody({
       content: [],
@@ -113,35 +113,55 @@ test('rejects a contradictory empty page and changing pagination totals', async 
     })),
     /3건을 보고했지만/,
   );
-
-  const fixtures = [
-    listBody({
-      content: [{ id: 2, title: '둘' }],
-      number: 0,
-      size: 1,
-      totalElements: 2,
-      totalPages: 2,
-    }),
-    listBody({
-      content: [{ id: 1, title: '하나' }],
-      number: 1,
-      size: 1,
-      totalElements: 3,
-      totalPages: 3,
-    }),
-  ];
-
-  await assert.rejects(
-    fetchPopgaEventList({
-      get: async (url) => ({ data: fixtures[Number(new URL(url).searchParams.get('page'))] }),
-      pageSize: 1,
-      pageDelayMs: 0,
-    }),
-    /페이지 순회 중 변경/,
-  );
 });
 
-test('allows only Popga current one-record counter drift and rejects a larger gap', async () => {
+test('re-crawls once when pagination totals change mid-walk and merges both passes', async () => {
+  // 1차 순회: page1에서 총계가 2→3으로 늘어 드리프트 감지(늘어난 page2까지 따라감).
+  const firstCrawl = [
+    listBody({ content: [{ id: 2, title: '둘' }], number: 0, size: 1, totalElements: 2, totalPages: 2 }),
+    listBody({ content: [{ id: 1, title: '하나' }], number: 1, size: 1, totalElements: 3, totalPages: 3 }),
+    listBody({ content: [{ id: 0, title: '영' }], number: 2, size: 1, totalElements: 3, totalPages: 3 }),
+  ];
+  // 2차 순회: 안정된 목록(새 항목 3 포함) — 드리프트 없음.
+  const secondCrawl = [
+    listBody({ content: [{ id: 3, title: '셋' }], number: 0, size: 1, totalElements: 3, totalPages: 3 }),
+    listBody({ content: [{ id: 2, title: '둘' }], number: 1, size: 1, totalElements: 3, totalPages: 3 }),
+    listBody({ content: [{ id: 1, title: '하나' }], number: 2, size: 1, totalElements: 3, totalPages: 3 }),
+  ];
+  let calls = 0;
+  const get = async (url) => {
+    const page = Number(new URL(url).searchParams.get('page'));
+    calls += 1;
+    return { data: calls <= firstCrawl.length ? firstCrawl[page] : secondCrawl[page] };
+  };
+
+  const result = await fetchPopgaEventList({ get, pageSize: 1, pageDelayMs: 0 });
+
+  assert.equal(calls, 6);
+  // 두 순회의 합집합 — 1차에서 본 항목 위치가 유지되고 새 항목이 뒤에 붙는다.
+  assert.deepEqual(result.map((item) => item.id).sort(), [0, 1, 2, 3]);
+});
+
+test('skips an item repeated across pages instead of failing the run', async () => {
+  // 순회 중 새 항목이 앞에 끼어들면 같은 id가 두 페이지에 걸쳐 나온다.
+  const pages = [
+    listBody({ content: [{ id: 9, title: '아홉' }, { id: 8, title: '여덟' }], number: 0, size: 2, totalElements: 3, totalPages: 2 }),
+    listBody({ content: [{ id: 8, title: '여덟' }], number: 1, size: 2, totalElements: 3, totalPages: 2 }),
+  ];
+  let calls = 0;
+  const get = async (url) => {
+    calls += 1;
+    return { data: pages[Number(new URL(url).searchParams.get('page'))] };
+  };
+
+  const result = await fetchPopgaEventList({ get, pageSize: 2, pageDelayMs: 0 });
+
+  // 드리프트로 재순회(2회 × 2페이지)하지만 실패하지 않고 유니크 항목을 돌려준다.
+  assert.equal(calls, 4);
+  assert.deepEqual(result.map((item) => item.id), [9, 8]);
+});
+
+test('tolerates counter drift: one hidden record passes quietly, a larger gap keeps collected items', async () => {
   const oneHidden = listBody({
     content: [{ id: 1, title: '공개 항목' }],
     number: 0,
@@ -149,12 +169,18 @@ test('allows only Popga current one-record counter drift and rejects a larger ga
     totalElements: 2,
     totalPages: 1,
   });
+  let oneHiddenCalls = 0;
   const result = await fetchPopgaEventList({
-    get: async () => ({ data: oneHidden }),
+    get: async () => {
+      oneHiddenCalls += 1;
+      return { data: oneHidden };
+    },
     pageSize: 2,
     pageDelayMs: 0,
   });
   assert.equal(result.length, 1);
+  // 상시적인 비공개 1건 오차는 드리프트가 아니므로 재순회하지 않는다.
+  assert.equal(oneHiddenCalls, 1);
 
   const twoMissing = listBody({
     content: [{ id: 1, title: '공개 항목' }],
@@ -163,14 +189,18 @@ test('allows only Popga current one-record counter drift and rejects a larger ga
     totalElements: 3,
     totalPages: 1,
   });
-  await assert.rejects(
-    fetchPopgaEventList({
-      get: async () => ({ data: twoMissing }),
-      pageSize: 3,
-      pageDelayMs: 0,
-    }),
-    /총계 불일치/,
-  );
+  let twoMissingCalls = 0;
+  const collected = await fetchPopgaEventList({
+    get: async () => {
+      twoMissingCalls += 1;
+      return { data: twoMissing };
+    },
+    pageSize: 3,
+    pageDelayMs: 0,
+  });
+  // 큰 오차는 재순회를 한 번 더 하고, 그래도 같으면 수집분으로 진행한다(전면 실패 금지).
+  assert.equal(twoMissingCalls, 2);
+  assert.deepEqual(collected.map((item) => item.id), [1]);
 });
 
 test('validates the detail response id and title', () => {

@@ -159,19 +159,23 @@ export function buildPopgaListUrl(page: number, size = DEFAULT_PAGE_SIZE): strin
 
 const defaultGet: PopgaHttpGet = (url, config) => axios.get(url, config);
 
-export async function fetchPopgaEventList(options: {
-  get?: PopgaHttpGet;
-  pageSize?: number;
-  pageDelayMs?: number;
-} = {}): Promise<PopgaSpot[]> {
-  const get = options.get ?? defaultGet;
-  const pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
-  const pageDelayMs = options.pageDelayMs ?? 300;
-  const all: PopgaSpot[] = [];
+// 목록은 등록이 활발해 순회 도중 총계·페이지 경계가 바뀌는 것이 정상 동작이다.
+// 형태 위반(파싱 실패)은 여전히 즉시 실패하지만, 이런 동적 변동은 실패 대신
+// 같은 런에서 한 번 더 순회해 합집합으로 수집한다(2026-07-15~ 5일 연속 전면 실패 교훈).
+const MAX_LIST_CRAWLS = 2;
+
+async function crawlPopgaListOnce(
+  get: PopgaHttpGet,
+  pageSize: number,
+  pageDelayMs: number,
+  byId: Map<string, PopgaSpot>,
+): Promise<boolean> {
   const seenIds = new Set<string>();
+  let drifted = false;
   let pageNumber = 0;
   let expectedTotal: number | null = null;
   let totalPages = 1;
+  let collected = 0;
 
   do {
     const response = await get(buildPopgaListUrl(pageNumber, pageSize), {
@@ -187,24 +191,29 @@ export async function fetchPopgaEventList(options: {
       parsed.page.totalElements !== expectedTotal ||
       parsed.page.totalPages !== totalPages
     ) {
-      throw new PopgaApiContractError(
-        '팝가 목록이 페이지 순회 중 변경되었습니다. 누락 방지를 위해 다음 실행에서 다시 시도합니다.',
+      console.warn(
+        `[popga-collector] 목록 총계가 순회 중 변경됨 (${expectedTotal}→${parsed.page.totalElements}건, ` +
+        `${totalPages}→${parsed.page.totalPages}p). 최신 값 기준으로 계속 진행합니다.`,
       );
+      drifted = true;
+      expectedTotal = parsed.page.totalElements;
+      totalPages = parsed.page.totalPages;
     }
 
     for (const item of parsed.content) {
       const id = String(item.id);
       if (seenIds.has(id)) {
-        throw new PopgaApiContractError(
-          `팝가 목록에 id=${id}가 여러 페이지에서 반복됐습니다. 누락 방지를 위해 중단합니다.`,
-        );
+        // 순회 중 새 항목이 앞에 끼어들면 같은 항목이 두 페이지에 걸쳐 나온다 — 누락이 아니므로 건너뛴다.
+        drifted = true;
+        continue;
       }
       seenIds.add(id);
-      all.push(item);
+      byId.set(id, item);
+      collected += 1;
     }
 
     console.log(
-      `[popga-collector] 목록 page=${pageNumber + 1}/${totalPages}, 이번 ${parsed.content.length}건 (누계 ${all.length}건)`,
+      `[popga-collector] 목록 page=${pageNumber + 1}/${totalPages}, 이번 ${parsed.content.length}건 (누계 ${byId.size}건)`,
     );
 
     pageNumber += 1;
@@ -213,18 +222,49 @@ export async function fetchPopgaEventList(options: {
     }
   } while (pageNumber < totalPages);
 
-  const countDrift = (expectedTotal ?? 0) - all.length;
-  if (countDrift !== 0 && countDrift <= MAX_REPORTED_COUNT_DRIFT && countDrift > 0) {
+  const countDrift = (expectedTotal ?? 0) - collected;
+  if (countDrift > MAX_REPORTED_COUNT_DRIFT) {
     console.warn(
-      `[popga-collector] 목록 총계가 content보다 ${countDrift}건 큽니다 ` +
-      `(API=${expectedTotal}, 수집=${all.length}). Popga의 비공개 레코드 오차로 처리합니다.`,
+      `[popga-collector] 목록 총계보다 ${countDrift}건 적게 수집됨 ` +
+      `(API=${expectedTotal}, 수집=${collected}). 순회 중 목록 변동으로 보고 재순회를 검토합니다.`,
     );
+    drifted = true;
   } else if (countDrift !== 0) {
-    throw new PopgaApiContractError(
-      `팝가 목록 총계 불일치 (API=${expectedTotal ?? 'unknown'}, 수집=${all.length})`,
+    console.warn(
+      `[popga-collector] 목록 총계와 수집 수의 경미한 오차 ` +
+      `(API=${expectedTotal}, 수집=${collected}). Popga의 비공개 레코드 오차로 처리합니다.`,
     );
   }
-  return all;
+  return drifted;
+}
+
+export async function fetchPopgaEventList(options: {
+  get?: PopgaHttpGet;
+  pageSize?: number;
+  pageDelayMs?: number;
+} = {}): Promise<PopgaSpot[]> {
+  const get = options.get ?? defaultGet;
+  const pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
+  const pageDelayMs = options.pageDelayMs ?? 300;
+
+  const byId = new Map<string, PopgaSpot>();
+  for (let attempt = 1; attempt <= MAX_LIST_CRAWLS; attempt += 1) {
+    const drifted = await crawlPopgaListOnce(get, pageSize, pageDelayMs, byId);
+    if (!drifted) break;
+    if (attempt < MAX_LIST_CRAWLS) {
+      console.warn(
+        `[popga-collector] 순회 중 목록 변동 감지 — 누락 방지를 위해 한 번 더 순회합니다 (${attempt + 1}/${MAX_LIST_CRAWLS}).`,
+      );
+      if (pageDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, pageDelayMs));
+      }
+    } else {
+      console.warn(
+        `[popga-collector] 재순회 후에도 목록이 계속 변합니다. 지금까지 수집한 ${byId.size}건으로 진행합니다.`,
+      );
+    }
+  }
+  return [...byId.values()];
 }
 
 export async function fetchPopgaSpotDetail(
