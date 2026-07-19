@@ -46,7 +46,7 @@ import {
   type RewardAdEventType,
 } from '../services/ticketService';
 import userEventService from '../services/userEventService';
-import { getCurrentCoordsOrNull } from '../utils/currentLocation';
+import { getStartupCoords } from '../utils/currentLocation';
 import { getLikesV2, toggleLike } from '../utils/storage';
 
 export const Route = createRoute('/', {
@@ -314,6 +314,11 @@ function HomePageInner() {
   const activeCacheKeyRef = useRef<string | null>(renderCacheKey);
   const selectedCardKeyRef = useRef<string | null>(initialCache?.selectedCardKey ?? null);
   const refreshRequestVersionRef = useRef(0);
+  const statusRef = useRef<HomeStatus>(initialCache?.status ?? 'loading');
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   const clearLoadTimeout = useCallback(() => {
     if (loadTimeoutRef.current) {
@@ -374,7 +379,14 @@ function HomePageInner() {
     if (!requestCacheKey) return;
     const requestVersion = ++refreshRequestVersionRef.current;
 
-    const coords = await getCurrentCoordsOrNull();
+    // 캐시 좌표로 즉시 요청해 첫 페인트를 GPS에 묶지 않는다. 크게 이동했으면 뒤에서 조용히 재검증.
+    const coords = await getStartupCoords(() => {
+      const current = statusRef.current;
+      // 광고·공개 흐름 중에는 상태를 건드리지 않는다(ad-freeze 방지).
+      if (current === 'ready' || current === 'loading' || current === 'load_failed') {
+        refreshCards().catch(() => {});
+      }
+    });
     const data = await getTodayCardsV2(coords ?? undefined);
     if (
       !mountedRef.current
