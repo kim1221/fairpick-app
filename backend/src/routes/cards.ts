@@ -8,13 +8,17 @@ import { openLockedCard, sealLockedCard } from '../services/cardToken';
 import {
   DAILY_OPEN_LIMIT,
   DAILY_TICKET_LIMIT,
+  computeDailyOpenCap,
   grantTicketsForEvent,
+  resolveEffectiveOpenLimit,
   TicketGrantError,
 } from '../services/ticketGrant';
 
 const router = express.Router();
 
 const DAILY_LIMIT = DAILY_TICKET_LIMIT;
+// 주간 발견 목표 — 동적 캡 도입으로 DAILY_OPEN_LIMIT 재사용을 중단(스펙 §10-6). 3장×7일.
+const WEEKLY_DISCOVERY_GOAL = 21;
 const TODAY_CARD_COUNT = 3;
 const WEEKLY_CARD_COUNT = 3;
 const CARD_POOL_LIMIT = 12;           // 최종 노출(오늘+더보기) 상한
@@ -935,6 +939,45 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
     await client.query('BEGIN');
     transactionOpen = true;
     await acquireUserCardLock(client, userId);
+    // 동적 캡용 신선 풀 크기(스펙 §2.2): /v2/today 후보 eligibility(안 연 카드 + 7일 노출 쿨다운 제외)와
+    // 동일 조건. 위치가 있으면 최대 반경(50km) 바운딩박스로 근사하고, 없으면 전국 풀 기준.
+    // OPEN_CAP_FULL_POOL(=CANDIDATE_LIMIT) 이상은 셀 필요가 없어 LIMIT으로 자른다.
+    const maxRadiusM = NEARBY_RADIUS_STEPS_M[NEARBY_RADIUS_STEPS_M.length - 1];
+    const freshBox = location ? calculateBoundingBox(location.lat, location.lng, maxRadiusM) : null;
+    const freshPoolParams: unknown[] = [userId, today, IMPRESSION_COOLDOWN_DAYS];
+    if (freshBox) freshPoolParams.push(freshBox.latMin, freshBox.latMax, freshBox.lngMin, freshBox.lngMax);
+    const freshPoolQuery = client.query<{ fresh: number }>(
+      `/* fresh_pool_count */
+       SELECT COUNT(*)::int AS fresh FROM (
+         SELECT 1 FROM canonical_events event
+         WHERE event.is_deleted = false
+           AND (event.end_at IS NULL OR (event.end_at AT TIME ZONE 'Asia/Seoul')::date >= $2::date)
+           AND NOT EXISTS (
+             SELECT 1 FROM user_card_opened_keys opened
+             WHERE opened.user_id = $1
+               AND (
+                 (opened.key_type = 'event_id' AND opened.key_value = event.id::text)
+                 OR (
+                   opened.key_type IN ('content_key', 'canonical_key')
+                   AND opened.key_value = ANY(
+                     ARRAY_REMOVE(ARRAY[event.content_key, event.canonical_key], NULL)
+                   )
+                 )
+               )
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM user_card_impressions ci
+             WHERE ci.user_id = $1
+               AND ci.event_id = event.id::text
+               AND ci.last_shown_on >= $2::date - (($3::int - 1) * INTERVAL '1 day')
+               AND ci.last_shown_on < $2::date
+           )
+           ${freshBox ? 'AND event.lat BETWEEN $4 AND $5 AND event.lng BETWEEN $6 AND $7' : ''}
+         LIMIT ${CANDIDATE_LIMIT}
+       ) fresh_pool`,
+      freshPoolParams,
+    );
+
     const [
       ticketResult,
       dailyOpenedResult,
@@ -942,17 +985,18 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
       impressionResult,
       weeklyOpenedResult,
       dailySlotRows,
+      freshPoolResult,
     ] = await Promise.all([
       client.query(
         `WITH ensured AS (
            INSERT INTO user_tickets (user_id, ticket_count, total_earned, total_exchanged)
            VALUES ($1, 0, 0, 0)
            ON CONFLICT (user_id) DO UPDATE SET updated_at = NOW()
-           RETURNING ticket_count, daily_earned, daily_earned_date
+           RETURNING ticket_count, daily_earned, daily_earned_date, daily_open_cap, daily_open_cap_date
          )
-         SELECT ticket_count, daily_earned, daily_earned_date FROM ensured
+         SELECT ticket_count, daily_earned, daily_earned_date, daily_open_cap, daily_open_cap_date FROM ensured
          UNION ALL
-         SELECT ticket_count, daily_earned, daily_earned_date
+         SELECT ticket_count, daily_earned, daily_earned_date, daily_open_cap, daily_open_cap_date
          FROM user_tickets WHERE user_id = $1
          LIMIT 1`,
         [userId],
@@ -1007,6 +1051,7 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
         [userId, weekKey],
       ),
       getDailySlotEvents(client, today, userId),
+      freshPoolQuery,
     ]);
 
     const seed = dailySeed(userId, today);
@@ -1034,13 +1079,33 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
       .slice()
       .sort((a, b) => (scoreById.get(b.eventId) ?? 0) - (scoreById.get(a.eventId) ?? 0));
     const dailyOpenCount = Number(dailyOpenedResult.rows[0]?.count ?? 0);
-    const assignments = dailyOpenCount >= DAILY_OPEN_LIMIT
+    const ticketRow = ticketResult.rows[0] ?? {};
+
+    // 동적 캡 확정(스펙 §2.2): 오늘 저장값과 신규 계산값 중 큰 쪽만 반영(상향만 허용).
+    const freshCount = Number(freshPoolResult.rows[0]?.fresh ?? 0);
+    const storedCap = resolveEffectiveOpenLimit(ticketRow, today);
+    const storedCapIsToday = ticketRow.daily_open_cap_date
+      ? String(ticketRow.daily_open_cap_date).slice(0, 10) === today
+      : false;
+    const computedCap = computeDailyOpenCap(freshCount);
+    const effectiveCap = storedCapIsToday ? Math.max(storedCap, computedCap) : computedCap;
+    await client.query(
+      `UPDATE user_tickets
+       SET daily_open_cap = CASE
+             WHEN daily_open_cap_date = $2::date THEN GREATEST(COALESCE(daily_open_cap, 0), $3)
+             ELSE $3
+           END,
+           daily_open_cap_date = $2::date
+       WHERE user_id = $1`,
+      [userId, today, effectiveCap],
+    );
+
+    const assignments = dailyOpenCount >= effectiveCap
       ? []
       : assignTodayCardsToSlots(scored, dailySlotRows, desiredCategories, seed);
 
     await recordCardAssignments(client, userId, today, assignments, 'v2');
 
-    const ticketRow = ticketResult.rows[0] ?? {};
     const dailyEarnedDate = ticketRow.daily_earned_date ? String(ticketRow.daily_earned_date).slice(0, 10) : null;
     const weeklyOpenedIds = new Set(weeklyOpenedResult.rows.map((row) => String(row.id)));
     const weeklyItems = dedupeRows(weeklyOpenedResult.rows)
@@ -1063,12 +1128,19 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
       dailyEarned: dailyEarnedDate === today ? (ticketRow.daily_earned ?? 0) : 0,
       dailyLimit: DAILY_LIMIT,
       dailyOpenCount,
-      dailyOpenLimit: DAILY_OPEN_LIMIT,
+      dailyOpenLimit: effectiveCap,
+      openCap: {
+        base: DAILY_OPEN_LIMIT,
+        effective: effectiveCap,
+        // 캡이 지역 풀 때문에 낮아졌으면 클라는 "오늘 {지역}의 카드는 여기까지" 프레이밍을 쓴다.
+        reason: effectiveCap < DAILY_OPEN_LIMIT ? 'regional_pool' : 'daily_max',
+        regionLabel: userRegion,
+      },
       userRegion,
       weeklyDiscovery: {
         weekKey,
         openedCount: weeklyOpenedCount,
-        goal: DAILY_OPEN_LIMIT,
+        goal: WEEKLY_DISCOVERY_GOAL,
         items: weeklyItems,
       },
       personalization: buildPersonalization(tasteResult.rows, taste),

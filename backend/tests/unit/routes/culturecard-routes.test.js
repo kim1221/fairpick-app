@@ -82,12 +82,13 @@ function todayKst() {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-function mockCardClient(query, { readSlots, writeAssignments } = {}) {
+function mockCardClient(query, { readSlots, writeAssignments, freshPool } = {}) {
   const state = {
     connectCount: 0,
     releaseCount: 0,
     lockQueries: [],
     transactions: [],
+    capUpdates: [],
   };
 
   pool.query = query;
@@ -111,6 +112,14 @@ function mockCardClient(query, { readSlots, writeAssignments } = {}) {
         }
         if (text.includes('FROM user_daily_card_slots slot')) {
           return readSlots ? readSlots(params, text) : { rows: [] };
+        }
+        // 동적 캡: 신선 풀 카운트(기본 320 = 풀 충분 → 캡 50, 기존 테스트 동작 유지)
+        if (text.includes('fresh_pool_count')) {
+          return freshPool ? freshPool(params, text) : { rows: [{ fresh: 320 }], rowCount: 1 };
+        }
+        if (text.includes('SET daily_open_cap')) {
+          state.capUpdates.push({ params });
+          return { rows: [], rowCount: 1 };
         }
         if (
           text.includes('WITH selected AS') &&
@@ -1745,4 +1754,71 @@ test('exchange amount table has EV 20.0 and the draw maps rand boundaries to tab
   for (let i = 0; i < 200; i += 1) {
     assert.ok(allowed.has(drawExchangeAmount()));
   }
+});
+
+// ── S2: 지역 풀 기반 동적 오픈 캡 (스펙 §2.2) ──────────────────────────────
+
+const {
+  computeDailyOpenCap,
+  resolveEffectiveOpenLimit,
+} = require('../../../src/services/ticketGrant');
+
+test('computeDailyOpenCap follows the spec formula and boundary values', () => {
+  assert.equal(computeDailyOpenCap(1156), 50); // 서울 신규 — 풀 충분
+  assert.equal(computeDailyOpenCap(300), 50);  // 풀 충분 경계
+  assert.equal(computeDailyOpenCap(299), 42);  // floor(299/7)
+  assert.equal(computeDailyOpenCap(156), 22);  // 서울 헤비
+  assert.equal(computeDailyOpenCap(28), 4);    // 부산
+  assert.equal(computeDailyOpenCap(10), 3);    // 플로어
+  assert.equal(computeDailyOpenCap(2), 2);     // 풀 < 플로어 → 풀 크기
+  assert.equal(computeDailyOpenCap(0), 0);     // pool_empty
+});
+
+test('resolveEffectiveOpenLimit only honors a cap stored for today', () => {
+  const today = todayKst();
+  assert.equal(resolveEffectiveOpenLimit({ daily_open_cap: 4, daily_open_cap_date: today }, today), 4);
+  assert.equal(resolveEffectiveOpenLimit({ daily_open_cap: 999, daily_open_cap_date: today }, today), 50);
+  assert.equal(resolveEffectiveOpenLimit({ daily_open_cap: 4, daily_open_cap_date: '2020-01-01' }, today), 50);
+  assert.equal(resolveEffectiveOpenLimit({}, today), 50);
+  assert.equal(resolveEffectiveOpenLimit(undefined, today), 50);
+});
+
+test('GET /api/cards/v2/today lowers the cap from the regional fresh pool and pins it', async () => {
+  const freshCandidates = [
+    ...Array.from({ length: 3 }, (_, index) => ({ id: `cap-exhibition-${index + 1}`, title: `전시 ${index + 1}`, content_key: `cap-ex-key-${index + 1}`, main_category: '전시', venue: '전시관', region: '부산', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(10), image_url: null, overview: null, buzz_score: 60 - index }),),
+    ...Array.from({ length: 3 }, (_, index) => ({ id: `cap-performance-${index + 1}`, title: `공연 ${index + 1}`, content_key: `cap-pf-key-${index + 1}`, main_category: '공연', venue: '공연장', region: '부산', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(10), image_url: null, overview: null, buzz_score: 50 - index }),),
+    ...Array.from({ length: 3 }, (_, index) => ({ id: `cap-popup-${index + 1}`, title: `팝업 ${index + 1}`, content_key: `cap-pp-key-${index + 1}`, main_category: '팝업', venue: '팝업존', region: '부산', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(10), image_url: null, overview: null, buzz_score: 40 - index }),),
+  ];
+
+  const state = mockCardClient(async (sql) => {
+    const text = String(sql);
+    if (text.includes('SELECT event_id FROM user_card_impressions')) return { rows: [] };
+    if (text.includes('user_likes')) return { rows: [] };
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 0, daily_earned: 0, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('MAX(el.earn_date)')) return { rows: [] };
+    if (text.includes('FROM user_ticket_earn_log el')) return { rows: [{ count: 0 }] };
+    if (text.includes('FROM canonical_events')) return { rows: freshCandidates };
+    throw new Error(`Unexpected dynamic-cap query: ${text}`);
+  }, {
+    // 부산 헤비 유저 가정: 신선 풀 28 → 캡 4
+    freshPool: async () => ({ rows: [{ fresh: 28 }], rowCount: 1 }),
+    writeAssignments: async (params) => ({ rows: [], rowCount: params[4].length }),
+  });
+
+  const { status, body } = await request(makeApp(cardsRouter), 'GET', '/v2/today');
+
+  assert.equal(status, 200);
+  assert.equal(body.dailyOpenLimit, 4);
+  assert.deepEqual(body.openCap, {
+    base: 50,
+    effective: 4,
+    reason: 'regional_pool',
+    regionLabel: null,
+  });
+  assert.equal(body.weeklyDiscovery.goal, 21);
+  // 캡이 user_tickets에 고정 저장된다 (상향만 허용은 SQL GREATEST가 담당)
+  assert.equal(state.capUpdates.length, 1);
+  assert.equal(state.capUpdates[0].params[2], 4);
 });

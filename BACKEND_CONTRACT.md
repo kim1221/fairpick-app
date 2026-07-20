@@ -154,3 +154,34 @@ ALTER TABLE user_visit_log
 ```
 
 RLS stays deny-all by default because no public policies are created. Backend writes and reads this table through the server-side Supabase/Postgres credentials.
+
+## Culture Card v2 — 경제 개편 델타 (S1·S2, 2026-07-20)
+
+상세 설계는 `docs/superpowers/specs/2026-07-19-culturecard-economy-collection-rework.md`가 단일 진실 공급원.
+
+### `GET /api/cards/v2/today` (변경)
+
+- `dailyOpenLimit: number` — **동적 값**(지역 신선 풀 기반, 3~50). 더 이상 상수 50이 아님.
+- `openCap` 추가:
+
+```ts
+type OpenCapInfo = {
+  base: number;                          // 50
+  effective: number;                     // 오늘 유효 캡 (user_tickets.daily_open_cap에 고정, 상향만 허용)
+  reason: 'daily_max' | 'regional_pool'; // regional_pool이면 "오늘 {지역}의 카드는 여기까지" 프레이밍
+  regionLabel: string | null;
+};
+```
+
+- `weeklyDiscovery.goal` = 21 고정(3장×7일 — DAILY_OPEN_LIMIT 재사용 중단).
+
+### `POST /api/tickets/exchange` (변경, S1)
+
+- 응답에 `amount: number` 추가 — **서버가 추첨한 지급 원화 금액**(EV 20원, 10~500원).
+  클라는 이 값을 그대로 `grantPromotionReward({ params: { promotionCode, amount } })`에 전달.
+- `POST /exchange/confirm` 응답에도 `amount` 포함(연출용). 티켓은 광고 1회=1개 고정.
+
+### DB (migrations)
+
+- `20260720_user_tickets_daily_open_cap.sql`: `user_tickets.daily_open_cap INTEGER`,
+  `daily_open_cap_date DATE` — **코드 배포 전에 적용 필수**(SELECT가 새 컬럼을 읽음).

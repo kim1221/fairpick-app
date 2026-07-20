@@ -19,6 +19,32 @@ export const EXCHANGE_AMOUNT_TABLE: ReadonlyArray<{ amount: number; weight: numb
   { amount: 500, weight: 4 },
 ];
 
+// 지역 신선 풀 기반 동적 오픈 캡(스펙 §2.2).
+// OPEN_CAP_FULL_POOL은 cards.ts CANDIDATE_LIMIT(300), ROTATION_DAYS는 노출 쿨다운 7일과 정합.
+export const OPEN_CAP_FULL_POOL = 300;
+export const OPEN_CAP_ROTATION_DAYS = 7;
+export const OPEN_CAP_FLOOR = 3;
+
+export function computeDailyOpenCap(freshCount: number): number {
+  if (freshCount >= OPEN_CAP_FULL_POOL) return DAILY_OPEN_LIMIT;
+  const rotation = Math.floor(freshCount / OPEN_CAP_ROTATION_DAYS);
+  // 풀이 3장 이상이면 "오늘의 3장" 경험은 항상 보장하고, 3장 미만이면 풀 크기가 곧 캡이다.
+  return Math.min(DAILY_OPEN_LIMIT, Math.max(rotation, Math.min(freshCount, OPEN_CAP_FLOOR)));
+}
+
+/** user_tickets 행의 저장 캡을 오늘 기준 유효 오픈 한도로 해석한다(없으면 base 한도). */
+export function resolveEffectiveOpenLimit(
+  row: { daily_open_cap?: number | string | null; daily_open_cap_date?: string | Date | null } | undefined,
+  today: string,
+): number {
+  const capDate = row?.daily_open_cap_date ? String(row.daily_open_cap_date).slice(0, 10) : null;
+  const cap = Number(row?.daily_open_cap);
+  if (capDate === today && Number.isFinite(cap) && cap > 0) {
+    return Math.min(DAILY_OPEN_LIMIT, cap);
+  }
+  return DAILY_OPEN_LIMIT;
+}
+
 export function drawExchangeAmount(rand: () => number = Math.random): number {
   const totalWeight = EXCHANGE_AMOUNT_TABLE.reduce((sum, entry) => sum + entry.weight, 0);
   let remaining = rand() * totalWeight;
@@ -168,11 +194,12 @@ export async function grantTicketsForEvent(
     [userId],
   );
   const { rows: lockRows } = await client.query(
-    `SELECT ticket_count, daily_earned, daily_earned_date
+    `SELECT ticket_count, daily_earned, daily_earned_date, daily_open_cap, daily_open_cap_date
      FROM user_tickets WHERE user_id = $1 FOR UPDATE`,
     [userId],
   );
   const row = lockRows[0];
+  const effectiveOpenLimit = resolveEffectiveOpenLimit(row, today);
   const { rows: openCountRows } = await client.query(
     `SELECT COUNT(*)::int AS count
      FROM user_ticket_earn_log
@@ -180,10 +207,10 @@ export async function grantTicketsForEvent(
     [userId, today],
   );
   const dailyOpenCount = Number(openCountRows[0]?.count ?? 0);
-  if (dailyOpenCount > DAILY_OPEN_LIMIT) {
+  if (dailyOpenCount > effectiveOpenLimit) {
     throw new TicketGrantError('DAILY_OPEN_LIMIT_REACHED', 429, {
       dailyOpenCount: dailyOpenCount - 1,
-      dailyOpenLimit: DAILY_OPEN_LIMIT,
+      dailyOpenLimit: effectiveOpenLimit,
     });
   }
 
@@ -243,6 +270,6 @@ export async function grantTicketsForEvent(
     dailyEarned: newDailyEarned,
     dailyLimit: DAILY_TICKET_LIMIT,
     dailyOpenCount,
-    dailyOpenLimit: DAILY_OPEN_LIMIT,
+    dailyOpenLimit: effectiveOpenLimit,
   };
 }

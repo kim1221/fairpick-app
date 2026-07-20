@@ -79,6 +79,14 @@ export type WeeklyDiscovery = {
   items: Card[];
 };
 
+export type OpenCapInfo = {
+  base: number;
+  effective: number;
+  // regional_pool = 지역 신선 풀 소진으로 캡이 낮아짐 → "오늘 {지역}의 카드는 여기까지" 프레이밍
+  reason: 'daily_max' | 'regional_pool';
+  regionLabel: string | null;
+};
+
 export type CardsTodayV2Response = {
   lockedCards: LockedCardPreview[];
   ticketCount: number;
@@ -86,6 +94,8 @@ export type CardsTodayV2Response = {
   dailyLimit: number;
   dailyOpenCount: number;
   dailyOpenLimit: number;
+  // S2 백엔드부터 내려옴 — 구버전 백엔드 호환을 위해 optional
+  openCap?: OpenCapInfo;
   userRegion: string | null;
   weeklyDiscovery: WeeklyDiscovery;
   personalization: PersonalizationProfile;
