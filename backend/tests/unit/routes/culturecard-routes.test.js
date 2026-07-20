@@ -2628,3 +2628,18 @@ test('GET /api/collections caps exposure at 3 region sets and 2 national sets', 
   // 진행 중인 세트가 우선 남는다 — 상한 때문에 완성 직전 세트가 사라지면 안 된다.
   assert.deepEqual(body.sets.map((set) => set.slug), ['set-1', 'set-2', 'set-3', 'set-6', 'set-7']);
 });
+
+test('collection match predicate treats a missing tags key as "no tag constraint"', () => {
+  const { collectionMatchSql } = require('../../../src/services/collections');
+  const sql = collectionMatchSql('slot', 'ev');
+
+  // ❗회귀 방지(2026-07-21 프로덕션 리허설에서 잡은 버그):
+  // tags 키가 없으면 jsonb_typeof(...)는 NULL이고 `NULL <> 'array'`는 TRUE가 아니라 NULL이라,
+  // 태그 없는 규칙(대부분의 세트)이 통째로 매칭에 실패했다. IS DISTINCT FROM이어야 한다.
+  assert.match(sql, /jsonb_typeof\(slot\.match_rule->'tags'\) IS DISTINCT FROM 'array'/);
+  assert.equal(sql.includes("jsonb_typeof(slot.match_rule->'tags') <> 'array'"), false);
+
+  // region/district는 ->>가 없는 키에 NULL을 주고 `NULL IS NULL`이 TRUE라 그대로 안전하다.
+  assert.match(sql, /slot\.match_rule->>'region' IS NULL OR ev\.region = slot\.match_rule->>'region'/);
+  assert.match(sql, /slot\.match_rule->>'district' IS NULL/);
+});

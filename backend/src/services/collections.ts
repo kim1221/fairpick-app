@@ -53,7 +53,9 @@ export function collectionMatchSql(slotAlias: string, eventAlias: string): strin
     AND (${rule}->>'region' IS NULL OR ${eventAlias}.region = ${rule}->>'region')
     AND (${rule}->>'district' IS NULL OR ${eventAlias}.address ILIKE '%' || (${rule}->>'district') || '%')
     AND (
-      jsonb_typeof(${rule}->'tags') <> 'array'
+      -- ❗IS DISTINCT FROM이어야 한다. tags 키가 없으면 jsonb_typeof(NULL)=NULL이고
+      -- NULL <> 'array'는 TRUE가 아니라 NULL이라, 태그 없는 규칙이 전부 매칭에 실패한다.
+      jsonb_typeof(${rule}->'tags') IS DISTINCT FROM 'array'
       OR jsonb_array_length(${rule}->'tags') = 0
       OR ${eventAlias}.derived_tags ?| ARRAY(SELECT jsonb_array_elements_text(${rule}->'tags'))
     )

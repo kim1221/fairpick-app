@@ -379,6 +379,13 @@ export async function runPublishCollectionSets(): Promise<PublishCollectionSetsR
                   AND ${normalizedCategorySql('event.main_category')} = s.match_rule->>'category'
                   AND (s.match_rule->>'region' IS NULL OR event.region = s.match_rule->>'region')
                   AND (s.match_rule->>'district' IS NULL OR event.address ILIKE '%' || (s.match_rule->>'district') || '%')
+                  -- 실루엣도 태그 조건을 따라야 시즌 세트 힌트가 엉뚱한 카드를 가리키지 않는다.
+                  -- (tags 키가 없으면 jsonb_typeof가 NULL이라 IS DISTINCT FROM으로 비교한다.)
+                  AND (
+                    jsonb_typeof(s.match_rule->'tags') IS DISTINCT FROM 'array'
+                    OR jsonb_array_length(s.match_rule->'tags') = 0
+                    OR event.derived_tags ?| ARRAY(SELECT jsonb_array_elements_text(s.match_rule->'tags'))
+                  )
                 ORDER BY event.buzz_score DESC NULLS LAST, event.id
                 LIMIT 1) AS event_id
          FROM collection_set_slots s
