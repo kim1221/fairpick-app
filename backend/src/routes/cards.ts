@@ -5,6 +5,12 @@ import { requireAuth } from '../middleware/requireAuth';
 import { calculateBoundingBox, getHaversineDistanceSQL } from '../utils/geo';
 import { reverseGeocodeRegion } from '../lib/geocode';
 import { openLockedCard, sealLockedCard, type CardSlotType } from '../services/cardToken';
+import { normalizeCategory, normalizedCategorySql } from '../services/cardCategory';
+import {
+  applyCollectionProgress,
+  findCollectionAssistCandidates,
+  type CollectionProgressEntry,
+} from '../services/collections';
 import {
   DAILY_OPEN_LIMIT,
   DAILY_TICKET_LIMIT,
@@ -34,8 +40,10 @@ const CATEGORY_CANDIDATE_LIMIT = Math.ceil(CANDIDATE_LIMIT / CATEGORY_PRIORITY.l
 // ── "?" 미스터리 슬롯 (스펙 §3.2·§3.3, /v2 전용) ─────────────────────────────
 // 위치는 3번째 고정(스펙 §3.1 시안 배치). 셔플 여부는 G2 오픈이슈(§10-3) — 튜닝 노브.
 const MYSTERY_SLOT_INDEX = TODAY_CARD_COUNT - 1;
-// S4(컬렉션 어시스트 60%) 전까지 탐험 25%/와일드 15%를 재정규화: 25/40 = 62.5% — 튜닝 노브.
-const MYSTERY_EXPLORE_PROBABILITY = 0.625;
+// 공급 우선순위 확률(스펙 §3.2, 합=1) — 튜닝 노브.
+// 어시스트 후보가 없으면(진행 중 세트 없음/조건 불일치) 탐험 → 와일드 순으로 흘러내린다.
+const MYSTERY_ASSIST_PROBABILITY = 0.60;
+const MYSTERY_EXPLORE_PROBABILITY = 0.25;
 // 탐험의 "취향 상위 카테고리" 판정 임계 — recommendationReasons의 취향 태그 기준(0.5)과 동일.
 const MYSTERY_TASTE_TOP_THRESHOLD = 0.5;
 // 히든 카드 buzz 임계(스펙 §3.2 "buzz 상위" 근사) — 튜닝 노브.
@@ -91,6 +99,7 @@ type MysterySlotContext = {
   slotIndex: number;
   taste: TasteMap;
   buzzById: ReadonlyMap<string, number>;
+  assistByEventId: ReadonlyMap<string, number>;
 };
 
 type LocationQuery = {
@@ -141,30 +150,6 @@ function getEventDedupeKey(row: EventRow): string {
     normalizeDedupePart(row.start_at),
     normalizeDedupePart(row.end_at),
   ].join('|');
-}
-
-function normalizeCategory(category: string | null): string {
-  if (!category) return '기타';
-  if (category.includes('전시')) return '전시';
-  if (category.includes('공연') || category.includes('뮤지컬') || category.includes('연극') || category.includes('콘서트')) return '공연';
-  if (category.includes('팝업')) return '팝업';
-  if (category.includes('축제') || category.includes('페스티벌')) return '축제';
-  return '기타';
-}
-
-function normalizedCategorySql(column: string): string {
-  return `CASE
-    WHEN ${column} IS NULL THEN '기타'
-    WHEN ${column} LIKE '%전시%' THEN '전시'
-    WHEN ${column} LIKE '%공연%'
-      OR ${column} LIKE '%뮤지컬%'
-      OR ${column} LIKE '%연극%'
-      OR ${column} LIKE '%콘서트%' THEN '공연'
-    WHEN ${column} LIKE '%팝업%' THEN '팝업'
-    WHEN ${column} LIKE '%축제%'
-      OR ${column} LIKE '%페스티벌%' THEN '축제'
-    ELSE '기타'
-  END`;
 }
 
 function parseCoordinate(value: unknown): number | null {
@@ -529,18 +514,37 @@ function resolveMysterySlotIndex(rows: DailySlotEventRow[]): number {
 }
 
 /**
- * "?" 슬롯 후보 선정(서버 권위, 스펙 §3.2 — S4 전까지 탐험/와일드만).
+ * "?" 슬롯 후보 선정(서버 권위, 스펙 §3.2): 컬렉션 어시스트 60% / 탐험 25% / 와일드 15%.
  * Math.random 금지 — dailySeed 기반 결정론이라 같은 날 재요청에도 같은 결과가 나와
  * 핀 고정·재보충 시맨틱과 정합한다.
  */
 function pickMysteryCard(
   candidates: ReturnType<typeof toCard>[],
-  ctx: { taste: TasteMap; buzzById: ReadonlyMap<string, number>; seed: number },
+  ctx: {
+    taste: TasteMap;
+    buzzById: ReadonlyMap<string, number>;
+    seed: number;
+    // eventId → 그 카드가 채울 수 있는 진행 중 세트의 남은 슬롯 최솟값
+    assistByEventId: ReadonlyMap<string, number>;
+  },
 ): ReturnType<typeof toCard> | null {
   if (candidates.length === 0) return null;
   const mysterySeed = ctx.seed ^ hashStr('culturecard-mystery-slot');
-  const explore = seededUnit(mysterySeed ^ hashStr('branch')) < MYSTERY_EXPLORE_PROBABILITY;
-  if (explore) {
+  const branch = seededUnit(mysterySeed ^ hashStr('branch'));
+
+  if (branch < MYSTERY_ASSIST_PROBABILITY) {
+    // 어시스트: 진행 중 세트의 빈 슬롯을 채우는 카드. 완성이 임박한 세트(remaining 작은 쪽)부터.
+    const assist = candidates
+      .filter((card) => ctx.assistByEventId.has(card.eventId))
+      .sort((a, b) => (
+        (ctx.assistByEventId.get(a.eventId) ?? 0) - (ctx.assistByEventId.get(b.eventId) ?? 0)
+        || (ctx.buzzById.get(b.eventId) ?? 0) - (ctx.buzzById.get(a.eventId) ?? 0)
+        || a.eventId.localeCompare(b.eventId)
+      ));
+    if (assist.length > 0) return assist[0]!;
+  }
+
+  if (branch < MYSTERY_ASSIST_PROBABILITY + MYSTERY_EXPLORE_PROBABILITY) {
     // 탐험: 취향 상위 카테고리가 아닌 카테고리의 고buzz 카드(안 가본 장르 노출)
     const exploration = candidates
       .filter((card) => (ctx.taste.get(card.category) ?? 0) < MYSTERY_TASTE_TOP_THRESHOLD)
@@ -550,7 +554,8 @@ function pickMysteryCard(
       ));
     if (exploration.length > 0) return exploration[0]!;
   }
-  // 와일드: 완전 랜덤(일별 시드 지터 상위) — 탐험 후보가 없을 때의 폴백이기도 하다
+
+  // 와일드: 완전 랜덤(일별 시드 지터 상위) — 위 분기의 후보가 없을 때의 폴백이기도 하다
   return candidates
     .slice()
     .sort((a, b) => (
@@ -615,6 +620,7 @@ function assignTodayCardsToSlots(
     const card = pickMysteryCard(available, {
       taste: mystery.taste,
       buzzById: mystery.buzzById,
+      assistByEventId: mystery.assistByEventId,
       seed,
     });
     if (card) {
@@ -1200,12 +1206,21 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
       [userId, today, effectiveCap],
     );
 
+    // "?" 슬롯 컬렉션 어시스트 후보(스펙 §3.2-1). 캡에 걸려 배정을 안 할 땐 조회도 생략한다.
+    const assistByEventId = dailyOpenCount >= effectiveCap
+      ? new Map<string, number>()
+      : await findCollectionAssistCandidates(client, {
+          userId,
+          eventIds: scored.map((card) => card.eventId),
+        });
+
     const assignments = dailyOpenCount >= effectiveCap
       ? []
       : assignTodayCardsToSlots(scored, dailySlotRows, desiredCategories, seed, {
           slotIndex: resolveMysterySlotIndex(dailySlotRows),
           taste,
           buzzById,
+          assistByEventId,
         });
 
     await recordCardAssignments(client, userId, today, assignments, 'v2');
@@ -1319,13 +1334,22 @@ router.post('/v2/open', requireAuth, async (req: Request, res: Response) => {
       today,
       adAttemptId,
     });
+
+    // slotType은 토큰이 권위(발급 시점의 슬롯 상태 봉인). 과거 발급 토큰(필드 없음)은 category.
+    const slotType: CardSlotType = tokenPayload.slotType === 'mystery' ? 'mystery' : 'category';
+    // 컬렉션 진행은 오픈과 같은 트랜잭션에서 기록한다(스펙 §4.2).
+    // 내부에서 SAVEPOINT로 격리하므로 실패해도 티켓 지급은 그대로 커밋된다.
+    const collectionProgress: CollectionProgressEntry[] = await applyCollectionProgress(client, {
+      userId,
+      eventId: tokenPayload.eventId,
+      source: slotType === 'mystery' ? 'mystery' : 'open',
+    });
+
     await client.query('COMMIT');
 
     const fullCard = toCard(event, new Set([tokenPayload.eventId]), null, new Map());
     fullCard.walkMinutes = tokenPayload.walkMinutes;
     fullCard.reasonTags = tokenPayload.reasonTags;
-    // slotType은 토큰이 권위(발급 시점의 슬롯 상태 봉인). 과거 발급 토큰(필드 없음)은 category.
-    const slotType: CardSlotType = tokenPayload.slotType === 'mystery' ? 'mystery' : 'category';
     return res.json({
       card: fullCard,
       ...reward,
@@ -1334,6 +1358,7 @@ router.post('/v2/open', requireAuth, async (req: Request, res: Response) => {
         // 히든 카드: "?" 슬롯에서만, buzz 상위(HIDDEN_BUZZ_MIN)일 때 특수 프레임(스펙 §3.2)
         hidden: slotType === 'mystery' && (toNumberOrNull(event.buzz_score) ?? 0) >= HIDDEN_BUZZ_MIN,
       },
+      collectionProgress,
     });
   } catch (err) {
     await client.query('ROLLBACK');

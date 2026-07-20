@@ -82,7 +82,31 @@ function todayKst() {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-function mockCardClient(query, { readSlots, writeAssignments, freshPool } = {}) {
+/**
+ * /v2/open 안의 컬렉션 진행(SAVEPOINT + 매칭/배지 쿼리) 기본 스텁.
+ * 컬렉션을 검증하지 않는 테스트는 "세트 없음"으로 흘려보낸다. 처리하면 결과를, 아니면 null.
+ */
+function stubCollectionQuery(text, { fills = [], sets = [], badges = [] } = {}) {
+  if (/^(SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT)/.test(text)) {
+    return { rows: [], rowCount: 0 };
+  }
+  if (text.includes('INSERT INTO user_collection_progress')) {
+    return { rows: fills, rowCount: fills.length };
+  }
+  if (text.includes('FROM collection_sets cs')) {
+    return { rows: sets, rowCount: sets.length };
+  }
+  if (text.includes('INSERT INTO user_collection_badges')) {
+    badges.push({ badgeKey: text.includes('milestone') ? 'milestone' : 'set', params: null });
+    return { rows: [], rowCount: 1 };
+  }
+  if (text.includes('FROM user_collection_badges')) {
+    return { rows: [{ count: badges.length }], rowCount: 1 };
+  }
+  return null;
+}
+
+function mockCardClient(query, { readSlots, writeAssignments, freshPool, assist } = {}) {
   const state = {
     connectCount: 0,
     releaseCount: 0,
@@ -109,6 +133,13 @@ function mockCardClient(query, { readSlots, writeAssignments, freshPool } = {}) 
           state.lockQueries.push({ text, params });
           transactionEvents.push('xact-lock');
           return { rows: [{ pg_advisory_xact_lock: null }], rowCount: 1 };
+        }
+        if (/^(SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT)/.test(text)) {
+          return { rows: [], rowCount: 0 };
+        }
+        // "?" 슬롯 컬렉션 어시스트 후보. 기본은 "진행 중 세트 없음".
+        if (text.includes('JOIN in_progress ON in_progress.set_id = slot.set_id')) {
+          return assist ? assist(params, text) : { rows: [] };
         }
         if (text.includes('FROM user_daily_card_slots slot')) {
           return readSlots ? readSlots(params, text) : { rows: [] };
@@ -299,6 +330,8 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
     async query(sql, params = []) {
       const text = String(sql);
       if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      const collectionStub = stubCollectionQuery(text);
+      if (collectionStub) return collectionStub;
       if (text.includes('FROM ad_reward_attempts')) {
         assert.match(text, /reward_at IS NOT NULL/);
         assert.match(text, /metadata->>'cardToken'/);
@@ -1148,6 +1181,8 @@ test('POST /api/cards/v2/open reveals slot type from the token and flags high-bu
     async query(sql, params = []) {
       const text = String(sql);
       if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      const collectionStub = stubCollectionQuery(text);
+      if (collectionStub) return collectionStub;
       if (text.includes('FROM ad_reward_attempts')) {
         return { rows: [{ attempt_id: params[0] }], rowCount: 1 };
       }
@@ -1213,6 +1248,167 @@ test('POST /api/cards/v2/open reveals slot type from the token and flags high-bu
   });
   assert.equal(legacyResponse.status, 200);
   assert.deepEqual(legacyResponse.body.reveal, { slotType: 'category', hidden: false });
+});
+
+/** /v2/open의 컬렉션 파트만 남기고 티켓 지급 경로는 성공으로 흘려보내는 클라이언트. */
+function makeCollectionOpenClient({ onCollectionQuery, onCommit }) {
+  const event = {
+    id: 'collection-event',
+    title: '성수 팝업',
+    content_key: 'collection-event-key',
+    canonical_key: null,
+    main_category: '팝업',
+    region: '서울',
+    venue: '성수 팝업존',
+    start_at: isoDaysFromNow(-1),
+    end_at: isoDaysFromNow(9),
+    image_url: null,
+    overview: null,
+    buzz_score: 10,
+  };
+  return {
+    event,
+    client: {
+      async query(sql, params = []) {
+        const text = String(sql);
+        if (text === 'BEGIN' || text === 'ROLLBACK') return { rows: [], rowCount: 0 };
+        if (text === 'COMMIT') {
+          onCommit?.();
+          return { rows: [], rowCount: 0 };
+        }
+        const collection = onCollectionQuery(text, params);
+        if (collection) return collection;
+        if (text.includes('FROM ad_reward_attempts')) return { rows: [{ attempt_id: params[0] }], rowCount: 1 };
+        if (text.includes('INSERT INTO event_archive_snapshots')) return { rows: [{ event_id: event.id }], rowCount: 1 };
+        if (text.includes('FROM canonical_events')) return { rows: [event], rowCount: 1 };
+        if (text.includes('pg_advisory_xact_lock')) return { rows: [{}], rowCount: 1 };
+        if (text.includes('SELECT 1') && text.includes('FROM user_card_opened_keys')) return { rows: [], rowCount: 0 };
+        if (text.includes('INSERT INTO user_card_opened_keys')) {
+          return { rows: [{ expected_count: 2, inserted_count: 2 }], rowCount: 1 };
+        }
+        if (text.includes('INSERT INTO user_ticket_earn_log')) return { rows: [{ id: 'earn-collection' }], rowCount: 1 };
+        if (text.includes('INSERT INTO user_tickets')) return { rows: [], rowCount: 1 };
+        if (text.includes('FROM user_tickets') && text.includes('FOR UPDATE')) {
+          return { rows: [{ ticket_count: 0, daily_earned: 0, daily_earned_date: todayKst() }], rowCount: 1 };
+        }
+        if (text.includes('COUNT(*)::int AS count') && text.includes('user_ticket_earn_log')) {
+          return { rows: [{ count: 0 }], rowCount: 1 };
+        }
+        if (text.includes('UPDATE user_tickets')) return { rows: [{ ticket_count: 1, total_earned: 1 }], rowCount: 1 };
+        if (text.includes('UPDATE user_ticket_earn_log')) return { rows: [], rowCount: 1 };
+        if (text.includes('UPDATE ad_reward_attempts')) return { rows: [], rowCount: 1 };
+        throw new Error(`Unexpected collection-open query: ${text}`);
+      },
+      release() {},
+    },
+  };
+}
+
+test('POST /api/cards/v2/open fills a matching collection slot and awards the set badge on completion', async () => {
+  const setId = '11111111-2222-4333-8444-555555555555';
+  const badgeInserts = [];
+  let progressInsertParams = null;
+  const { event, client } = makeCollectionOpenClient({
+    onCollectionQuery(text, params) {
+      if (/^(SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT)/.test(text)) return { rows: [], rowCount: 0 };
+      if (text.includes('INSERT INTO user_collection_progress')) {
+        progressInsertParams = params.slice();
+        // 매칭·중복방지 조건이 쿼리에 살아 있는지 확인한다.
+        assert.match(text, /DISTINCT ON \(slot\.set_id\)/);
+        assert.match(text, /cs\.status = 'active'/);
+        assert.match(text, /ON CONFLICT DO NOTHING/);
+        assert.match(text, /filled\.slot_index = slot\.slot_index OR filled\.event_id = ev\.event_id/);
+        return { rows: [{ set_id: setId, slot_index: 3 }], rowCount: 1 };
+      }
+      if (text.includes('FROM collection_sets cs')) {
+        // 마지막 슬롯이 채워져 4/4 완성.
+        return {
+          rows: [{ set_id: setId, slug: 'seongsu-2026-w30', title: '성수 컬렉션', tier: 'normal', total_slots: 4, filled_count: 4 }],
+          rowCount: 1,
+        };
+      }
+      if (text.includes('INSERT INTO user_collection_badges')) {
+        badgeInserts.push(params.slice());
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.includes('FROM user_collection_badges')) return { rows: [{ count: 1 }], rowCount: 1 };
+      return null;
+    },
+  });
+  pool.connect = async () => client;
+
+  const cardToken = sealLockedCard({
+    userId,
+    eventId: event.id,
+    assignedOn: todayKst(),
+    walkMinutes: null,
+    reasonTags: [],
+    slotType: 'mystery',
+  });
+  const { status, body } = await request(makeApp(cardsRouter), 'POST', '/v2/open', {
+    cardToken,
+    adAttemptId: 'attempt-collection',
+  });
+
+  assert.equal(status, 200);
+  assert.deepEqual(body.collectionProgress, [{
+    setId,
+    slug: 'seongsu-2026-w30',
+    title: '성수 컬렉션',
+    filledSlotIndex: 3,
+    filledCount: 4,
+    totalSlots: 4,
+    completed: true,
+    badgeKey: 'set:seongsu-2026-w30',
+  }]);
+  // "?" 슬롯으로 채운 진행은 source='mystery'로 기록된다(어시스트 효과 측정용).
+  assert.deepEqual(progressInsertParams, [userId, event.id, 'mystery']);
+  // 세트 배지는 세트 slug 키로 멱등 수여된다.
+  assert.equal(badgeInserts[0][1], 'set:seongsu-2026-w30');
+  assert.equal(badgeInserts[0][2], setId);
+  // 티켓 지급은 그대로 유지된다.
+  assert.equal(body.earned, 1);
+});
+
+test('POST /api/cards/v2/open still grants the ticket when collection progress fails', async () => {
+  let committed = false;
+  const savepointCalls = [];
+  const { event, client } = makeCollectionOpenClient({
+    onCommit() { committed = true; },
+    onCollectionQuery(text) {
+      if (/^(SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT)/.test(text)) {
+        savepointCalls.push(text.split(' ').slice(0, 3).join(' '));
+        return { rows: [], rowCount: 0 };
+      }
+      if (text.includes('INSERT INTO user_collection_progress')) {
+        // 컬렉션 테이블이 아직 없는 환경(마이그레이션 지연 배포)을 재현한다.
+        throw new Error('relation "collection_set_slots" does not exist');
+      }
+      return null;
+    },
+  });
+  pool.connect = async () => client;
+
+  const cardToken = sealLockedCard({
+    userId,
+    eventId: event.id,
+    assignedOn: todayKst(),
+    walkMinutes: null,
+    reasonTags: [],
+  });
+  const { status, body } = await request(makeApp(cardsRouter), 'POST', '/v2/open', {
+    cardToken,
+    adAttemptId: 'attempt-collection-fail',
+  });
+
+  // 컬렉션 실패가 오픈을 삼키면 광고를 본 유저의 티켓이 사라진다 — 반드시 커밋돼야 한다.
+  assert.equal(status, 200);
+  assert.equal(body.earned, 1);
+  assert.equal(body.card.eventId, event.id);
+  assert.deepEqual(body.collectionProgress, []);
+  assert.equal(committed, true);
+  // 실패 경로는 SAVEPOINT로 되감아 트랜잭션을 살려둔다.
+  assert.deepEqual(savepointCalls, ['SAVEPOINT culturecard_collection', 'ROLLBACK TO SAVEPOINT', 'RELEASE SAVEPOINT culturecard_collection']);
 });
 
 test('GET /api/cards/today explains weighted taste personalization', async () => {
@@ -2073,4 +2269,362 @@ test('GET /api/cards/v2/today lowers the cap from the regional fresh pool and pi
   // 캡이 user_tickets에 고정 저장된다 (상향만 허용은 SQL GREATEST가 담당)
   assert.equal(state.capUpdates.length, 1);
   assert.equal(state.capUpdates[0].params[2], 4);
+});
+
+// ── 테마 컬렉션 조회 API (스펙 §5.2) ────────────────────────────────────────
+const collectionsRouter = require('../../../src/routes/collections').default;
+
+const COLLECTION_SET_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
+function collectionSetRow(overrides = {}) {
+  return {
+    set_id: COLLECTION_SET_ID,
+    slug: 'seongsu-2026-w30',
+    title: '성수 컬렉션',
+    subtitle: '성수동의 문화 4곳',
+    template: 'neighborhood',
+    tier: 'normal',
+    region_scope: '서울',
+    status: 'active',
+    published_at: isoDaysFromNow(-3),
+    expires_at: isoDaysFromNow(25),
+    total_slots: 2,
+    filled_count: 1,
+    ...overrides,
+  };
+}
+
+function collectionSlotRows() {
+  return [
+    {
+      set_id: COLLECTION_SET_ID,
+      slot_index: 1,
+      hint_text: '성수의 어느 전시',
+      teaser_image_url: 'https://img/teaser.jpg',
+      filled_event_id: null,
+      filled_source: null,
+      filled_at: null,
+      title: null,
+      display_title: null,
+      main_category: null,
+      region: null,
+      venue: null,
+      image_url: null,
+      start_at: null,
+      end_at: null,
+    },
+    {
+      set_id: COLLECTION_SET_ID,
+      slot_index: 0,
+      hint_text: '성수의 어느 팝업',
+      teaser_image_url: 'https://img/other-teaser.jpg',
+      filled_event_id: 'filled-popup',
+      filled_source: 'mystery',
+      filled_at: isoDaysFromNow(-1),
+      title: '성수 팝업',
+      display_title: '성수 팝업 스토어',
+      main_category: '팝업',
+      region: '서울',
+      venue: '성수 팝업존',
+      image_url: 'https://img/filled.jpg',
+      start_at: isoDaysFromNow(-2),
+      end_at: isoDaysFromNow(8),
+    },
+  ];
+}
+
+test('GET /api/collections hides unfilled slots behind hint and silhouette only', async () => {
+  const queries = [];
+  pool.query = async (sql, params = []) => {
+    const text = String(sql);
+    queries.push({ text, params });
+    if (text.includes('FROM collection_sets cs')) return { rows: [collectionSetRow()], rowCount: 1 };
+    if (text.includes('FROM collection_set_slots slot')) return { rows: collectionSlotRows(), rowCount: 2 };
+    throw new Error(`Unexpected collections query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(collectionsRouter), 'GET', '/?region=서울');
+
+  assert.equal(status, 200);
+  assert.equal(body.sets.length, 1);
+  const set = body.sets[0];
+  assert.equal(set.setId, COLLECTION_SET_ID);
+  assert.equal(set.totalSlots, 2);
+  assert.equal(set.filledCount, 1);
+  assert.equal(set.completed, false);
+  assert.equal(typeof set.daysRemaining, 'number');
+
+  // 슬롯은 slot_index 순으로 정렬된다(쿼리 반환 순서와 무관).
+  assert.deepEqual(set.slots.map((slot) => slot.slotIndex), [0, 1]);
+
+  const filled = set.slots[0];
+  assert.equal(filled.state, 'filled');
+  assert.equal(filled.filled.eventId, 'filled-popup');
+  assert.equal(filled.filled.title, '성수 팝업 스토어');
+  assert.equal(filled.filled.source, 'mystery');
+  assert.equal(filled.empty, null);
+
+  // ❗빈 슬롯은 제목·이벤트 id 등 실제 카드 정보를 절대 노출하지 않는다.
+  const empty = set.slots[1];
+  assert.equal(empty.state, 'empty');
+  assert.equal(empty.filled, null);
+  assert.deepEqual(empty.empty, {
+    hintText: '성수의 어느 전시',
+    silhouetteImageUrl: 'https://img/teaser.jpg',
+  });
+  assert.equal(JSON.stringify(empty).includes('eventId'), false);
+
+  // 홈 훅 요약: 진행 중이면서 완성에 가장 가까운 세트.
+  assert.deepEqual(body.nearCompletion, {
+    setId: COLLECTION_SET_ID,
+    title: '성수 컬렉션',
+    filled: 1,
+    total: 2,
+  });
+
+  // 활성 세트만, 그리고 지역 세트 + 전국(NULL) 세트만 읽는다.
+  const setQuery = queries.find((query) => query.text.includes('FROM collection_sets cs'));
+  assert.match(setQuery.text, /cs\.status = 'active'/);
+  assert.match(setQuery.text, /cs\.expires_at > NOW\(\)/);
+  assert.match(setQuery.text, /cs\.region_scope IS NULL OR cs\.region_scope = \$2/);
+  assert.deepEqual(setQuery.params, [userId, '서울']);
+});
+
+test('GET /api/collections returns an empty payload when no set is active', async () => {
+  pool.query = async () => ({ rows: [], rowCount: 0 });
+
+  const { status, body } = await request(makeApp(collectionsRouter), 'GET', '/');
+
+  assert.equal(status, 200);
+  assert.deepEqual(body, { sets: [], activeSetCount: 0, nearCompletion: null });
+});
+
+test('GET /api/collections/:setId returns the set with its badge and rejects malformed ids', async () => {
+  pool.query = async (sql) => {
+    const text = String(sql);
+    if (text.includes('FROM collection_sets cs')) {
+      return { rows: [collectionSetRow({ filled_count: 2 })], rowCount: 1 };
+    }
+    if (text.includes('FROM collection_set_slots slot')) return { rows: collectionSlotRows(), rowCount: 2 };
+    if (text.includes('FROM user_collection_badges')) {
+      return { rows: [{ badge_key: 'set:seongsu-2026-w30', awarded_at: isoDaysFromNow(0) }], rowCount: 1 };
+    }
+    throw new Error(`Unexpected detail query: ${text}`);
+  };
+
+  const detail = await request(makeApp(collectionsRouter), 'GET', `/${COLLECTION_SET_ID}`);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.setId, COLLECTION_SET_ID);
+  assert.equal(detail.body.completed, true);
+  assert.equal(detail.body.badge.badgeKey, 'set:seongsu-2026-w30');
+
+  // slug/경로 조작은 DB에 닿기 전에 막는다.
+  let reachedDb = false;
+  pool.query = async () => { reachedDb = true; return { rows: [], rowCount: 0 }; };
+  const bad = await request(makeApp(collectionsRouter), 'GET', '/not-a-uuid');
+  assert.equal(bad.status, 400);
+  assert.equal(bad.body.error, 'INVALID_SET_ID');
+  assert.equal(reachedDb, false);
+});
+
+test('GET /api/collections/badges lists awarded badges newest first', async () => {
+  let badgeQuery = null;
+  pool.query = async (sql, params = []) => {
+    badgeQuery = { text: String(sql), params };
+    return {
+      rows: [
+        { badge_key: 'milestone:sets-3', set_id: null, tier: 'normal', title: '컬렉터 · 세트 3개 완성', awarded_at: isoDaysFromNow(0) },
+        { badge_key: 'set:seongsu-2026-w30', set_id: COLLECTION_SET_ID, tier: 'normal', title: '성수 컬렉션', awarded_at: isoDaysFromNow(-2) },
+      ],
+      rowCount: 2,
+    };
+  };
+
+  const { status, body } = await request(makeApp(collectionsRouter), 'GET', '/badges');
+
+  assert.equal(status, 200);
+  assert.deepEqual(body.badges.map((badge) => badge.badgeKey), ['milestone:sets-3', 'set:seongsu-2026-w30']);
+  // 마일스톤 배지는 세트에 매이지 않는다.
+  assert.equal(body.badges[0].setId, null);
+  assert.equal(body.badges[1].setId, COLLECTION_SET_ID);
+  assert.match(badgeQuery.text, /ORDER BY awarded_at DESC/);
+  assert.deepEqual(badgeQuery.params, [userId]);
+});
+
+test('GET /api/cards/v2/today steers the "?" slot to a collection assist candidate', async () => {
+  // 카테고리 슬롯 2개(전시·공연)를 채우고 나면 축제 후보 2장이 "?" 몫으로 남는다.
+  // 그중 하나만 진행 중 세트의 빈 슬롯 조건에 맞는다 → 어시스트가 그걸 골라야 한다.
+  const freshCandidates = [
+    { id: 'assist-exhibition', title: '어시스트 전시', content_key: 'assist-a', main_category: '전시', venue: 'A관', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: null, buzz_score: 40 },
+    { id: 'assist-performance', title: '어시스트 공연', content_key: 'assist-b', main_category: '공연', venue: 'B홀', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(6), image_url: null, overview: null, buzz_score: 30 },
+    // buzz가 훨씬 높아 탐험·와일드였다면 이쪽이 뽑혔을 카드.
+    { id: 'loud-festival', title: '시끄러운 축제', content_key: 'assist-c', main_category: '축제', venue: '광장', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(7), image_url: null, overview: null, buzz_score: 99 },
+    { id: 'set-piece-festival', title: '세트 조각 축제', content_key: 'assist-d', main_category: '축제', venue: '공원', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(8), image_url: null, overview: null, buzz_score: 5 },
+  ];
+  let assistParams = null;
+  let assistSql = '';
+
+  mockCardClient(async (sql) => {
+    const text = String(sql);
+    if (text.includes('user_card_impressions')) return { rows: [] };
+    if (text.includes('user_likes')) return { rows: [] };
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 0, daily_earned: 0, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('MAX(el.earn_date)')) return { rows: [] };
+    if (text.includes('FROM user_ticket_earn_log el')) return { rows: [{ count: 0 }] };
+    if (text.includes('FROM canonical_events')) return { rows: freshCandidates };
+    throw new Error(`Unexpected assist query: ${text}`);
+  }, {
+    assist: (params, text) => {
+      assistParams = params.slice();
+      assistSql = text;
+      // 남은 슬롯 1개짜리 세트를 완성시킬 수 있는 카드.
+      return { rows: [{ event_id: 'set-piece-festival', remaining: 1 }] };
+    },
+  });
+
+  const { status, body } = await request(makeApp(cardsRouter), 'GET', '/v2/today');
+
+  assert.equal(status, 200);
+  const mysteryCard = body.lockedCards.find((card) => card.slotType === 'mystery');
+  assert.ok(mysteryCard);
+  assert.equal(openLockedCard(mysteryCard.cardToken).eventId, 'set-piece-festival');
+
+  // 어시스트 조회는 후보 전체를 넘기고, 진행 중 세트로만 좁힌다.
+  assert.equal(assistParams[0], userId);
+  assert.deepEqual(new Set(assistParams[1]), new Set(freshCandidates.map((event) => event.id)));
+  assert.match(assistSql, /FROM user_collection_progress started/);
+  assert.match(assistSql, /in_progress\.remaining > 0/);
+
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+// ── 주간 세트 발행 배치 (스펙 §4.3) ────────────────────────────────────────
+const { kstWeekKey, seasonProfile, buildSetPlans } = require('../../../src/jobs/publishCollectionSets');
+
+test('collection set slugs stay stable within a KST week so reruns are idempotent', () => {
+  // 같은 주 월요일과 일요일은 같은 주 키를 낸다 → slug 동일 → ON CONFLICT로 재발행 안 됨.
+  const monday = new Date('2026-07-20T00:30:00+09:00');
+  const sunday = new Date('2026-07-26T23:30:00+09:00');
+  const nextMonday = new Date('2026-07-27T00:30:00+09:00');
+  assert.equal(kstWeekKey(monday), kstWeekKey(sunday));
+  assert.notEqual(kstWeekKey(monday), kstWeekKey(nextMonday));
+  assert.match(kstWeekKey(monday), /^\d{4}-W\d{2}$/);
+
+  // KST 경계: UTC로는 전날이지만 KST로는 새 주다.
+  assert.equal(kstWeekKey(new Date('2026-07-26T15:30:00Z')), kstWeekKey(nextMonday));
+});
+
+test('season profile follows the KST month', () => {
+  assert.equal(seasonProfile(new Date('2026-07-20T12:00:00+09:00')).key, 'summer');
+  assert.equal(seasonProfile(new Date('2026-10-20T12:00:00+09:00')).key, 'autumn');
+  assert.equal(seasonProfile(new Date('2026-01-20T12:00:00+09:00')).key, 'winter');
+  assert.equal(seasonProfile(new Date('2026-04-20T12:00:00+09:00')).key, 'spring');
+});
+
+test('buildSetPlans only publishes sets whose pool covers twice the slots, tags included', async () => {
+  const askedRules = [];
+  // 전시는 태그를 붙이면 후보가 4장뿐 → 4슬롯 × 2 = 8 미만이라 시즌 세트는 발행되면 안 된다.
+  pool.query = async (sql, params = []) => {
+    const text = String(sql);
+    if (text.includes('GROUP BY 1, 2')) {
+      return { rows: [{ region: '서울', district: '마포구', event_count: 60 }], rowCount: 1 };
+    }
+    if (text.includes('COUNT(*) OVER () AS total')) {
+      const category = params[1];
+      const hasTags = text.includes('derived_tags ?|');
+      askedRules.push({ category, hasTags, params: params.slice() });
+      const total = hasTags ? 4 : 40;
+      const limit = Number(params[params.length - 1]);
+      const rows = Array.from({ length: Math.min(total, limit) }, (_, index) => ({
+        total,
+        event_id: `${category}-${hasTags ? 'tagged' : 'plain'}-${index}`,
+      }));
+      return { rows, rowCount: rows.length };
+    }
+    throw new Error(`Unexpected plan query: ${text}`);
+  };
+
+  const plans = await buildSetPlans('2026-08-17', '2026-W30', new Date('2026-07-20T12:00:00+09:00'));
+  const templates = plans.map((plan) => plan.template);
+
+  // 태그로 좁혀지는 시즌 세트는 재료 부족으로 빠진다("못 깨는 미션" 방지).
+  assert.equal(templates.includes('season'), false);
+  assert.equal(templates.includes('neighborhood'), true);
+  assert.equal(templates.includes('buzz'), true);
+
+  // 카운트 질의는 태그까지 적용된 결과를 세야 한다.
+  const taggedAsk = askedRules.find((ask) => ask.hasTags);
+  assert.ok(taggedAsk, '태그 규칙도 카운트 질의를 거쳐야 한다');
+  assert.deepEqual(taggedAsk.params[taggedAsk.params.length - 2], ['실내', '시원한', '여름']);
+
+  // 동네 세트 슬롯: 팝업2+전시1+공연1, 슬롯마다 다른 실루엣.
+  const neighborhood = plans.find((plan) => plan.template === 'neighborhood');
+  assert.deepEqual(neighborhood.slots.map((slot) => slot.matchRule.category), ['팝업', '팝업', '전시', '공연']);
+  assert.deepEqual(neighborhood.slots.map((slot) => slot.slotIndex), [0, 1, 2, 3]);
+  assert.equal(new Set(neighborhood.slots.map((slot) => slot.teaserEventId)).size, 4);
+  assert.equal(neighborhood.regionScope, '서울');
+  assert.match(neighborhood.slug, /^neighborhood-서울-마포구-2026-W30$/);
+});
+
+test('buildSetPlans skips 시·도 names that the district fallback picked up', async () => {
+  pool.query = async (sql) => {
+    const text = String(sql);
+    if (text.includes('GROUP BY 1, 2')) {
+      return {
+        rows: [
+          { region: '대구', district: '대구광역시', event_count: 90 },
+          { region: '서울', district: '서울특별시', event_count: 80 },
+        ],
+        rowCount: 2,
+      };
+    }
+    if (text.includes('COUNT(*) OVER () AS total')) {
+      const rows = Array.from({ length: 10 }, (_, index) => ({ total: 40, event_id: `event-${index}` }));
+      return { rows, rowCount: rows.length };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  };
+
+  const plans = await buildSetPlans('2026-08-17', '2026-W30', new Date('2026-07-20T12:00:00+09:00'));
+  // "대구광역시 컬렉션" 같은 세트는 동네가 아니라 시·도라 만들지 않는다.
+  assert.equal(plans.some((plan) => plan.template === 'neighborhood'), false);
+});
+
+test('GET /api/collections caps exposure at 3 region sets and 2 national sets', async () => {
+  const makeSet = (index, regionScope, filledCount) => ({
+    set_id: `0000000${index}-aaaa-4bbb-8ccc-dddddddddddd`,
+    slug: `set-${index}`,
+    title: `세트 ${index}`,
+    subtitle: null,
+    template: 'neighborhood',
+    tier: 'normal',
+    region_scope: regionScope,
+    status: 'active',
+    published_at: isoDaysFromNow(-index),
+    expires_at: isoDaysFromNow(20),
+    total_slots: 4,
+    filled_count: filledCount,
+  });
+  // 지역 5개(진행도 4,3,2,1,0) + 전국 3개(진행도 3,2,1)
+  const rows = [
+    makeSet(1, '서울', 4), makeSet(2, '서울', 3), makeSet(3, '서울', 2), makeSet(4, '서울', 1), makeSet(5, '서울', 0),
+    makeSet(6, null, 3), makeSet(7, null, 2), makeSet(8, null, 1),
+  ];
+  pool.query = async (sql) => {
+    const text = String(sql);
+    if (text.includes('FROM collection_sets cs')) return { rows, rowCount: rows.length };
+    if (text.includes('FROM collection_set_slots slot')) return { rows: [], rowCount: 0 };
+    throw new Error(`Unexpected query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(collectionsRouter), 'GET', '/?region=서울');
+
+  assert.equal(status, 200);
+  assert.equal(body.sets.length, 5);
+  assert.equal(body.sets.filter((set) => set.regionScope != null).length, 3);
+  assert.equal(body.sets.filter((set) => set.regionScope == null).length, 2);
+  // 진행 중인 세트가 우선 남는다 — 상한 때문에 완성 직전 세트가 사라지면 안 된다.
+  assert.deepEqual(body.sets.map((set) => set.slug), ['set-1', 'set-2', 'set-3', 'set-6', 'set-7']);
 });

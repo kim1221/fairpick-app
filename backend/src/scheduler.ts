@@ -13,6 +13,7 @@ import { sendEndSoonNotifications } from './jobs/sendEndSoonNotifications';
 import { runPopgaCollector } from './jobs/popgaCollector';
 import { runAutoFeaturedScore } from './jobs/autoFeaturedScore';
 import { generateContentPool } from './jobs/generateContentPool';
+import { runPublishCollectionSets } from './jobs/publishCollectionSets';
 import { runningJobs } from './lib/jobState';
 import { withJobLog } from './lib/jobLogger';
 import { latestDailyScheduleBoundaryMs } from './lib/scheduleBoundary';
@@ -339,6 +340,14 @@ export function initScheduler() {
       timezone: 'Asia/Seoul'
     });
     console.log('[Scheduler] registered: Buzz score update @ 02:30 KST');
+
+    // 매주 월요일 05:00 KST - 테마 컬렉션 주간 발행 (03:00 수집 파이프라인 이후라 풀이 최신)
+    cron.schedule('0 5 * * 1', async () => {
+      await runJobSafely('collection-sets', () => withJobLog('collection-sets', runPublishCollectionSets));
+    }, {
+      timezone: 'Asia/Seoul'
+    });
+    console.log('[Scheduler] registered: Collection sets publish @ Mon 05:00 KST');
 
     // 매일 03:30 KST - Price Info 백필 (데이터 수집 후)
     cron.schedule('30 3 * * *', async () => {
