@@ -22,14 +22,14 @@ import {
 } from 'react-native';
 import { manilaTagTexture } from '../../assets';
 
-// ── 디자인 토큰 (v13 :root) ──────────────────────────────────────────────
+// ── 디자인 토큰 (v13 :root + draw-loop-v1) ───────────────────────────────
 export const TAG_TOKENS = {
   bg: '#100D09', // 앱 배경 워엄 다크(top)
   bg2: '#0A0805', // 앱 배경(bottom) · 태그 상단 깎기 색
   manila: '#D9C7A0', // CTA 솔리드 배경
   manilaDark: '#C9B688',
   ink: '#2C2A22', // 본문 잉크
-  navy: '#2A386A', // 큰 글자 / 듀오톤 오버레이
+  navy: '#2A386A', // 큰 글자 / 듀오톤 오버레이 / 미스터리 태그 종이
   red: '#A8331F', // 스탬프 · Nº · +티켓 · TO 라벨
   sub: '#6E6350', // 서브 · 파인프린트
   // 다크 UI(태그 밖 앱 크롬)
@@ -40,6 +40,13 @@ export const TAG_TOKENS = {
   headText: '#EDE6D6',
   ctaDisabledBg: '#2A241A',
   ctaDisabledText: '#7A6E58',
+  // 미스터리(네이비 태그) 팔레트 — draw-loop-v1 ② 시안 값
+  navyCream: '#E9DBB8', // 네이비 태그 위 큰 글자·강조
+  navySub: '#8E99BE', // 네이비 태그 서브(아이브로우·룰 라벨)
+  navyLine: '#46538A', // 네이비 태그 룰 선
+  navyValue: '#D8DEF0', // 네이비 태그 룰 값
+  navyFine: '#7C88B2', // 네이비 태그 파인프린트
+  navyGrommet: '#55628F', // 네이비 태그 그로밋 링
 } as const;
 
 // 태그 몸통 안쪽 여백(그로밋/깎은 상단을 피하는 top 패딩 포함)
@@ -90,35 +97,62 @@ export function CondensedDisplay({
   );
 }
 
-/** 태그 몸통: 마닐라 텍스처 + 각진 상단 + 그로밋. children은 z-index 위 콘텐츠. */
+/**
+ * 태그 몸통: 종이 + 각진 상단 + 그로밋. children은 z-index 위 콘텐츠.
+ * tone='navy'는 미스터리(? 슬롯) 태그 — 텍스처 대신 네이비 단색 + 하이라이트/섀도 레이어로
+ * 시안의 gradient를 근사한다(RN에 linear-gradient 없음).
+ */
 export function TagBody({
   children,
   style,
+  tone = 'manila',
+  showGrommet = true,
 }: {
   children: React.ReactNode;
   style?: ViewStyle;
+  tone?: 'manila' | 'navy';
+  showGrommet?: boolean;
 }) {
+  const body = tone === 'navy' ? (
+    <View style={[tagKitStyles.tagImage, tagKitStyles.tagNavyBase]}>
+      {/* 상단 하이라이트/하단 섀도로 시안의 168deg gradient 근사 */}
+      <View style={tagKitStyles.navyTopSheen} pointerEvents="none" />
+      <View style={tagKitStyles.navyBottomShade} pointerEvents="none" />
+      {children}
+    </View>
+  ) : (
+    <ImageBackground
+      source={manilaTagTexture}
+      style={tagKitStyles.tagImage}
+      imageStyle={tagKitStyles.tagImageInner}
+      resizeMode="cover"
+    >
+      {/* 워엄 채도 보정 오버레이(텍스처가 밝아 잉크 대비 확보) */}
+      <View style={tagKitStyles.manilaWash} pointerEvents="none" />
+      {children}
+    </ImageBackground>
+  );
+
   return (
     <View style={[tagKitStyles.tagOuter, style]}>
-      <ImageBackground
-        source={manilaTagTexture}
-        style={tagKitStyles.tagImage}
-        imageStyle={tagKitStyles.tagImageInner}
-        resizeMode="cover"
-      >
-        {/* 워엄 채도 보정 오버레이(텍스처가 밝아 잉크 대비 확보) */}
-        <View style={tagKitStyles.manilaWash} pointerEvents="none" />
-        {children}
-      </ImageBackground>
+      {body}
 
       {/* 각진 상단: 앱 배경색 삼각형으로 좌우 상단 모서리를 깎음 */}
       <View style={tagKitStyles.cutLeft} pointerEvents="none" />
       <View style={tagKitStyles.cutRight} pointerEvents="none" />
 
       {/* 그로밋(구멍) */}
-      <View style={tagKitStyles.grommet} pointerEvents="none">
-        <View style={tagKitStyles.grommetHole} />
-      </View>
+      {showGrommet ? (
+        <View
+          style={[
+            tagKitStyles.grommet,
+            tone === 'navy' ? tagKitStyles.grommetNavy : null,
+          ]}
+          pointerEvents="none"
+        >
+          <View style={tagKitStyles.grommetHole} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -192,6 +226,41 @@ export function FinePrint({ children }: { children: string }) {
   return <Text style={tagKitStyles.fineprint}>{children}</Text>;
 }
 
+/**
+ * 사각 고무 스탬프(draw-loop-v1의 TODAY ONLY / ALL ISSUED / HIDDEN).
+ * 보더 박스 + 모노 대문자 + 기울임 — 발광·글로우 없이 잉크 도장만 흉내낸다.
+ */
+export function BoxStamp({
+  text,
+  size = 'small',
+  style,
+}: {
+  text: string;
+  size?: 'small' | 'large';
+  style?: ViewStyle;
+}) {
+  return (
+    <View
+      style={[
+        tagKitStyles.boxStamp,
+        size === 'large' ? tagKitStyles.boxStampLarge : null,
+        style,
+      ]}
+      pointerEvents="none"
+    >
+      <Text
+        allowFontScaling={false}
+        style={[
+          tagKitStyles.boxStampText,
+          size === 'large' ? tagKitStyles.boxStampTextLarge : null,
+        ]}
+      >
+        {text}
+      </Text>
+    </View>
+  );
+}
+
 const tagKitStyles = StyleSheet.create({
   tagOuter: {
     width: 256,
@@ -219,6 +288,25 @@ const tagKitStyles = StyleSheet.create({
   manilaWash: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(247,241,225,0.14)',
+  },
+  tagNavyBase: {
+    backgroundColor: TAG_TOKENS.navy,
+  },
+  navyTopSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '38%',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+  },
+  navyBottomShade: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '30%',
+    backgroundColor: 'rgba(0,0,0,0.10)',
   },
   cutLeft: {
     position: 'absolute',
@@ -257,6 +345,9 @@ const tagKitStyles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 2,
     shadowOffset: { width: 0, height: 1 },
+  },
+  grommetNavy: {
+    backgroundColor: TAG_TOKENS.navyGrommet,
   },
   grommetHole: {
     width: GROMMET_SIZE - 8,
@@ -390,5 +481,35 @@ const tagKitStyles = StyleSheet.create({
     textTransform: 'uppercase',
     textAlign: 'center',
     marginTop: 10,
+  },
+  boxStamp: {
+    borderWidth: 2.5,
+    borderColor: TAG_TOKENS.red,
+    borderRadius: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    opacity: 0.82,
+    transform: [{ rotate: '-9deg' }],
+    alignSelf: 'flex-start',
+  },
+  boxStampLarge: {
+    borderWidth: 3,
+    borderRadius: 4,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    opacity: 0.85,
+    transform: [{ rotate: '-7deg' }],
+  },
+  boxStampText: {
+    fontFamily: MONO_FAMILY,
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 2,
+    color: TAG_TOKENS.red,
+    textTransform: 'uppercase',
+  },
+  boxStampTextLarge: {
+    fontSize: 20,
+    letterSpacing: 4,
   },
 });

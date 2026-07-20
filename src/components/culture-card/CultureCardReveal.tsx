@@ -1,7 +1,8 @@
 import React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Icon } from '@toss/tds-react-native';
-import type { Card } from '../../services/cardsService';
+import type { Card, OpenCultureCardResponse } from '../../services/cardsService';
+import { BoxStamp } from './tagKit';
 
 const SURFACE = '#FFFFFF';
 const INK = '#211F1B';
@@ -9,6 +10,11 @@ const SUB = '#69645B';
 const RED = '#B43A27';
 const LINE = 'rgba(33,31,27,0.14)';
 const DARK_TEXT = '#171717';
+// 다크 캔버스(태그 홈) 위 크롬 색
+const CREAM = '#EFE3C4';
+const CANVAS_SUB = '#8B8071';
+const CTA_BG = '#E9DBB8';
+const CTA_TEXT = '#2A2415';
 
 export interface RevealedCultureCard {
   card: Card;
@@ -16,10 +22,13 @@ export interface RevealedCultureCard {
   ticketCount: number;
   dailyEarned: number;
   dailyLimit: number;
+  reveal?: OpenCultureCardResponse['reveal'];
 }
 
 interface CultureCardRevealProps {
   openedCard: RevealedCultureCard;
+  /** 남은 오픈 캡이 있을 때만 true — "다음 카드 뽑기" CTA 노출 조건 */
+  canDrawNext: boolean;
   onDetail: () => void;
   onNext: () => void;
   onSave: () => void;
@@ -47,11 +56,18 @@ function ddayLabel(dday: number | null): string | null {
   return null;
 }
 
-export function CultureCardReveal({ openedCard, onDetail, onNext, onSave }: CultureCardRevealProps) {
+export function CultureCardReveal({
+  openedCard,
+  canDrawNext,
+  onDetail,
+  onNext,
+  onSave,
+}: CultureCardRevealProps) {
   const { card, earned } = openedCard;
   const schedule = dateRange(card);
   const distance = card.walkMinutes ? `도보 ${card.walkMinutes}분` : null;
   const meta = [schedule, distance, ddayLabel(card.dday)].filter(Boolean).join(' · ');
+  const isHidden = openedCard.reveal?.hidden === true;
 
   return (
     <View style={styles.wrap}>
@@ -93,11 +109,26 @@ export function CultureCardReveal({ openedCard, onDetail, onNext, onSave }: Cult
           </View>
           <Text style={styles.rewardValue}>+{earned}</Text>
         </View>
+
+        {/* ? 슬롯 히든 카드: 절제된 러버스탬프 1개만(글로우·콘페티 금지) */}
+        {isHidden ? <BoxStamp text="HIDDEN" style={styles.hiddenStamp} /> : null}
       </View>
 
+      {canDrawNext ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="다음 카드 뽑기"
+          accessibilityHint="홈으로 돌아가 다음 봉인 카드를 골라요. 광고는 자동으로 시작되지 않아요"
+          style={({ pressed }) => [styles.drawNext, pressed ? styles.drawNextPressed : null]}
+          onPress={onNext}
+        >
+          <Text style={styles.drawNextText}>다음 카드 뽑기</Text>
+        </Pressable>
+      ) : null}
+
       <View style={styles.actions}>
-        <Pressable accessibilityRole="button" style={styles.primaryButton} onPress={onDetail}>
-          <Text style={styles.primaryText}>이벤트 자세히 보기</Text>
+        <Pressable accessibilityRole="button" style={styles.outlineButton} onPress={onDetail}>
+          <Text style={styles.outlineText}>상세 보기</Text>
         </Pressable>
         <Pressable accessibilityRole="button" style={styles.outlineButton} onPress={onSave}>
           <Icon name="icon-bookmark-mono" size={18} color={DARK_TEXT} />
@@ -105,9 +136,11 @@ export function CultureCardReveal({ openedCard, onDetail, onNext, onSave }: Cult
         </Pressable>
       </View>
 
-      <Pressable accessibilityRole="button" style={styles.next} onPress={onNext}>
-        <Text style={styles.nextText}>다른 카드 고르기 ›</Text>
-      </Pressable>
+      {!canDrawNext ? (
+        <Pressable accessibilityRole="button" style={styles.next} onPress={onNext}>
+          <Text style={styles.nextText}>오늘의 뽑기 완료 · 홈으로</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -116,6 +149,7 @@ const styles = StyleSheet.create({
   wrap: {
     paddingHorizontal: 22,
     paddingTop: 14,
+    paddingBottom: 8,
   },
   openedHeader: {
     flexDirection: 'row',
@@ -124,10 +158,10 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     marginBottom: 10,
     borderTopWidth: 3,
-    borderTopColor: '#171717',
+    borderTopColor: CREAM,
   },
   openedEyebrow: {
-    color: DARK_TEXT,
+    color: CREAM,
     fontSize: 22,
     lineHeight: 29,
     fontWeight: '900',
@@ -260,22 +294,36 @@ const styles = StyleSheet.create({
     lineHeight: 38,
     fontWeight: '900',
   },
-  actions: {
-    marginTop: 14,
-    flexDirection: 'row',
-    gap: 9,
+  hiddenStamp: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
   },
-  primaryButton: {
-    flex: 1.7,
-    height: 52,
-    borderRadius: 0,
-    backgroundColor: '#A52822',
+  drawNext: {
+    marginTop: 14,
+    borderRadius: 10,
+    paddingVertical: 16,
+    backgroundColor: CTA_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  drawNextPressed: {
+    opacity: 0.86,
+  },
+  drawNextText: {
+    color: CTA_TEXT,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '800',
+  },
+  actions: {
+    marginTop: 10,
+    flexDirection: 'row',
+    gap: 9,
+  },
   outlineButton: {
     flex: 1,
-    height: 52,
+    height: 50,
     borderRadius: 0,
     borderWidth: 1,
     borderColor: '#171717',
@@ -285,12 +333,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
   },
-  primaryText: {
-    color: '#FFFFFF',
-    fontSize: 14.5,
-    lineHeight: 20,
-    fontWeight: '900',
-  },
   outlineText: {
     color: DARK_TEXT,
     fontSize: 14,
@@ -299,10 +341,10 @@ const styles = StyleSheet.create({
   },
   next: {
     alignItems: 'center',
-    paddingVertical: 17,
+    paddingVertical: 15,
   },
   nextText: {
-    color: '#6F6B65',
+    color: CANVAS_SUB,
     fontSize: 12.5,
     lineHeight: 18,
     fontWeight: '700',

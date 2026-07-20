@@ -1,12 +1,16 @@
 import crypto from 'crypto';
 import { config } from '../config';
 
+export type CardSlotType = 'category' | 'mystery';
+
 export type LockedCardTokenPayload = {
   userId: string;
   eventId: string;
   assignedOn: string;
   walkMinutes: number | null;
   reasonTags: string[];
+  /** "?" 미스터리 슬롯 여부(스펙 §3.2). 과거 발급 토큰에는 없다 — 없으면 'category'로 해석한다. */
+  slotType?: CardSlotType;
 };
 
 const VERSION = 'v1';
@@ -42,6 +46,8 @@ export function openLockedCard(token: string): LockedCardTokenPayload | null {
       || typeof payload.eventId !== 'string'
       || typeof payload.assignedOn !== 'string'
       || !Array.isArray(payload.reasonTags)
+      // slotType은 선택 필드(하위호환) — 존재한다면 알려진 값이어야 한다.
+      || (payload.slotType != null && payload.slotType !== 'category' && payload.slotType !== 'mystery')
     ) return null;
     return payload as LockedCardTokenPayload;
   } catch {

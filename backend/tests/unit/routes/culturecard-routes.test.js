@@ -267,18 +267,31 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
     assert.equal('title' in preview, false);
     assert.equal('venue' in preview, false);
     assert.equal('imageUrl' in preview, false);
-    assert.equal(typeof preview.teaserEyebrow, 'string');
-    assert.equal(typeof preview.teaserHeadline, 'string');
+    // "?" 슬롯은 티저까지 은닉, 카테고리 슬롯은 티저 카피 제공(스펙 §3.3)
+    if (preview.slotType === 'mystery') {
+      assert.equal(preview.teaserEyebrow, null);
+      assert.equal(preview.teaserHeadline, null);
+      assert.equal(preview.category, null);
+    } else {
+      assert.equal(preview.slotType, 'category');
+      assert.equal(typeof preview.teaserEyebrow, 'string');
+      assert.equal(typeof preview.teaserHeadline, 'string');
+    }
     assert.equal(typeof preview.palette.background, 'string');
   }
+  assert.equal(todayResponse.body.lockedCards.filter((card) => card.slotType === 'mystery').length, 1);
   assert.equal(todayResponse.body.dailyOpenCount, 1);
   assert.equal(todayResponse.body.dailyOpenLimit, 50);
   assert.equal(todayResponse.body.weeklyDiscovery.items.length, 1);
   assert.equal(todayResponse.body.weeklyDiscovery.items[0].eventId, opened.id);
 
   await new Promise((resolve) => setImmediate(resolve));
-  const token = todayResponse.body.lockedCards.find((card) => card.category === '전시').cardToken;
-  const cappedToken = todayResponse.body.lockedCards.find((card) => card.category === '공연').cardToken;
+  // 미스터리 슬롯이 어느 카드를 가리든 상관없게 토큰 복호화로 카드를 찾는다.
+  const findByEvent = (eventId) => todayResponse.body.lockedCards.find(
+    (card) => openLockedCard(card.cardToken).eventId === eventId,
+  );
+  const token = findByEvent('locked-a').cardToken;
+  const cappedToken = findByEvent('locked-b').cardToken;
   let grantOpenCount = 1;
   let archiveUpsertCount = 0;
   let ledgerClaimCount = 0;
@@ -352,6 +365,8 @@ test('v2 locks curated details until rewarded open and keeps weekly discovery di
   assert.equal(openedResponse.body.earned, 1);
   assert.equal(openedResponse.body.dailyOpenCount, 1);
   assert.equal(openedResponse.body.dailyOpenLimit, 50);
+  assert.ok(['category', 'mystery'].includes(openedResponse.body.reveal.slotType));
+  assert.equal(openedResponse.body.reveal.hidden, false); // buzz 40 < HIDDEN_BUZZ_MIN(70)
   assert.equal(archiveUpsertCount, 1);
   assert.equal(ledgerClaimCount, 1);
 
@@ -488,10 +503,14 @@ test('GET /api/cards/v2/today expands core categories instead of exhausting the 
 
   assert.equal(status, 200);
   assert.equal(body.lockedCards.length, 3);
-  assert.deepEqual(
-    new Set(body.lockedCards.map((card) => card.category)),
-    new Set(['전시', '공연', '팝업']),
-  );
+  // 카테고리 슬롯 2개는 서로 다른 핵심 카테고리, "?" 슬롯 1개는 카테고리 은닉.
+  const coreCategorySlots = body.lockedCards.filter((card) => card.slotType === 'category');
+  assert.equal(coreCategorySlots.length, 2);
+  assert.equal(body.lockedCards.filter((card) => card.slotType === 'mystery').length, 1);
+  assert.equal(new Set(coreCategorySlots.map((card) => card.category)).size, 2);
+  for (const card of coreCategorySlots) {
+    assert.ok(['전시', '공연', '팝업'].includes(card.category));
+  }
   const radiiUsed = canonicalCalls
     .flatMap((call) => call.params)
     .filter((param) => [3_000, 10_000, 50_000].includes(param));
@@ -508,10 +527,12 @@ test('GET /api/cards/v2/today relaxes recent impressions only for a core categor
     .toISOString()
     .slice(0, 10);
   const impressions = new Map([['recent-only-exhibition', previousKstDay]]);
+  // 핵심 카테고리 후보는 전시(최근 노출 1장뿐)·공연 각 1장만 둔다 — 일별 셔플이 어떤 순서든
+  // 카테고리 슬롯 2개 = (완화된) 전시 + 공연으로 확정되고, "?" 슬롯은 남는 축제를 가져간다.
   const freshCandidates = [
     { id: 'recent-only-exhibition', title: '최근에 본 유일한 전시', content_key: 'recent-only-exhibition-key', main_category: '전시', venue: '전시관', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(10), image_url: null, overview: null, buzz_score: 1 },
-    ...Array.from({ length: 3 }, (_, index) => ({ id: `fresh-performance-${index + 1}`, title: `새 공연 ${index + 1}`, content_key: `fresh-performance-key-${index + 1}`, main_category: '공연', venue: '공연장', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(10), image_url: null, overview: null, buzz_score: 90 - index })),
-    ...Array.from({ length: 3 }, (_, index) => ({ id: `fresh-popup-${index + 1}`, title: `새 팝업 ${index + 1}`, content_key: `fresh-popup-key-${index + 1}`, main_category: '팝업', venue: '팝업존', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(10), image_url: null, overview: null, buzz_score: 90 - index })),
+    { id: 'fresh-performance-1', title: '새 공연 1', content_key: 'fresh-performance-key-1', main_category: '공연', venue: '공연장', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(10), image_url: null, overview: null, buzz_score: 90 },
+    { id: 'fresh-festival-1', title: '새 축제 1', content_key: 'fresh-festival-key-1', main_category: '축제', venue: '광장', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(10), image_url: null, overview: null, buzz_score: 60 },
   ];
   const eventById = new Map(freshCandidates.map((event) => [event.id, event]));
   const dailySlots = new Map();
@@ -567,12 +588,21 @@ test('GET /api/cards/v2/today relaxes recent impressions only for a core categor
 
   assert.equal(status, 200);
   assert.equal(body.lockedCards.length, 3);
+  // 카테고리 슬롯 2개 = 완화된 전시 + 새 공연, "?" 슬롯 1개 = 카테고리 은닉(null).
+  const coreSlots = body.lockedCards.filter((card) => card.slotType === 'category');
+  const mysterySlots = body.lockedCards.filter((card) => card.slotType === 'mystery');
+  assert.equal(coreSlots.length, 2);
+  assert.equal(mysterySlots.length, 1);
+  assert.equal(mysterySlots[0].category, null);
   assert.deepEqual(
-    new Set(body.lockedCards.map((card) => card.category)),
-    new Set(['전시', '공연', '팝업']),
+    new Set(coreSlots.map((card) => card.category)),
+    new Set(['전시', '공연']),
   );
   const decodedIds = body.lockedCards.map((card) => openLockedCard(card.cardToken).eventId);
   assert.equal(decodedIds.includes('recent-only-exhibition'), true);
+  // 완화로 살아난 전시 카드는 카테고리 슬롯(은닉 아님)에 배정된다.
+  const exhibitionSlot = coreSlots.find((card) => card.category === '전시');
+  assert.equal(openLockedCard(exhibitionSlot.cardToken).eventId, 'recent-only-exhibition');
   assert.deepEqual(new Set(assignmentEventIds), new Set(decodedIds));
   assert.deepEqual(
     new Set([...dailySlots.values()].map((slot) => slot.eventId)),
@@ -608,25 +638,32 @@ test('GET /api/cards/v2/today keeps one daily slot across location changes and e
   const initialExhibition = candidate('pinned-exhibition', '전시', 300);
   const initialPerformance = candidate('pinned-performance', '공연', 400);
   const initialPopup = candidate('pinned-popup', '팝업', 500);
-  const wideExhibition = candidate('wide-exhibition', '전시', 40_000);
-  // 첫 배정 뒤 새로 유입되며, pin이 없다면 기존 두 카드보다 점수가 높다.
-  const newHighPerformance = candidate('new-high-performance', '공연', 450, { fresh: true, buzz: 100 });
-  const newHighPopup = candidate('new-high-popup', '팝업', 550, { fresh: true, buzz: 100 });
+  // "?" 슬롯 위치·카테고리 배치는 일별 셔플을 따르므로, 어느 카테고리를 열어도
+  // 검증할 수 있게 보충 후보(50km 전용)와 신규 고점수 카드를 카테고리별로 준비한다.
+  const wideByCategory = new Map([
+    ['전시', candidate('wide-exhibition', '전시', 40_000)],
+    ['공연', candidate('wide-performance', '공연', 40_000)],
+    ['팝업', candidate('wide-popup', '팝업', 40_000)],
+  ]);
+  // 첫 배정 뒤 새로 유입되며, pin이 없다면 기존 카드보다 점수가 높다.
+  const newHighByCategory = new Map([
+    ['전시', candidate('new-high-exhibition', '전시', 350, { fresh: true, buzz: 100 })],
+    ['공연', candidate('new-high-performance', '공연', 450, { fresh: true, buzz: 100 })],
+    ['팝업', candidate('new-high-popup', '팝업', 550, { fresh: true, buzz: 100 })],
+  ]);
   const eventById = new Map([
     initialExhibition,
     initialPerformance,
     initialPopup,
-    wideExhibition,
-    newHighPerformance,
-    newHighPopup,
+    ...wideByCategory.values(),
+    ...newHighByCategory.values(),
   ].map((event) => [event.id, event]));
   const previousKstDay = new Date(Date.now() + 9 * 60 * 60 * 1000 - 24 * 60 * 60 * 1000)
     .toISOString()
     .slice(0, 10);
   const impressions = new Map([
     [initialPerformance.id, previousKstDay],
-    [newHighPerformance.id, previousKstDay],
-    ...Array.from({ length: 8 }, (_, index) => [`older-performance-${index + 1}`, previousKstDay]),
+    ...Array.from({ length: 9 }, (_, index) => [`older-performance-${index + 1}`, previousKstDay]),
   ]);
 
   mockCardClient(async (sql, params = []) => {
@@ -659,11 +696,24 @@ test('GET /api/cards/v2/today keeps one daily slot across location changes and e
         radius,
       });
 
-      const rows = [initialPerformance, initialPopup];
-      if (assignmentWrites.length > 0) rows.push(newHighPerformance, newHighPopup);
-      if (!openedEventIds.has(initialExhibition.id)) rows.push(initialExhibition);
-      if (radius === 50_000) rows.push(wideExhibition);
-      return { rows: rows.filter((event) => !openedEventIds.has(event.id)) };
+      const openedCategories = new Set(
+        [...openedEventIds].map((id) => eventById.get(id).main_category),
+      );
+      const rows = [initialExhibition, initialPerformance, initialPopup]
+        .filter((event) => !openedEventIds.has(event.id));
+      if (assignmentWrites.length > 0) {
+        // 열지 않은 카테고리에만 새 고점수 카드가 유입된다(핀 보호 검증용).
+        for (const [category, event] of newHighByCategory) {
+          if (!openedCategories.has(category)) rows.push(event);
+        }
+      }
+      if (radius === 50_000) {
+        // 연 카테고리의 보충 후보는 50km 반경에서만 나타난다(반경 확장 검증용).
+        for (const [category, event] of wideByCategory) {
+          if (openedCategories.has(category)) rows.push(event);
+        }
+      }
+      return { rows };
     }
     throw new Error(`Unexpected pinned-selection query: ${text}`);
   }, {
@@ -676,23 +726,27 @@ test('GET /api/cards/v2/today keeps one daily slot across location changes and e
           slot_category: slot.category,
           slot_event_id: slot.eventId,
           slot_usable: !openedEventIds.has(slot.eventId),
+          slot_type: slot.slotType,
         }] : [];
       }),
     }),
     writeAssignments: async (params) => {
-      const [assignedUserId, assignedOn, slotIndexes, categories, eventIds] = params;
+      const [assignedUserId, assignedOn, slotIndexes, categories, eventIds, slotTypes] = params;
       assert.equal(assignedUserId, userId);
       assert.equal(assignedOn, todayKst());
       assert.equal(new Set(slotIndexes).size, slotIndexes.length);
+      assert.equal(slotTypes.filter((slotType) => slotType === 'mystery').length, 1);
       assignmentWrites.push({
         slotIndexes: slotIndexes.slice(),
         categories: categories.slice(),
         eventIds: eventIds.slice(),
+        slotTypes: slotTypes.slice(),
       });
       dailySlots.clear();
       slotIndexes.forEach((slotIndex, index) => dailySlots.set(slotIndex, {
         category: categories[index],
         eventId: eventIds[index],
+        slotType: slotTypes[index],
       }));
       eventIds.forEach((eventId) => impressions.set(eventId, assignedOn));
       return { rows: [], rowCount: eventIds.length };
@@ -704,6 +758,7 @@ test('GET /api/cards/v2/today keeps one daily slot across location changes and e
     assert.ok(payload);
     return [slotIndex, {
       category: card.category,
+      slotType: card.slotType,
       eventId: payload.eventId,
       visualSeed: card.visualSeed,
     }];
@@ -718,57 +773,64 @@ test('GET /api/cards/v2/today keeps one daily slot across location changes and e
 
   const firstSelection = readSelection(first);
   const secondSelection = readSelection(second);
-  const firstByCategory = new Map(
-    [...firstSelection].map(([slotIndex, selection]) => [selection.category, { slotIndex, ...selection }]),
+  // 첫 배정 = 근처 3장. 어느 슬롯이 "?"인지는 일별 셔플에 달렸지만 구성은 결정적이다.
+  assert.deepEqual(
+    new Set([...firstSelection.values()].map((selection) => selection.eventId)),
+    new Set([initialExhibition.id, initialPerformance.id, initialPopup.id]),
   );
-  assert.equal(firstByCategory.get('전시').eventId, initialExhibition.id);
-  assert.equal(firstByCategory.get('공연').eventId, initialPerformance.id);
-  assert.equal(firstByCategory.get('팝업').eventId, initialPopup.id);
+  const mysteryEntries = [...firstSelection].filter(([, selection]) => selection.slotType === 'mystery');
+  assert.equal(mysteryEntries.length, 1);
+  assert.equal(mysteryEntries[0][1].category, null);
+  for (const [, selection] of firstSelection) {
+    if (selection.slotType !== 'category') continue;
+    assert.equal(selection.category, eventById.get(selection.eventId).main_category);
+  }
   assert.deepEqual(secondSelection, firstSelection);
   assert.deepEqual(
     second.body.lockedCards.map((card) => ({ category: card.category, visualSeed: card.visualSeed })),
     first.body.lockedCards.map((card) => ({ category: card.category, visualSeed: card.visualSeed })),
   );
-  assert.deepEqual(
-    new Set([...firstSelection.values()].map((selection) => selection.category)),
-    new Set(['전시', '공연', '팝업']),
-  );
   assert.equal(impressions.get(initialExhibition.id), todayKst());
   assert.equal(impressions.get(initialPerformance.id), todayKst());
   assert.equal(impressions.get(initialPopup.id), todayKst());
-  assert.equal(dailySlots.get(firstByCategory.get('전시').slotIndex).eventId, initialExhibition.id);
-  assert.equal(dailySlots.get(firstByCategory.get('공연').slotIndex).eventId, initialPerformance.id);
-  assert.equal(dailySlots.get(firstByCategory.get('팝업').slotIndex).eventId, initialPopup.id);
+  for (const [slotIndex, selection] of firstSelection) {
+    assert.equal(dailySlots.get(slotIndex).eventId, selection.eventId);
+  }
   assert.equal(radiusCalls.some((call) => call.phase === 'same-day'), false);
   assert.ok(impressionReadCounts[0] >= 10);
 
-  const exhibitionSlotIndex = firstByCategory.get('전시').slotIndex;
-  const openedExhibitionId = firstByCategory.get('전시').eventId;
-  openedEventIds.add(openedExhibitionId);
+  // 카테고리 슬롯 하나를 연다("?" 슬롯 개봉·재보충은 별도 테스트에서 다룬다).
+  const [openSlotIndex, openSelection] = [...firstSelection]
+    .find(([, selection]) => selection.slotType === 'category');
+  const openedCategory = eventById.get(openSelection.eventId).main_category;
+  openedEventIds.add(openSelection.eventId);
   const afterOpen = await request(makeApp(cardsRouter), 'GET', movedPath);
   assert.equal(afterOpen.status, 200);
   assert.equal(afterOpen.body.dailyOpenCount, 1);
 
   const afterOpenSelection = readSelection(afterOpen);
-  assert.equal(afterOpenSelection.get(exhibitionSlotIndex).eventId, wideExhibition.id);
+  // 연 슬롯만 50km 보충 후보로 교체되고, 나머지("?" 포함)는 그대로 핀 유지.
+  assert.equal(afterOpenSelection.get(openSlotIndex).eventId, wideByCategory.get(openedCategory).id);
+  assert.equal(afterOpenSelection.get(openSlotIndex).slotType, 'category');
   for (const [slotIndex, selection] of firstSelection) {
-    if (slotIndex === exhibitionSlotIndex) continue;
+    if (slotIndex === openSlotIndex) continue;
     assert.deepEqual(afterOpenSelection.get(slotIndex), selection);
   }
-  assert.equal([...afterOpenSelection.values()].some(({ eventId }) => eventId === newHighPerformance.id), false);
-  assert.equal([...afterOpenSelection.values()].some(({ eventId }) => eventId === newHighPopup.id), false);
+  // 새로 유입된 고점수 카드는 핀 덕에 어떤 슬롯도 밀어내지 못한다.
+  for (const event of newHighByCategory.values()) {
+    assert.equal([...afterOpenSelection.values()].some(({ eventId }) => eventId === event.id), false);
+  }
   assert.deepEqual(
     radiusCalls.filter((call) => call.phase === 'after-open').map((call) => call.radius),
     [3_000, 10_000, 50_000],
   );
   assert.equal(fallbackCalls, 0);
   assert.equal(assignmentWrites.length, 3);
-  assert.equal(dailySlots.get(exhibitionSlotIndex).eventId, wideExhibition.id);
-  assert.equal(
-    dailySlots.get(firstByCategory.get('공연').slotIndex).eventId,
-    initialPerformance.id,
-  );
-  assert.equal(dailySlots.get(firstByCategory.get('팝업').slotIndex).eventId, initialPopup.id);
+  assert.equal(dailySlots.get(openSlotIndex).eventId, wideByCategory.get(openedCategory).id);
+  for (const [slotIndex, selection] of firstSelection) {
+    if (slotIndex === openSlotIndex) continue;
+    assert.equal(dailySlots.get(slotIndex).eventId, selection.eventId);
+  }
 });
 
 test('GET /api/cards/v2/today preserves three popup positions and uses the open-card advisory namespace', async () => {
@@ -818,21 +880,25 @@ test('GET /api/cards/v2/today preserves three popup positions and uses the open-
           slot_category: slot.category,
           slot_event_id: slot.eventId,
           slot_usable: true,
+          slot_type: slot.slotType,
         }] : [];
       }),
     }),
     writeAssignments: async (params, text) => {
-      const [assignedUserId, assignedOn, slotIndexes, categories, eventIds] = params;
+      const [assignedUserId, assignedOn, slotIndexes, categories, eventIds, slotTypes] = params;
       assert.equal(assignedUserId, userId);
       assert.equal(assignedOn, todayKst());
       assert.deepEqual(slotIndexes, [0, 1, 2]);
+      // "?" 슬롯도 실제 카드 카테고리로 기록된다(핀 복원용) — slot_type으로만 구분.
       assert.deepEqual(categories, ['팝업', '팝업', '팝업']);
+      assert.deepEqual(slotTypes, ['category', 'category', 'mystery']);
       assert.equal(new Set(eventIds).size, 3);
       assert.match(text, /ON CONFLICT \(user_id, slot_index\)/);
       dailySlots.clear();
       slotIndexes.forEach((slotIndex, index) => dailySlots.set(slotIndex, {
         category: categories[index],
         eventId: eventIds[index],
+        slotType: slotTypes[index],
       }));
       eventIds.forEach((eventId) => impressions.set(eventId, assignedOn));
       return { rows: [], rowCount: eventIds.length };
@@ -845,6 +911,7 @@ test('GET /api/cards/v2/today preserves three popup positions and uses the open-
     return [slotIndex, {
       eventId: payload.eventId,
       category: card.category,
+      slotType: card.slotType,
       visualSeed: card.visualSeed,
     }];
   }));
@@ -857,7 +924,12 @@ test('GET /api/cards/v2/today preserves three popup positions and uses the open-
   const firstPositions = readPositions(first);
   const secondPositions = readPositions(second);
   assert.equal(firstPositions.size, 3);
-  assert.equal([...firstPositions.values()].every((slot) => slot.category === '팝업'), true);
+  const popupCategorySlots = [...firstPositions.values()].filter((slot) => slot.slotType === 'category');
+  assert.equal(popupCategorySlots.length, 2);
+  assert.equal(popupCategorySlots.every((slot) => slot.category === '팝업'), true);
+  const popupMysterySlots = [...firstPositions.values()].filter((slot) => slot.slotType === 'mystery');
+  assert.equal(popupMysterySlots.length, 1);
+  assert.equal(popupMysterySlots[0].category, null);
   assert.deepEqual(secondPositions, firstPositions);
   assert.equal(dailySlots.size, 3);
   assert.equal(fallbackReadCount, 1);
@@ -961,6 +1033,186 @@ test('POST /api/cards/v2/open rejects a stale token after a lifetime dedupe matc
   assert.equal(status, 409);
   assert.equal(body.error, 'EVENT_ALREADY_OPENED');
   assert.equal(rewardMutationAttempted, false);
+});
+
+test('GET /api/cards/v2/today hides every content cue on the "?" slot but keeps a decodable token', async () => {
+  const freshCandidates = [
+    { id: 'hide-exhibition', title: '숨김 전시', content_key: 'hide-a', main_category: '전시', venue: 'A관', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: 'https://img/a.jpg', overview: 'A 소개', buzz_score: 40 },
+    { id: 'hide-performance', title: '숨김 공연', content_key: 'hide-b', main_category: '공연', venue: 'B홀', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(6), image_url: null, overview: 'B 소개', buzz_score: 30 },
+    { id: 'hide-popup', title: '숨김 팝업', content_key: 'hide-c', main_category: '팝업', venue: 'C존', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(7), image_url: null, overview: 'C 소개', buzz_score: 20 },
+    { id: 'hide-festival', title: '숨김 축제', content_key: 'hide-d', main_category: '축제', venue: '광장', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(8), image_url: null, overview: 'D 소개', buzz_score: 10 },
+  ];
+  mockCardClient(async (sql) => {
+    const text = String(sql);
+    if (text.includes('user_card_impressions')) return { rows: [] };
+    if (text.includes('user_likes')) return { rows: [] };
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 0, daily_earned: 0, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('MAX(el.earn_date)')) return { rows: [] };
+    if (text.includes('FROM user_ticket_earn_log el')) return { rows: [{ count: 0 }] };
+    if (text.includes('FROM canonical_events')) return { rows: freshCandidates };
+    throw new Error(`Unexpected mystery-hiding query: ${text}`);
+  });
+
+  const { status, body } = await request(makeApp(cardsRouter), 'GET', '/v2/today');
+
+  assert.equal(status, 200);
+  const mysteryCard = body.lockedCards.find((card) => card.slotType === 'mystery');
+  assert.ok(mysteryCard);
+  // "?" 슬롯은 내용 단서를 전부 은닉한다(스펙 §3.3).
+  assert.equal(mysteryCard.category, null);
+  assert.equal(mysteryCard.areaLabel, null);
+  assert.equal(mysteryCard.distanceLabel, null);
+  assert.equal(mysteryCard.timingLabel, null);
+  assert.equal(mysteryCard.teaserEyebrow, null);
+  assert.equal(mysteryCard.teaserHeadline, null);
+  assert.deepEqual(mysteryCard.reasonTags, []);
+  // 토큰·티켓 스킨 시드는 유지되고, 토큰에는 발급 시점의 slotType이 봉인된다.
+  assert.equal(typeof mysteryCard.visualSeed, 'string');
+  assert.equal(typeof mysteryCard.palette.background, 'string');
+  const mysteryPayload = openLockedCard(mysteryCard.cardToken);
+  assert.equal(mysteryPayload.slotType, 'mystery');
+  assert.equal(freshCandidates.some((event) => event.id === mysteryPayload.eventId), true);
+  for (const card of body.lockedCards) {
+    if (card.slotType !== 'category') continue;
+    assert.equal(typeof card.category, 'string');
+    assert.equal(typeof card.areaLabel, 'string');
+    assert.equal(typeof card.timingLabel, 'string');
+    assert.equal(openLockedCard(card.cardToken).slotType, 'category');
+  }
+
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test('GET /api/cards/v2/today picks the "?" card deterministically from the daily seed', async () => {
+  // 저장된 슬롯이 없어도(핀 미보존) 같은 날 반복 조회는 같은 배치·같은 "?" 카드를 내야 한다.
+  // Math.random이 섞이면 남는 후보 4장 중 무엇이 "?"가 될지 호출마다 달라진다.
+  const freshCandidates = [
+    { id: 'det-exhibition', title: '결정 전시', content_key: 'det-a', main_category: '전시', venue: 'A관', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(5), image_url: null, overview: null, buzz_score: 40 },
+    { id: 'det-performance', title: '결정 공연', content_key: 'det-b', main_category: '공연', venue: 'B홀', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(6), image_url: null, overview: null, buzz_score: 30 },
+    { id: 'det-popup', title: '결정 팝업', content_key: 'det-c', main_category: '팝업', venue: 'C존', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(7), image_url: null, overview: null, buzz_score: 20 },
+    { id: 'det-festival-1', title: '결정 축제 1', content_key: 'det-d1', main_category: '축제', venue: '광장1', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(8), image_url: null, overview: null, buzz_score: 85 },
+    { id: 'det-festival-2', title: '결정 축제 2', content_key: 'det-d2', main_category: '축제', venue: '광장2', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(8), image_url: null, overview: null, buzz_score: 80 },
+    { id: 'det-festival-3', title: '결정 축제 3', content_key: 'det-d3', main_category: '축제', venue: '광장3', region: '서울', start_at: isoDaysFromNow(-1), end_at: isoDaysFromNow(8), image_url: null, overview: null, buzz_score: 75 },
+  ];
+  mockCardClient(async (sql) => {
+    const text = String(sql);
+    if (text.includes('user_card_impressions')) return { rows: [] };
+    if (text.includes('user_likes')) return { rows: [] };
+    if (text.includes('FROM user_tickets')) {
+      return { rows: [{ ticket_count: 0, daily_earned: 0, daily_earned_date: todayKst() }] };
+    }
+    if (text.includes('MAX(el.earn_date)')) return { rows: [] };
+    if (text.includes('FROM user_ticket_earn_log el')) return { rows: [{ count: 0 }] };
+    if (text.includes('FROM canonical_events')) return { rows: freshCandidates };
+    throw new Error(`Unexpected mystery-determinism query: ${text}`);
+  });
+
+  const first = await request(makeApp(cardsRouter), 'GET', '/v2/today');
+  const second = await request(makeApp(cardsRouter), 'GET', '/v2/today');
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+
+  const layout = (response) => response.body.lockedCards.map((card) => ({
+    slotType: card.slotType,
+    eventId: openLockedCard(card.cardToken).eventId,
+  }));
+  const firstLayout = layout(first);
+  assert.deepEqual(layout(second), firstLayout);
+  // 저장된 슬롯이 없으면 "?"는 항상 마지막 슬롯 고정이다.
+  assert.deepEqual(
+    firstLayout.map((slot) => slot.slotType),
+    ['category', 'category', 'mystery'],
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test('POST /api/cards/v2/open reveals slot type from the token and flags high-buzz mystery cards as hidden', async () => {
+  const highBuzzEvent = {
+    id: 'hidden-gem',
+    title: '고버즈 히든 카드',
+    content_key: 'hidden-gem-key',
+    canonical_key: null,
+    main_category: '공연',
+    region: '서울',
+    venue: '비밀 공연장',
+    start_at: isoDaysFromNow(-1),
+    end_at: isoDaysFromNow(9),
+    image_url: null,
+    overview: '히든 소개',
+    buzz_score: 90, // HIDDEN_BUZZ_MIN(70) 이상
+  };
+  const client = {
+    async query(sql, params = []) {
+      const text = String(sql);
+      if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (text.includes('FROM ad_reward_attempts')) {
+        return { rows: [{ attempt_id: params[0] }], rowCount: 1 };
+      }
+      if (text.includes('INSERT INTO event_archive_snapshots')) {
+        return { rows: [{ event_id: highBuzzEvent.id }], rowCount: 1 };
+      }
+      if (text.includes('FROM canonical_events')) {
+        return { rows: [highBuzzEvent], rowCount: 1 };
+      }
+      if (text.includes('pg_advisory_xact_lock')) return { rows: [{}], rowCount: 1 };
+      if (text.includes('SELECT 1') && text.includes('FROM user_card_opened_keys')) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (text.includes('INSERT INTO user_card_opened_keys')) {
+        return { rows: [{ expected_count: 2, inserted_count: 2 }], rowCount: 1 };
+      }
+      if (text.includes('INSERT INTO user_ticket_earn_log')) return { rows: [{ id: 'earn-hidden' }], rowCount: 1 };
+      if (text.includes('INSERT INTO user_tickets')) return { rows: [], rowCount: 1 };
+      if (text.includes('FROM user_tickets') && text.includes('FOR UPDATE')) {
+        return { rows: [{ ticket_count: 0, daily_earned: 0, daily_earned_date: todayKst() }], rowCount: 1 };
+      }
+      if (text.includes('COUNT(*)::int AS count') && text.includes('user_ticket_earn_log')) {
+        return { rows: [{ count: 0 }], rowCount: 1 };
+      }
+      if (text.includes('UPDATE user_tickets')) return { rows: [{ ticket_count: 1, total_earned: 1 }], rowCount: 1 };
+      if (text.includes('UPDATE user_ticket_earn_log')) return { rows: [], rowCount: 1 };
+      if (text.includes('UPDATE ad_reward_attempts')) return { rows: [], rowCount: 1 };
+      throw new Error(`Unexpected reveal query: ${text}`);
+    },
+    release() {},
+  };
+  pool.connect = async () => client;
+
+  // "?" 슬롯 토큰: reveal은 mystery이고, 고버즈라 히든 카드 프레임을 받는다.
+  const mysteryToken = sealLockedCard({
+    userId,
+    eventId: highBuzzEvent.id,
+    assignedOn: todayKst(),
+    walkMinutes: 12,
+    reasonTags: [],
+    slotType: 'mystery',
+  });
+  const mysteryResponse = await request(makeApp(cardsRouter), 'POST', '/v2/open', {
+    cardToken: mysteryToken,
+    adAttemptId: 'attempt-mystery',
+  });
+  assert.equal(mysteryResponse.status, 200);
+  assert.deepEqual(mysteryResponse.body.reveal, { slotType: 'mystery', hidden: true });
+  assert.equal(mysteryResponse.body.card.eventId, highBuzzEvent.id);
+  assert.equal(mysteryResponse.body.card.title, highBuzzEvent.title);
+
+  // 과거 발급 토큰(slotType 없음)은 category로 해석되고, 고버즈여도 hidden이 아니다.
+  const legacyToken = sealLockedCard({
+    userId,
+    eventId: highBuzzEvent.id,
+    assignedOn: todayKst(),
+    walkMinutes: null,
+    reasonTags: [],
+  });
+  const legacyResponse = await request(makeApp(cardsRouter), 'POST', '/v2/open', {
+    cardToken: legacyToken,
+    adAttemptId: 'attempt-legacy',
+  });
+  assert.equal(legacyResponse.status, 200);
+  assert.deepEqual(legacyResponse.body.reveal, { slotType: 'category', hidden: false });
 });
 
 test('GET /api/cards/today explains weighted taste personalization', async () => {

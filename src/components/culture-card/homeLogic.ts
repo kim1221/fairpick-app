@@ -1,8 +1,10 @@
 import type {
   Card,
+  CardSlotType,
   CardsTodayResponse,
   CardsTodayV2Response,
   LockedCardPreview,
+  OpenCapInfo,
   PersonalizationProfile,
 } from '../../services/cardsService';
 
@@ -129,14 +131,140 @@ export function removeLockedCardPreview(
   };
 }
 
+/** 티켓 게이지: 10칸 = 포인트 뽑기 1회. */
+export const TICKET_EXCHANGE_UNIT = 10;
+
+export type TicketGaugeState = {
+  filled: number; // 0~10 (표시 칸 수)
+  total: number; // 10
+  ready: boolean; // ticketCount ≥ 10 → 포인트 뽑기 가능
+  countLabel: string; // "7/10"
+  subtitle: string;
+};
+
+export function getTicketGaugeState(ticketCount: number, dailyOpenCount: number): TicketGaugeState {
+  const safeTickets = Math.max(0, ticketCount);
+  const filled = Math.min(safeTickets, TICKET_EXCHANGE_UNIT);
+  const ready = safeTickets >= TICKET_EXCHANGE_UNIT;
+  const openedLine = `오늘 ${Math.max(0, dailyOpenCount)}장 열었어요`;
+  return {
+    filled,
+    total: TICKET_EXCHANGE_UNIT,
+    ready,
+    countLabel: `${filled}/${TICKET_EXCHANGE_UNIT}`,
+    subtitle: ready
+      ? `포인트 뽑기 가능 · ${openedLine}`
+      : `${TICKET_EXCHANGE_UNIT - filled}장 더 모으면 포인트 뽑기 · ${openedLine}`,
+  };
+}
+
+/** 구버전 백엔드(slotType 없음)는 항상 카테고리 슬롯으로 취급한다. */
+export function getSlotType(card: Pick<LockedCardPreview, 'slotType'>): CardSlotType {
+  return card.slotType === 'mystery' ? 'mystery' : 'category';
+}
+
+/** 미스터리 슬롯이 항상 마지막 탭에 오도록 정렬한다(카테고리 슬롯 간 순서는 유지). */
+export function sortLockedCardsForTabs(cards: LockedCardPreview[]): LockedCardPreview[] {
+  return [...cards].sort((a, b) => {
+    const aMystery = getSlotType(a) === 'mystery' ? 1 : 0;
+    const bMystery = getSlotType(b) === 'mystery' ? 1 : 0;
+    return aMystery - bMystery;
+  });
+}
+
+const CATEGORY_EN: Record<string, string> = {
+  전시: 'EXHIBITION',
+  공연: 'PERFORMANCE',
+  팝업: 'POP-UP',
+  축제: 'FESTIVAL',
+  행사: 'EVENT',
+  기타: 'CULTURE',
+};
+
+export type SlotTabContent = {
+  title: string;
+  subtitle: string;
+  mystery: boolean;
+};
+
+/** 슬롯 탭 카피: 카테고리 슬롯 = 카테고리명+영문, 미스터리 슬롯 = "?"+행선지 미정. */
+export function getSlotTabContent(card: LockedCardPreview): SlotTabContent {
+  if (getSlotType(card) === 'mystery') {
+    return { title: '?', subtitle: '행선지 미정', mystery: true };
+  }
+  const category = card.category?.trim() || '문화';
+  return {
+    title: category,
+    subtitle: CATEGORY_EN[category] ?? 'CULTURE',
+    mystery: false,
+  };
+}
+
+/** 오늘 오픈 캡의 실효값. openCap이 없는 구버전 응답은 dailyOpenLimit을 그대로 쓴다. */
+export function getEffectiveOpenCap(
+  data: Pick<CardsTodayV2Response, 'dailyOpenLimit'> & { openCap?: OpenCapInfo },
+): number {
+  return data.openCap?.effective ?? data.dailyOpenLimit;
+}
+
+/** 공개 화면의 "다음 카드 뽑기" 노출 여부: 남은 캡이 있을 때만. */
+export function canDrawNextCard(
+  dailyOpenCount: number,
+  data: (Pick<CardsTodayV2Response, 'dailyOpenLimit'> & { openCap?: OpenCapInfo }) | null,
+): boolean {
+  if (!data) return false;
+  const cap = getEffectiveOpenCap(data);
+  return cap > 0 && dailyOpenCount < cap;
+}
+
+export type CapReachedView =
+  | {
+    variant: 'regional_pool';
+    title: string;
+    description: string;
+    meterLabel: string;
+    ctaLabel: string;
+    footnote: string;
+  }
+  | { variant: 'daily_max'; copy: HomeCopy };
+
+/**
+ * 캡 도달 화면 분기.
+ * regional_pool = 지역 신선 풀 소진 → 한도 페널티가 아니라 지역 희소성 프레이밍(ALL ISSUED).
+ * daily_max(또는 openCap 없음) = 기존 일일 한도 카피 유지.
+ */
+export function getCapReachedView(
+  data: Pick<CardsTodayV2Response, 'dailyOpenCount' | 'dailyOpenLimit' | 'userRegion'> & {
+    openCap?: OpenCapInfo;
+  },
+): CapReachedView {
+  const openCap = data.openCap;
+  if (openCap?.reason !== 'regional_pool') {
+    return { variant: 'daily_max', copy: DAILY_LIMIT_COPY };
+  }
+  const region = openCap.regionLabel?.trim() || data.userRegion?.trim() || '내 주변';
+  const cap = Math.max(1, openCap.effective);
+  return {
+    variant: 'regional_pool',
+    title: `오늘 ${region}의 카드는\n여기까지예요`,
+    description: `가까운 문화를 ${cap}곳 모두 발견했어요.\n내일 아침, 새로 발행된 카드가 도착해요.`,
+    meterLabel: `TODAY ${Math.min(data.dailyOpenCount, cap)} / ${cap} ISSUED`,
+    ctaLabel: '오늘 연 카드 보러 가기',
+    footnote: '내일 다시 만나요 · 아침에 새 카드가 발행돼요',
+  };
+}
+
 /**
  * 잠금 응답에 포함된 비식별 힌트만으로 선택지 카피를 만든다.
  * 이벤트 제목·장소·이미지는 공개 전에 사용하지 않는다.
  */
 export function getLockedCardChoice(card: LockedCardPreview, index: number): LockedCardChoice {
+  if (getSlotType(card) === 'mystery') {
+    return { label: '행선지 미정', description: '어디로든 갈 수 있어요' };
+  }
   const category = card.category?.trim() || '문화';
   const reasons = card.reasonTags ?? [];
-  const isEndingSoon = card.timingLabel.includes('마감');
+  const isEndingSoon = Boolean(card.timingLabel?.includes('마감'));
   const hasTasteReason = reasons.some((reason) => reason.startsWith('취향 '));
 
   let label: string;

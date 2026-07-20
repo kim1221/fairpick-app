@@ -5,7 +5,7 @@
 ## 무엇을 하고 있나
 FairPick(문화 큐레이션 앱) → **컬처카드**(리워드형 문화 카드 앱)로 전환.
 핵심 루프: 광고 보고 "오늘의 문화 카드" 열기 → 티켓 1~3 랜덤 적립 → 10티켓 = 토스포인트 교환.
-차별화: **문화 여권 + 가봤어요 GPS 도장**(실제 방문 시 도장+보너스).
+차별화: **문화 여권 + 다녀왔어요 도장**(보상 없는 자기신고 추억 기록).
 
 - 스펙: `docs/superpowers/specs/2026-06-30-culturecard-reward-design.md`
 - 계획: `docs/superpowers/plans/2026-07-01-culturecard-implementation.md`
@@ -22,14 +22,14 @@ FairPick(문화 큐레이션 앱) → **컬처카드**(리워드형 문화 카�
 - ✅ 프론트 서비스 3종: cardsService/visitService/passportService (계약 일치)
 - ✅ 백엔드 엔드포인트: GET /api/cards/today, POST /api/visits, GET /api/passport
 - ✅ 마이그레이션 2개 **라이브 적용 완료**: `user_visit_log`, checkin_lat/lng
-- ✅ 4개 화면: 홈(광고 reveal+워치독 15/60s+fail-closed), 저장(북마크+가봤어요 도장),
+- ✅ 4개 화면: 홈(광고 reveal+워치독 15/60s+fail-closed), 저장/여권(북마크+다녀왔어요 도장),
   내 문화(여권+티켓 잔액/교환+내역). 탭 3개(홈/저장/내 문화).
 - ✅ **A안 위치기반**: cards/today 내주변 우선(반경 3→10→50km→전국)+카테고리 다양성+walkMinutes 실계산.
-  visits GPS **fail-closed**(400m+행사기간 검증돼야만 도장+3티켓 — 어뷰징 차단). 기존
-  recommendationService/geo.ts(haversine)/useTodayBanner 위치패턴 재사용. currentLocation.ts 유틸 분리.
+  visits는 2026-07-04 이후 **위치 인증·티켓 보상 없는 자기신고 도장**으로 확정. 기존
+  recommendationService/geo.ts(haversine)/useTodayBanner 위치패턴은 카드 추천 위치 계산에만 사용.
 - ✅ 레거시 제거: explore/hot/ending/nearby/search 화면·라우트, 로컬 cultureCard MVP,
   잡동사니(페어픽.html·count-*.js), dead MagazineCard. router.gen 재생성.
-- ✅ history에 visit(가봤어요 도장) union.
+- ✅ history에 visit(다녀왔어요 도장) union. 현재 방문 도장은 보상 없음이라 신규 내역에는 노출되지 않음.
 - ✅ 앱 아이콘/썸네일(입장권 컨셉, 한자 뺀 모던 버전 GPT로 재생성) — **사용자가 이미 콘솔에 넣고 앱정보 심사 중**.
 - ✅ 검증: 번들 ait build 0/0, 백엔드 test 10/10, 앱 tsc 변경분 0.
 - 브랜드: granite.config displayName '컬처카드'(icon URL은 콘솔에서 처리 중).
@@ -37,21 +37,21 @@ FairPick(문화 큐레이션 앱) → **컬처카드**(리워드형 문화 카�
 ## 결정된 경제/제품 모델
 - 수집형 유지(10티켓=1교환). 즉시지급/상시교환은 제네릭 리워드앱 함정이라 기각.
 - 오늘의 카드 3장 고정 + 더뽑기(하루 30티켓 한도). 통화 표기 "티켓", 교환 "토스포인트".
-- 가봤어요 도장: **GPS 검증(A안)** 이라 +3 보너스 정당. B안(무보상)은 기각됨.
+- 다녀왔어요 도장: **보상 없는 자기신고 추억 기록**으로 확정. 티켓 보상은 광고 카드 오픈/출석/주간 보너스/교환 흐름에만 둔다.
 
 ## 지금 위치 / 다음 할 일
 사용자 질문: "앱정보 심사 넣었고, 실제 배포해서 테스트하면 되나?" → 답변함:
 1. **백엔드 먼저 배포 필요**(앱이 API 쳐야 테스트됨). 안전(추가형·마이그레이션 적용됨·새 env 없음).
    방법: feat/culturecard-rework → **main 머지 + push → Railway 자동배포**.
    ⚠️ 기존 페어픽 main을 컬처카드로 대체하는 것 인지.
-2. **프론트는 전면출시(G5) 전에 테스트빌드로 기기 검증** — 특히 **GPS 체크인은 실기기 실제 위치로만 검증 가능**.
+2. **프론트는 전면출시(G5) 전에 테스트빌드로 기기 검증** — 특히 리워드 광고·토스포인트 교환은 실기기에서 확인 필요.
 3. 사용자가 "배포/머지 해달라" 하면 G4로 진행(승인 영역).
 
 ### 남은 TODO
 - [ ] G4: feat→main 머지+push(Railway 배포) — **사용자 승인 대기 중**
-- [ ] G3: 기기 테스트(로그인→홈 위치카드→광고 열기→적립 / 저장 가봤어요 GPS→도장 / 내문화 교환)
+- [ ] G3: 기기 테스트(로그인→홈 위치카드→광고 열기→적립 / 여권 가고 싶어요→다녀왔어요 도장 / 포인트 교환)
 - [ ] (선택) PR 생성 feat→main
-- [ ] (선택) 스펙에 A안(위치/GPS) 동기화, database.types.ts 정식 재생성, dead code(sections/* 등) 스윕
+- [ ] (선택) database.types.ts 정식 재생성, dead code(sections/* 등) 스윕
 - [ ] 콘솔 등록정보 컬처카드로 교체(값은 이미 제공: 이름 컬처카드/Culture Card, 부제 "오늘의 문화 카드 열고 포인트", appName은 fairpick-app 유지)
 
 ## 주의점

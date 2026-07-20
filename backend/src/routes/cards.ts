@@ -4,7 +4,7 @@ import { pool } from '../db';
 import { requireAuth } from '../middleware/requireAuth';
 import { calculateBoundingBox, getHaversineDistanceSQL } from '../utils/geo';
 import { reverseGeocodeRegion } from '../lib/geocode';
-import { openLockedCard, sealLockedCard } from '../services/cardToken';
+import { openLockedCard, sealLockedCard, type CardSlotType } from '../services/cardToken';
 import {
   DAILY_OPEN_LIMIT,
   DAILY_TICKET_LIMIT,
@@ -31,6 +31,15 @@ const NEARBY_RADIUS_STEPS_M = [3000, 10000, 50000] as const;
 const PRIMARY_CATEGORIES = ['전시', '공연', '팝업'] as const;
 const CATEGORY_PRIORITY = [...PRIMARY_CATEGORIES, '축제', '기타'] as const;
 const CATEGORY_CANDIDATE_LIMIT = Math.ceil(CANDIDATE_LIMIT / CATEGORY_PRIORITY.length);
+// ── "?" 미스터리 슬롯 (스펙 §3.2·§3.3, /v2 전용) ─────────────────────────────
+// 위치는 3번째 고정(스펙 §3.1 시안 배치). 셔플 여부는 G2 오픈이슈(§10-3) — 튜닝 노브.
+const MYSTERY_SLOT_INDEX = TODAY_CARD_COUNT - 1;
+// S4(컬렉션 어시스트 60%) 전까지 탐험 25%/와일드 15%를 재정규화: 25/40 = 62.5% — 튜닝 노브.
+const MYSTERY_EXPLORE_PROBABILITY = 0.625;
+// 탐험의 "취향 상위 카테고리" 판정 임계 — recommendationReasons의 취향 태그 기준(0.5)과 동일.
+const MYSTERY_TASTE_TOP_THRESHOLD = 0.5;
+// 히든 카드 buzz 임계(스펙 §3.2 "buzz 상위" 근사) — 튜닝 노브.
+const HIDDEN_BUZZ_MIN = 70;
 // 공급 점수 가중치(합=1): 근접·신선도·일별로테이션·취향·버즈
 const W_PROXIMITY = 0.35;
 const W_FRESHNESS = 0.25;
@@ -69,11 +78,19 @@ type DailySlotEventRow = EventRow & {
   slot_category: string;
   slot_event_id: string;
   slot_usable: boolean;
+  slot_type?: string | null;
 };
 
 type DailyCardAssignment = {
   slotIndex: number;
   card: ReturnType<typeof toCard>;
+  slotType: CardSlotType;
+};
+
+type MysterySlotContext = {
+  slotIndex: number;
+  taste: TasteMap;
+  buzzById: ReadonlyMap<string, number>;
 };
 
 type LocationQuery = {
@@ -494,12 +511,63 @@ function getUsableDailySlotEvents(rows: DailySlotEventRow[]): DailySlotEventRow[
   ));
 }
 
+// 오늘 이미 mystery로 저장된 슬롯이 있으면 하루 동안 그 위치를 유지한다(핀 시맨틱).
+// 없으면(첫 배정·전환 배포 당일) 고정 위치를 쓴다.
+function resolveMysterySlotIndex(rows: DailySlotEventRow[]): number {
+  for (const row of rows) {
+    const slotIndex = Number(row.slot_index);
+    if (
+      row.slot_type === 'mystery'
+      && Number.isInteger(slotIndex)
+      && slotIndex >= 0
+      && slotIndex < TODAY_CARD_COUNT
+    ) {
+      return slotIndex;
+    }
+  }
+  return MYSTERY_SLOT_INDEX;
+}
+
+/**
+ * "?" 슬롯 후보 선정(서버 권위, 스펙 §3.2 — S4 전까지 탐험/와일드만).
+ * Math.random 금지 — dailySeed 기반 결정론이라 같은 날 재요청에도 같은 결과가 나와
+ * 핀 고정·재보충 시맨틱과 정합한다.
+ */
+function pickMysteryCard(
+  candidates: ReturnType<typeof toCard>[],
+  ctx: { taste: TasteMap; buzzById: ReadonlyMap<string, number>; seed: number },
+): ReturnType<typeof toCard> | null {
+  if (candidates.length === 0) return null;
+  const mysterySeed = ctx.seed ^ hashStr('culturecard-mystery-slot');
+  const explore = seededUnit(mysterySeed ^ hashStr('branch')) < MYSTERY_EXPLORE_PROBABILITY;
+  if (explore) {
+    // 탐험: 취향 상위 카테고리가 아닌 카테고리의 고buzz 카드(안 가본 장르 노출)
+    const exploration = candidates
+      .filter((card) => (ctx.taste.get(card.category) ?? 0) < MYSTERY_TASTE_TOP_THRESHOLD)
+      .sort((a, b) => (
+        (ctx.buzzById.get(b.eventId) ?? 0) - (ctx.buzzById.get(a.eventId) ?? 0)
+        || a.eventId.localeCompare(b.eventId)
+      ));
+    if (exploration.length > 0) return exploration[0]!;
+  }
+  // 와일드: 완전 랜덤(일별 시드 지터 상위) — 탐험 후보가 없을 때의 폴백이기도 하다
+  return candidates
+    .slice()
+    .sort((a, b) => (
+      seededUnit(hashStr(b.eventId) ^ mysterySeed) - seededUnit(hashStr(a.eventId) ^ mysterySeed)
+      || a.eventId.localeCompare(b.eventId)
+    ))[0]!;
+}
+
 function assignTodayCardsToSlots(
   cards: ReturnType<typeof toCard>[],
   dailySlotRows: DailySlotEventRow[],
   desiredCategories: readonly string[],
   seed: number,
+  // /v2 전용 "?" 슬롯 컨텍스트. 생략하면(legacy /today) 기존 3카테고리 배정 그대로.
+  mystery?: MysterySlotContext,
 ): DailyCardAssignment[] {
+  const mysterySlotIndex = mystery?.slotIndex ?? -1;
   const slots: Array<ReturnType<typeof toCard> | undefined> = Array(TODAY_CARD_COUNT);
   const cardByEventId = new Map(cards.map((card) => [card.eventId, card]));
   const selectedIds = new Set<string>();
@@ -522,7 +590,7 @@ function assignTodayCardsToSlots(
   ));
 
   for (let slotIndex = 0; slotIndex < TODAY_CARD_COUNT; slotIndex += 1) {
-    if (slots[slotIndex]) continue;
+    if (slots[slotIndex] || slotIndex === mysterySlotIndex) continue;
     const desiredCategory = desiredCategories[slotIndex];
     let card = firstAvailable(desiredCategory);
 
@@ -541,8 +609,27 @@ function assignTodayCardsToSlots(
     selectedCategories.add(card.category);
   }
 
+  // "?" 슬롯: 핀이 없을 때만 새로 뽑는다(열리면 다음 조회에서 여기로 재보충).
+  if (mystery && mysterySlotIndex >= 0 && mysterySlotIndex < TODAY_CARD_COUNT && !slots[mysterySlotIndex]) {
+    const available = cards.filter((candidate) => !selectedIds.has(candidate.eventId));
+    const card = pickMysteryCard(available, {
+      taste: mystery.taste,
+      buzzById: mystery.buzzById,
+      seed,
+    });
+    if (card) {
+      slots[mysterySlotIndex] = card;
+      selectedIds.add(card.eventId);
+      selectedCategories.add(card.category);
+    }
+  }
+
   return slots.flatMap((card, slotIndex) => (
-    card ? [{ slotIndex, card }] : []
+    card ? [{
+      slotIndex,
+      card,
+      slotType: (slotIndex === mysterySlotIndex ? 'mystery' : 'category') as CardSlotType,
+    }] : []
   ));
 }
 
@@ -570,19 +657,21 @@ async function recordCardAssignments(
   const slotIndexes = assignments.map(({ slotIndex }) => slotIndex);
   const categories = assignments.map(({ card }) => card.category);
   const eventIds = assignments.map(({ card }) => card.eventId);
+  const slotTypes = assignments.map(({ slotType }) => slotType);
   try {
     await db.query(
       `WITH selected AS (
-         SELECT slot_index, category, event_id
-         FROM unnest($3::smallint[], $4::text[], $5::text[])
-           AS slot(slot_index, category, event_id)
+         SELECT slot_index, category, event_id, slot_type
+         FROM unnest($3::smallint[], $4::text[], $5::text[], $6::text[])
+           AS slot(slot_index, category, event_id, slot_type)
        ), upserted_slots AS (
-         INSERT INTO user_daily_card_slots (user_id, slot_index, category, assigned_on, event_id)
-         SELECT $1, slot_index, category, $2::date, event_id FROM selected
+         INSERT INTO user_daily_card_slots (user_id, slot_index, category, assigned_on, event_id, slot_type)
+         SELECT $1, slot_index, category, $2::date, event_id, slot_type FROM selected
          ON CONFLICT (user_id, slot_index)
          DO UPDATE SET assigned_on = EXCLUDED.assigned_on,
                        category = EXCLUDED.category,
                        event_id = EXCLUDED.event_id,
+                       slot_type = EXCLUDED.slot_type,
                        updated_at = NOW()
          RETURNING slot_index
        ), deleted_slots AS (
@@ -598,7 +687,7 @@ async function recordCardAssignments(
        ON CONFLICT (user_id, event_id)
        DO UPDATE SET last_shown_on = EXCLUDED.last_shown_on,
                      shown_count = user_card_impressions.shown_count + 1`,
-      [userId, today, slotIndexes, categories, eventIds],
+      [userId, today, slotIndexes, categories, eventIds, slotTypes],
     );
   } catch (error: any) {
     console.error(`[Cards] ${logLabel} assignment log failed:`, error?.message ?? error);
@@ -613,6 +702,7 @@ async function getDailySlotEvents(
 ): Promise<DailySlotEventRow[]> {
   const { rows } = await db.query<DailySlotEventRow>(
     `SELECT slot.slot_index, slot.category AS slot_category, slot.event_id AS slot_event_id,
+            slot.slot_type,
             event.id, event.title, event.display_title, event.content_key, event.canonical_key,
             event.main_category, event.region, event.start_at, event.end_at, event.image_url,
             event.venue, event.overview, event.lat, event.lng, event.buzz_score,
@@ -892,8 +982,10 @@ function toLockedPreview(
   userId: string,
   today: string,
   variant: number,
+  slotType: CardSlotType = 'category',
 ) {
   const teaser = buildTeaserCopy(card, hashStr(`${card.eventId}|${today}|${variant}`));
+  const isMystery = slotType === 'mystery';
   return {
     cardToken: sealLockedCard({
       userId,
@@ -901,17 +993,21 @@ function toLockedPreview(
       assignedOn: today,
       walkMinutes: card.walkMinutes,
       reasonTags: card.reasonTags,
+      slotType,
     }),
     // 카드 토큰은 매 응답마다 IV가 달라진다. 이벤트 ID를 노출하지 않는 안정적인 키로
     // 같은 날 같은 추천의 티켓 스킨과 인쇄 일련번호를 고정한다.
     visualSeed: String(hashStr(`${card.eventId}|${today}`)),
-    category: card.category,
-    areaLabel: card.region,
-    distanceLabel: card.walkMinutes == null ? null : `도보 ${card.walkMinutes}분`,
-    timingLabel: lockedTimingLabel(card.dday),
-    reasonTags: card.reasonTags,
-    teaserEyebrow: teaser.eyebrow,
-    teaserHeadline: teaser.headline,
+    slotType,
+    // "?" 슬롯은 내용 단서를 은닉한다(스펙 §3.3): 카테고리·지역·거리·타이밍·티저 전부 null.
+    // 토큰·visualSeed·팔레트·isRevisit만 유지.
+    category: isMystery ? null : card.category,
+    areaLabel: isMystery ? null : card.region,
+    distanceLabel: isMystery || card.walkMinutes == null ? null : `도보 ${card.walkMinutes}분`,
+    timingLabel: isMystery ? null : lockedTimingLabel(card.dday),
+    reasonTags: isMystery ? [] : card.reasonTags,
+    teaserEyebrow: isMystery ? null : teaser.eyebrow,
+    teaserHeadline: isMystery ? null : teaser.headline,
     palette: teaser.palette,
     // 연 카드는 평생 재추천하지 않는다. 클라이언 하위 호환을 위해 필드는 유지한다.
     isRevisit: false,
@@ -1069,7 +1165,11 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
           );
     const taste = buildTasteMap(tasteResult.rows);
     const scoreById = new Map<string, number>();
-    for (const row of rows) scoreById.set(String(row.id), scoreRow(row, { location, taste, seed }));
+    const buzzById = new Map<string, number>();
+    for (const row of rows) {
+      scoreById.set(String(row.id), scoreRow(row, { location, taste, seed }));
+      buzzById.set(String(row.id), toNumberOrNull(row.buzz_score) ?? 0);
+    }
 
     const cards = rows.map((row) => toCard(row, new Set<string>(), location, taste));
     const previousImpressionIds = new Set(
@@ -1102,7 +1202,11 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
 
     const assignments = dailyOpenCount >= effectiveCap
       ? []
-      : assignTodayCardsToSlots(scored, dailySlotRows, desiredCategories, seed);
+      : assignTodayCardsToSlots(scored, dailySlotRows, desiredCategories, seed, {
+          slotIndex: resolveMysterySlotIndex(dailySlotRows),
+          taste,
+          buzzById,
+        });
 
     await recordCardAssignments(client, userId, today, assignments, 'v2');
 
@@ -1118,11 +1222,12 @@ router.get('/v2/today', requireAuth, async (req: Request, res: Response) => {
     const userRegion = await userRegionPromise;
 
     return res.json({
-      lockedCards: assignments.map(({ card, slotIndex }) => toLockedPreview(
+      lockedCards: assignments.map(({ card, slotIndex, slotType }) => toLockedPreview(
         card,
         userId,
         today,
         slotIndex,
+        slotType,
       )),
       ticketCount: ticketRow.ticket_count ?? 0,
       dailyEarned: dailyEarnedDate === today ? (ticketRow.daily_earned ?? 0) : 0,
@@ -1219,7 +1324,17 @@ router.post('/v2/open', requireAuth, async (req: Request, res: Response) => {
     const fullCard = toCard(event, new Set([tokenPayload.eventId]), null, new Map());
     fullCard.walkMinutes = tokenPayload.walkMinutes;
     fullCard.reasonTags = tokenPayload.reasonTags;
-    return res.json({ card: fullCard, ...reward });
+    // slotType은 토큰이 권위(발급 시점의 슬롯 상태 봉인). 과거 발급 토큰(필드 없음)은 category.
+    const slotType: CardSlotType = tokenPayload.slotType === 'mystery' ? 'mystery' : 'category';
+    return res.json({
+      card: fullCard,
+      ...reward,
+      reveal: {
+        slotType,
+        // 히든 카드: "?" 슬롯에서만, buzz 상위(HIDDEN_BUZZ_MIN)일 때 특수 프레임(스펙 §3.2)
+        hidden: slotType === 'mystery' && (toNumberOrNull(event.buzz_score) ?? 0) >= HIDDEN_BUZZ_MIN,
+      },
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     if (err instanceof TicketGrantError) {

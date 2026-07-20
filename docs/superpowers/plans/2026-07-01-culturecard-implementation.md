@@ -2,7 +2,7 @@
 
 > **For agentic workers (codex/서브에이전트):** 이 계획을 task 단위로 구현한다. 각 task는 독립적으로 테스트·검수 가능해야 한다. 빌드는 codex, 검수는 Claude(오케스트레이터) + `reviewer`/`pitfall-audit`/`qa-verify`. 단계는 `- [ ]` 체크박스로 추적.
 
-**Goal:** FairPick(큐레이션) → 컬처카드(리워드형 문화 카드)로, 검증된 서버 티켓 엔진 위에 "광고→카드 오픈→티켓 적립→토스포인트 교환 + 문화 여권/가봤어요 도장" 루프를 재배선한다.
+**Goal:** FairPick(큐레이션) → 컬처카드(리워드형 문화 카드)로, 검증된 서버 티켓 엔진 위에 "광고→카드 오픈→티켓 적립→토스포인트 교환 + 문화 여권/다녀왔어요 도장" 루프를 재배선한다.
 
 **Architecture:** A안(얇은 재배선). 기존 `backend/src/routes/tickets.ts` 경제 엔진은 그대로 두고, ① 카드 공급/방문/여권 3개 신규 엔드포인트를 추가하고 ② 프론트 홈/저장/내 문화 화면을 진짜 API에 다시 연결한다. 로컬 전용 MVP·레거시 큐레이션 화면은 폐기.
 
@@ -13,7 +13,7 @@
 - 프론트는 **backend API만** 호출 (Supabase 직접 금지). 금액 **서버 권위**. 지급 **멱등**(idempotency).
 - 광고: **라이브 adGroupID만**(`__DEV__` 삼항·테스트ID 금지) · `load→loaded→show` 순서 · 실돈 보상 **fail-closed** · 외부 콜백 전환엔 **워치독/타임아웃**(ad-freeze 교훈).
 - 비게임 **TDS 필수**(컴포넌트 변형·커스텀 앱바 금지) · **해요체** · 다크패턴 금지(진입광고/이탈방해/전면광고/강제동의).
-- 통화 표기 **"티켓"**, 교환 대상 **"토스포인트"**. 오늘의 카드 **3장**. 도장 보너스 **+3 티켓**. 3번째 탭 **"내 문화"**.
+- 통화 표기 **"티켓"**, 교환 대상 **"토스포인트"**. 오늘의 카드 **3장**. 방문 도장은 **보상 없는 자기신고 추억 기록**. 3번째 탭 **"내 문화"**.
 - 디자인 토큰: 종이 `#F5F1E8`·브론즈 `#B8924A`/`#9C7635`·잉크 `#16161A`·토스블루 `#3182F6`·전시 `#3182F6`·공연 `#A8324A`·팝업 `#D08A2C`·축제 `#3E8E5A`. 세리프 **Noto Serif KR**(제목), 산세 **Pretendard**(UI). 반경 카드 22/16·버튼 14·pill 999.
 - Storage는 `@apps-in-toss/framework` Storage(AsyncStorage 금지). SVG는 `@granite-js/native`. BlurView iOS 전용.
 - DB: 메인 테이블 `canonical_events`(컬럼 `start_at`/`end_at`, `WHERE is_deleted=false`). 마이그레이션 후 `database.types.ts` 재생성 + 미러 + `BACKEND_CONTRACT.md` 동기화.
@@ -53,14 +53,12 @@ type CardsTodayResponse = {
 ```ts
 type VisitResponse = {
   ok: true;
-  alreadyVisited: boolean;   // 재호출 시 true, 보너스 중복지급 없음
-  bonusTickets: number;      // 신규 방문 시 +3, 재방문 시 0
-  ticketCount: number;
+  alreadyVisited: boolean;   // 재호출 시 true
   stampCount: number;        // 누적 도장 수
 };
 ```
-- **event당 평생 1회 멱등**: `UNIQUE(user_id, event_id)`. 신규일 때만 +3 티켓을 `user_tickets`에 가산하고 `user_visit_log` 기록. 단일 트랜잭션.
-- 광고 daily limit(30)과 **별개**. 어뷰즈 가드: 하루 visit 보너스 최대 10건(초과 시 도장은 찍되 bonusTickets=0).
+- **event당 평생 1회 멱등**: `UNIQUE(user_id, event_id)`. 신규일 때도 티켓을 지급하지 않고 `user_visit_log`에 도장만 기록.
+- 잘못 누른 도장은 `DELETE /api/visits/:eventId`로 취소한다.
 
 ### `GET /api/passport` (requireAuth)
 ```ts
@@ -126,12 +124,12 @@ type PassportResponse = {
 - [ ] `qa-verify`(backend build/test) 통과
 - [ ] **검수**: 계약 일치(필드/타입), `is_deleted=false`·서버권위 확인
 
-### Task A3: `POST /api/visits` (가봤어요/도장+보너스)  [codex: backend]
+### Task A3: `POST /api/visits` (다녀왔어요 도장)  [codex: backend]
 **Files:** Create `backend/src/routes/visits.ts`; Modify `index.ts`
-**Interfaces:** Produces `VisitResponse`. 단일 트랜잭션, `user_visit_log` UNIQUE 게이트.
-- [ ] **TDD**: 신규 방문 → +3·alreadyVisited=false / 재방문 → +0·alreadyVisited=true(멱등) / 하루 보너스 10건 초과 → 도장은 찍히되 bonus=0 / 동시요청 race → 1회만 보너스
-- [ ] 구현: INSERT ON CONFLICT DO NOTHING 게이트 → 신규일 때만 user_tickets 가산 → COMMIT
-- [ ] **검수(+pitfall-audit)**: 멱등·중복지급 방지·트랜잭션 경계
+**Interfaces:** Produces `VisitResponse`. `user_visit_log` UNIQUE 게이트.
+- [ ] **TDD**: 신규 도장 → alreadyVisited=false / 재호출 → alreadyVisited=true(멱등) / 도장 취소 → stampCount 감소
+- [ ] 구현: INSERT ON CONFLICT DO NOTHING 게이트 → 보상 없이 도장 기록
+- [ ] **검수(+pitfall-audit)**: 멱등·중복 도장 방지
 
 ### Task A4: `GET /api/passport`  [codex: backend]
 **Files:** Create `backend/src/routes/passport.ts`; Modify `index.ts`
@@ -156,11 +154,11 @@ type PassportResponse = {
 - [ ] 더 뽑기: 하루 30 한도까지. `DAILY_LIMIT_REACHED` vs 광고없음 문구 분리
 - [ ] **검수(+pitfall-audit)**: 광고 생명주기·fail-closed·워치독·테스트ID 잔존 0
 
-### Task B3: 저장 화면 (북마크 + 가봤어요 도장)  [codex/frontend-engineer]
+### Task B3: 저장 화면 (북마크 + 다녀왔어요 도장)  [codex/frontend-engineer]
 **Files:** Modify `src/pages/saved.tsx`
 **Interfaces:** Consumes 기존 북마크 서비스 + `markVisited`. 디자인 = 시안 03/06.
 - [ ] 가보고픈 행사 리스트(입장권 row, 카테고리색, D-day, 길찾기)
-- [ ] "가봤어요" → `markVisited(eventId)` → 도장 연출 + "+3 티켓" 토스트(alreadyVisited면 안내만)
+- [ ] "다녀왔어요" → `markVisited(eventId)` → 보상 없는 도장 연출(alreadyVisited면 안내만)
 - [ ] **검수**: 멱등 UI(중복 도장 방지), 해요체
 
 ### Task B4: 내 문화 화면 (여권 + 잔액권 + 교환 + 내역)  [codex: frontend]
@@ -186,7 +184,7 @@ type PassportResponse = {
 ---
 
 ## Self-Review (스펙 커버리지)
-- 경제(수집형 10→교환) = 기존 엔진 재사용(변경 없음) ✓ / 카드공급 A2 ✓ / 가봤어요·도장 A3·B3 ✓ /
+- 경제(수집형 10→교환) = 기존 엔진 재사용(변경 없음) ✓ / 카드공급 A2 ✓ / 다녀왔어요·도장 A3·B3 ✓ /
   여권 A4·B4 ✓ / 홈 광고 reveal B2 ✓ / 레거시 흡수·정리 B5 ✓ / 통화·탭·토큰 Global Constraints ✓ /
   검증 C1 ✓. 월간 리포트는 v1.1(범위 밖, 스펙 명시).
 

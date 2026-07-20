@@ -1,12 +1,11 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import { loadFullScreenAd, showFullScreenAd } from '@apps-in-toss/framework';
-import { Button, Icon, useDialog } from '@toss/tds-react-native';
+import { Button, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -14,9 +13,11 @@ import {
   View,
 } from 'react-native';
 import { BottomTabBar } from '../components/BottomTabBar';
+import { AllIssuedTag } from '../components/culture-card/AllIssuedTag';
 import { CultureCardReveal, type RevealedCultureCard } from '../components/culture-card/CultureCardReveal';
 import { CultureCardStack } from '../components/culture-card/CultureCardStack';
 import { CultureCardStatePanel } from '../components/culture-card/CultureCardStatePanel';
+import { TicketGauge } from '../components/culture-card/TicketGauge';
 import {
   AD_LOAD_FAILED_COPY,
   AD_LOADING_COPY,
@@ -24,6 +25,8 @@ import {
   AD_SHOW_TERMINAL_TIMEOUT_MS,
   LOAD_FAILED_COPY,
   POOL_EMPTY_COPY,
+  canDrawNextCard,
+  getCapReachedView,
   getEarnFailureCopy,
   getTodayCardsAvailability,
   hasReachedDailyLimit,
@@ -33,6 +36,7 @@ import {
   removeLockedCardPreview,
   type HomeCopy,
 } from '../components/culture-card/homeLogic';
+import { TAG_TOKENS } from '../components/culture-card/tagKit';
 import { LikesProvider } from '../contexts/LikesContext';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -55,15 +59,19 @@ export const Route = createRoute('/', {
 
 const REWARDED_AD_ID = 'ait.v2.live.b50cf7d900884c5b';
 const AD_LOAD_TIMEOUT_MS = 15_000;
-// 카드뉴스의 색이 살아나도록 따뜻한 밝은 캔버스를 사용한다.
-const INK = '#F7F5EF';
-const INK_BOTTOM = '#EFECE4';
+// draw-loop-v1: 빈티지 태그가 떠 있는 워엄 다크 캔버스.
+const INK = TAG_TOKENS.bg;
+const INK_BOTTOM = TAG_TOKENS.bg2;
 const SURFACE = '#FFFFFF';
 const LINE = '#DDD8CE';
 const GOLD = '#A52822';
 const TEXT = '#171717';
 const MUTED = '#6F6B65';
-const MUTED_2 = '#817C74';
+const CREAM = '#EFE3C4';
+const CANVAS_SUB = '#7A7264';
+const CHIP_LINE = '#3A332A';
+const CHIP_TEXT = '#B8AD98';
+const CHIP_STRONG = '#E5D8BB';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
 type HomeStatus =
@@ -127,13 +135,12 @@ function getStableCachedState(data: CardsTodayV2Response): Pick<HomeSessionCache
   };
 }
 
-function formatIssueLine(region: string | null): string {
+function formatIssueLine(): string {
   const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const year = nowKst.getUTCFullYear();
   const month = String(nowKst.getUTCMonth() + 1).padStart(2, '0');
   const day = String(nowKst.getUTCDate()).padStart(2, '0');
-  const edition = region?.trim() || 'DAILY';
-  return `${edition} · DAILY EDITION · ${month}.${day}.${year}`;
+  return `DAILY EDITION · ${month}.${day}.${year}`;
 }
 
 function createStyles(a: Adaptive) {
@@ -151,80 +158,51 @@ function createStyles(a: Adaptive) {
     },
     nav: {
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       justifyContent: 'space-between',
-      paddingBottom: 9,
-      borderBottomWidth: 2,
-      borderBottomColor: '#171717',
+      gap: 10,
     },
     brand: {
       flex: 1,
     },
-    mark: {
-      display: 'none',
-    },
-    markText: {
-      color: '#FFFFFF',
-      fontSize: 13,
-      lineHeight: 18,
-      fontWeight: '900',
-    },
     name: {
-      color: TEXT,
-      fontSize: 18,
-      lineHeight: 22,
+      color: CREAM,
+      fontSize: 19,
+      lineHeight: 24,
       fontWeight: '900',
-      letterSpacing: 0.2,
+      letterSpacing: 1.6,
+      transform: [{ scaleX: 0.94 }],
+      alignSelf: 'flex-start',
     },
     issue: {
-      marginTop: 7,
-      color: TEXT,
+      marginTop: 3,
+      color: CANVAS_SUB,
       fontSize: 9.5,
       lineHeight: 13,
-      fontWeight: '800',
+      fontWeight: '700',
       letterSpacing: 1.2,
     },
-    ticketChip: {
-      height: 39,
-      borderRadius: 2,
-      paddingHorizontal: 10,
+    locChip: {
+      marginTop: 2,
       borderWidth: 1,
-      borderColor: '#171717',
-      backgroundColor: '#F7F5EF',
+      borderColor: CHIP_LINE,
+      borderRadius: 20,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
-      gap: 5,
+      gap: 4,
     },
-    ticketChipNumber: {
-      color: TEXT,
-      fontSize: 14,
-      lineHeight: 19,
-      fontWeight: '800',
+    locChipMark: {
+      color: CHIP_TEXT,
+      fontSize: 10,
+      lineHeight: 14,
     },
-    ticketChipLabel: {
-      color: MUTED_2,
+    locChipText: {
+      color: CHIP_STRONG,
       fontSize: 11,
       lineHeight: 15,
-      fontWeight: '700',
-    },
-    ticketChipDivider: {
-      width: 1,
-      height: 13,
-      backgroundColor: '#D8D2C7',
-      marginHorizontal: 2,
-    },
-    ticketChipCta: {
-      color: GOLD,
-      fontSize: 12.5,
-      lineHeight: 16,
-      fontWeight: '800',
-    },
-    ticketChipChevron: {
-      color: GOLD,
-      fontSize: 12,
-      lineHeight: 16,
-      fontWeight: '800',
+      fontWeight: '600',
     },
     loadingBox: {
       marginHorizontal: 22,
@@ -498,7 +476,12 @@ function HomePageInner() {
   }, [cardsData?.lockedCards, selectedCardKey]);
   const dailyLimitReached = hasReachedDailyLimit(cardsData);
   const ticketCount = cardsData?.ticketCount ?? 0;
-  const issueLine = formatIssueLine(cardsData?.userRegion ?? null);
+  const issueLine = formatIssueLine();
+  const regionLabel = cardsData?.userRegion?.trim() || '내 주변';
+  const capView = cardsData ? getCapReachedView(cardsData) : null;
+  const canDrawNext = cardsData
+    ? canDrawNextCard(cardsData.dailyOpenCount, cardsData)
+    : false;
 
   const handleRefresh = useCallback(async () => {
     if (!isLoggedIn) return;
@@ -681,6 +664,7 @@ function HomePageInner() {
               ticketCount: result.ticketCount,
               dailyEarned: result.dailyEarned,
               dailyLimit: result.dailyLimit,
+              reveal: result.reveal,
             });
             setStatus('revealed');
             resetAdAfterAttempt();
@@ -794,9 +778,13 @@ function HomePageInner() {
     try {
       const nextData = await refreshCards();
       if (hasReachedDailyLimit(nextData ?? null)) {
-        openAlert(getEarnFailureCopy({
-          response: { status: 429, data: { error: 'DAILY_OPEN_LIMIT_REACHED' } },
-        }));
+        // regional_pool 캡은 전용 ALL ISSUED 화면이 설명하므로 알럿은 daily_max에서만 띄운다.
+        const reached = nextData ? getCapReachedView(nextData) : null;
+        if (reached?.variant !== 'regional_pool') {
+          openAlert(getEarnFailureCopy({
+            response: { status: 429, data: { error: 'DAILY_OPEN_LIMIT_REACHED' } },
+          }));
+        }
       }
     } catch {
       setStatusCopy(LOAD_FAILED_COPY);
@@ -838,10 +826,10 @@ function HomePageInner() {
   }, [dialog, openedCard]);
 
   const actionLabel = !isLoggedIn && !authLoading
-    ? '로그인하고 컬처카드 공개하기'
+    ? '로그인하고 컬처카드 열기'
     : dailyLimitReached
       ? '오늘 공개 완료'
-      : '광고 보고 컬처카드 공개하기';
+      : '광고 보고 카드 열기';
   const stackDisabled = (
     authLoading
     || loginPending
@@ -864,25 +852,25 @@ function HomePageInner() {
               <Text style={styles.name}>CULTURE CARD</Text>
               <Text style={styles.issue}>{issueLine}</Text>
             </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`보유 티켓 ${ticketCount}장, 리워드에서 교환하기`}
-              style={styles.ticketChip}
-              onPress={() => (navigation.replace as (route: string) => void)('/points')}
-            >
-              <Icon name="icon-ticket-mono" size={15} color={GOLD} />
-              <Text style={styles.ticketChipNumber}>{ticketCount}</Text>
-              <Text style={styles.ticketChipLabel}>티켓</Text>
-              <View style={styles.ticketChipDivider} />
-              <Text style={styles.ticketChipCta}>교환</Text>
-              <Text style={styles.ticketChipChevron}>›</Text>
-            </Pressable>
+            <View style={styles.locChip} accessibilityLabel={`현재 지역 ${regionLabel}`}>
+              <Text style={styles.locChipMark}>◉</Text>
+              <Text style={styles.locChipText}>{regionLabel}</Text>
+            </View>
           </View>
         </View>
+
+        {isLoggedIn && cardsData ? (
+          <TicketGauge
+            ticketCount={ticketCount}
+            dailyOpenCount={cardsData.dailyOpenCount}
+            onPress={() => (navigation.replace as (route: string) => void)('/points')}
+          />
+        ) : null}
 
         {status === 'revealed' && openedCard ? (
           <CultureCardReveal
             openedCard={openedCard}
+            canDrawNext={canDrawNext}
             onDetail={handleDetail}
             onNext={handleNextCard}
             onSave={handleSave}
@@ -899,6 +887,7 @@ function HomePageInner() {
                 onSelectCard={handleSelectCard}
                 onOpen={handleOpenCard}
                 userRegion={cardsData?.userRegion ?? null}
+                nextCardNumber={isLoggedIn && cardsData ? cardsData.dailyOpenCount + 1 : null}
               />
             ) : null}
 
@@ -940,14 +929,25 @@ function HomePageInner() {
             ) : null}
 
             {status === 'daily_limit' ? (
-              <CultureCardStatePanel
-                label="오늘 완료"
-                title={statusCopy?.title ?? '오늘 준비한 컬처카드는 여기까지예요'}
-                description={statusCopy?.description ?? '내일 새로운 카드가 도착해요. 공개한 카드는 컬렉션에서 다시 볼 수 있어요.'}
-                actionLabel="컬렉션 보기"
-                tone="success"
-                onAction={() => (navigation.replace as (route: string) => void)('/passport')}
-              />
+              capView?.variant === 'regional_pool' ? (
+                <AllIssuedTag
+                  title={capView.title}
+                  description={capView.description}
+                  meterLabel={capView.meterLabel}
+                  ctaLabel={capView.ctaLabel}
+                  footnote={capView.footnote}
+                  onAction={() => (navigation.replace as (route: string) => void)('/passport')}
+                />
+              ) : (
+                <CultureCardStatePanel
+                  label="오늘 완료"
+                  title={statusCopy?.title ?? '오늘 준비한 컬처카드는 여기까지예요'}
+                  description={statusCopy?.description ?? '내일 새로운 카드가 도착해요. 공개한 카드는 컬렉션에서 다시 볼 수 있어요.'}
+                  actionLabel="컬렉션 보기"
+                  tone="success"
+                  onAction={() => (navigation.replace as (route: string) => void)('/passport')}
+                />
+              )
             ) : null}
 
             {status === 'pool_empty' ? (

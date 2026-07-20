@@ -5,11 +5,17 @@ import {
   AD_SHOW_TERMINAL_TIMEOUT_MS,
   LOAD_FAILED_COPY,
   POOL_EMPTY_COPY,
+  canDrawNextCard,
+  getCapReachedView,
   getCardNextAction,
   getEarnFailureCopy,
+  getEffectiveOpenCap,
   getLockedCardChoice,
   getNextOpenableCard,
   getPersonalizationCopy,
+  getSlotTabContent,
+  getSlotType,
+  getTicketGaugeState,
   getTodayCardsAvailability,
   getTodayCardProgress,
   hasReachedDailyLimit,
@@ -18,6 +24,7 @@ import {
   markCardOpened,
   rankWeeklyActionCards,
   removeLockedCardPreview,
+  sortLockedCardsForTabs,
 } from '../homeLogic';
 
 function card(eventId: string, opened = false): Card {
@@ -251,6 +258,129 @@ describe('culture-card home logic', () => {
 
     expect(ranked.map((item) => item.eventId)).toEqual(['today', 'soon', 'near']);
     expect(getCardNextAction(ranked[0]!).label).toBe('오늘 마감');
+  });
+
+  test('falls back to category slots when the backend omits slotType', () => {
+    expect(getSlotType(lockedCard())).toBe('category');
+    expect(getSlotType(lockedCard({ slotType: 'category' }))).toBe('category');
+    expect(getSlotType(lockedCard({ slotType: 'mystery' }))).toBe('mystery');
+  });
+
+  test('keeps the mystery slot in the last tab without reordering category slots', () => {
+    const mystery = lockedCard({ cardToken: 'm', visualSeed: 'm', slotType: 'mystery' });
+    const first = lockedCard({ cardToken: 'a', visualSeed: 'a', category: '공연' });
+    const second = lockedCard({ cardToken: 'b', visualSeed: 'b', category: '전시' });
+
+    const sorted = sortLockedCardsForTabs([mystery, first, second]);
+
+    expect(sorted.map((card) => card.visualSeed)).toEqual(['a', 'b', 'm']);
+  });
+
+  test('builds slot tabs from the category, hiding everything for the mystery slot', () => {
+    expect(getSlotTabContent(lockedCard({ category: '공연' }))).toEqual({
+      title: '공연',
+      subtitle: 'PERFORMANCE',
+      mystery: false,
+    });
+    expect(getSlotTabContent(lockedCard({ category: '희귀장르' }))).toEqual({
+      title: '희귀장르',
+      subtitle: 'CULTURE',
+      mystery: false,
+    });
+    expect(getSlotTabContent(lockedCard({
+      slotType: 'mystery',
+      category: null,
+      areaLabel: null,
+      distanceLabel: null,
+      timingLabel: null,
+      teaserEyebrow: null,
+      teaserHeadline: null,
+      reasonTags: [],
+    }))).toEqual({
+      title: '?',
+      subtitle: '행선지 미정',
+      mystery: true,
+    });
+  });
+
+  test('describes the mystery slot choice without leaking server hints', () => {
+    const choice = getLockedCardChoice(lockedCard({
+      slotType: 'mystery',
+      category: null,
+      timingLabel: null,
+      reasonTags: [],
+    }), 2);
+
+    expect(choice.label).toBe('행선지 미정');
+    expect(choice.description).not.toContain('전시');
+  });
+
+  test('tracks the 10-cell ticket gauge toward a point draw', () => {
+    const partial = getTicketGaugeState(7, 12);
+    expect(partial).toMatchObject({ filled: 7, total: 10, ready: false, countLabel: '7/10' });
+    expect(partial.subtitle).toBe('3장 더 모으면 포인트 뽑기 · 오늘 12장 열었어요');
+
+    const ready = getTicketGaugeState(10, 3);
+    expect(ready.ready).toBe(true);
+    expect(ready.subtitle).toContain('포인트 뽑기 가능');
+
+    // 10장이 넘어도 게이지는 가득 찬 10칸으로만 표기한다.
+    expect(getTicketGaugeState(23, 0)).toMatchObject({ filled: 10, ready: true, countLabel: '10/10' });
+  });
+
+  test('draws the next card only while the effective open cap remains', () => {
+    const withCap = {
+      dailyOpenLimit: 50,
+      openCap: { base: 50, effective: 4, reason: 'regional_pool' as const, regionLabel: '전포동' },
+    };
+
+    expect(getEffectiveOpenCap(withCap)).toBe(4);
+    expect(getEffectiveOpenCap({ dailyOpenLimit: 50 })).toBe(50);
+    expect(canDrawNextCard(3, withCap)).toBe(true);
+    expect(canDrawNextCard(4, withCap)).toBe(false);
+    expect(canDrawNextCard(49, { dailyOpenLimit: 50 })).toBe(true);
+    expect(canDrawNextCard(50, { dailyOpenLimit: 50 })).toBe(false);
+    expect(canDrawNextCard(0, null)).toBe(false);
+  });
+
+  test('frames the regional pool cap as scarcity instead of a penalty', () => {
+    const view = getCapReachedView({
+      dailyOpenCount: 4,
+      dailyOpenLimit: 4,
+      userRegion: '부산',
+      openCap: { base: 50, effective: 4, reason: 'regional_pool', regionLabel: '전포동' },
+    });
+
+    expect(view.variant).toBe('regional_pool');
+    if (view.variant === 'regional_pool') {
+      expect(view.title).toContain('전포동');
+      expect(view.title).toContain('여기까지예요');
+      expect(view.description).toContain('4곳');
+      expect(view.description).toContain('내일 아침');
+      expect(view.meterLabel).toBe('TODAY 4 / 4 ISSUED');
+      expect(view.ctaLabel).toBe('오늘 연 카드 보러 가기');
+    }
+  });
+
+  test('keeps the existing daily-limit copy for the hard daily max', () => {
+    const dailyMax = getCapReachedView({
+      dailyOpenCount: 50,
+      dailyOpenLimit: 50,
+      userRegion: '서울',
+      openCap: { base: 50, effective: 50, reason: 'daily_max', regionLabel: null },
+    });
+    expect(dailyMax.variant).toBe('daily_max');
+    if (dailyMax.variant === 'daily_max') {
+      expect(dailyMax.copy.title).toBe('오늘 준비한 컬처카드는 여기까지예요');
+    }
+
+    // 구버전 백엔드(openCap 없음)도 기존 카피를 유지한다.
+    const legacy = getCapReachedView({
+      dailyOpenCount: 50,
+      dailyOpenLimit: 50,
+      userRegion: '서울',
+    });
+    expect(legacy.variant).toBe('daily_max');
   });
 
   test('explains growing and established taste profiles', () => {

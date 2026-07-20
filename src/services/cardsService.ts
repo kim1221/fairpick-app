@@ -53,16 +53,22 @@ export type CardsTodayResponse = {
   personalization?: PersonalizationProfile;
 };
 
+export type CardSlotType = 'category' | 'mystery';
+
 export type LockedCardPreview = {
   cardToken: string;
   visualSeed?: string; // 같은 날 같은 추천의 잠금 티켓 외형을 고정하는 비식별 키
-  category: string;
+  // S3 백엔드부터 내려옴 — 구버전 응답에는 없으므로 optional. 없으면 'category'로 폴백한다.
+  slotType?: CardSlotType;
+  // mystery 슬롯은 카테고리·티저 단서를 서버가 은닉한다(null). UI는 값 존재 여부가 아니라
+  // slotType으로 분기한다.
+  category: string | null;
   areaLabel: string | null;
   distanceLabel: string | null;
-  timingLabel: string;
+  timingLabel: string | null;
   reasonTags: string[];
-  teaserEyebrow: string;
-  teaserHeadline: string;
+  teaserEyebrow: string | null;
+  teaserHeadline: string | null;
   palette: {
     background: string;
     foreground: string;
@@ -111,6 +117,11 @@ export type OpenCultureCardResponse = {
   dailyLimit: number;
   dailyOpenCount: number;
   dailyOpenLimit: number;
+  // S3 백엔드부터 내려옴 — hidden=true면 ? 슬롯에서 나온 히든 카드(절제된 특수 표기만).
+  reveal?: {
+    slotType: CardSlotType;
+    hidden: boolean;
+  };
 };
 
 export type CardLocation = {

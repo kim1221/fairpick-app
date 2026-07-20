@@ -1,22 +1,44 @@
+/**
+ * 홈 연속뽑기 히어로 (draw-loop-v1 시안 ①·②).
+ * 슬롯 탭 3개(카테고리 2 + ? 미스터리 1) → 선택한 슬롯을 빈티지 수하물 태그로 크게 보여준다.
+ * 카테고리 슬롯 = 마닐라 태그, 미스터리 슬롯 = 네이비 태그(행선지 미정).
+ * 태그 시각 요소는 tagKit 프리미티브(TagBody·CondensedDisplay·BoxStamp·FinePrint)로 그린다.
+ */
 import React from 'react';
 import {
-  ImageBackground,
+  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from 'react-native';
 import type { LockedCardPreview } from '../../services/cardsService';
-import { getLockedCardChoice } from './homeLogic';
-import { getTicketSerial, getTicketSkin, stableTicketHash } from './ticketSkins';
+import { romanizeRegion } from '../../utils/regionRomanize';
+import {
+  getLockedCardChoice,
+  getSlotTabContent,
+  getSlotType,
+  sortLockedCardsForTabs,
+} from './homeLogic';
+import { BoxStamp, CondensedDisplay, FinePrint, TAG_TOKENS, TagBody } from './tagKit';
+import { getTicketSerial } from './ticketSkins';
 
-const INK = '#171717';
-const MUTED = '#6F6B65';
-const RED = '#A52822';
-const PAPER = '#F7F5EF';
-const TICKET_PAPER = '#FFFDF7';
+const MONO_FAMILY = Platform.select({ ios: 'Courier', android: 'monospace', default: 'monospace' });
+
+// 시안 ①·② 태그 위 색
+const MANILA_EYEBROW = '#8A7A56';
+const MANILA_SUB = '#5A4F3B';
+const MANILA_RULE = '#C9B98F';
+const MANILA_KEY = '#8A7A56';
+const MANILA_VALUE = '#3E3628';
+const MANILA_SERIAL = '#6B5F49';
+// 태그 밖 크롬
+const CTA_BG = '#E9DBB8';
+const CTA_TEXT = '#2A2415';
+const CAP_SUB = '#8B8071';
+const CAP_STRONG = '#D9CBA8';
+const TAB_OUTLINE = '#EFE3C4';
 
 interface CultureCardStackProps {
   cards: LockedCardPreview[];
@@ -27,18 +49,148 @@ interface CultureCardStackProps {
   onSelectCard: (cardKey: string) => void;
   onOpen: () => void;
   userRegion: string | null;
+  /** 오늘 몇 번째 카드를 열게 되는지(dailyOpenCount + 1). 미로그인/미로드 시 null */
+  nextCardNumber: number | null;
 }
 
-const GENERIC_HEADLINES = [
-  '가까운 곳에 숨은\n새로운 문화',
-  '오늘의 한 장을\n열어보세요',
-  '이번 주가 지나기 전에\n만나볼 문화',
-  '평범한 하루에 더할\n새로운 발견',
-] as const;
+function getCardKey(card: LockedCardPreview): string {
+  return card.visualSeed ?? card.cardToken;
+}
 
-function mysteryHeadline(card: LockedCardPreview): string {
-  const visualKey = card.visualSeed ?? card.cardToken;
-  return GENERIC_HEADLINES[stableTicketHash(visualKey) % GENERIC_HEADLINES.length]!;
+function formatSerialLine(userRegion: string | null): string {
+  const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const month = String(nowKst.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(nowKst.getUTCDate()).padStart(2, '0');
+  const year = String(nowKst.getUTCFullYear()).slice(-2);
+  return `${romanizeRegion(userRegion)} · No.${month}${day}.${year}`;
+}
+
+/** 시안의 rule-row: 상단 잉크 선 + 모노 라벨 + 볼드 값. tone에 따라 잉크색이 바뀐다. */
+function RuleRow({
+  label,
+  value,
+  tone,
+  last = false,
+  strongValue = false,
+}: {
+  label: string;
+  value: string;
+  tone: 'manila' | 'navy';
+  last?: boolean;
+  strongValue?: boolean;
+}) {
+  const navy = tone === 'navy';
+  return (
+    <View
+      style={[
+        styles.ruleRow,
+        navy ? styles.ruleRowNavy : null,
+        last ? (navy ? styles.ruleRowLastNavy : styles.ruleRowLast) : null,
+      ]}
+    >
+      <Text style={[styles.ruleKey, navy ? styles.ruleKeyNavy : null]}>{label}</Text>
+      <Text
+        style={[
+          styles.ruleValue,
+          navy ? styles.ruleValueNavy : null,
+          strongValue ? styles.ruleValueStrong : null,
+        ]}
+        numberOfLines={1}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+/** 카테고리(마닐라) 히어로 태그 내용 */
+function CategoryHero({
+  card,
+  userRegion,
+  isCompactHeight,
+}: {
+  card: LockedCardPreview | null;
+  userRegion: string | null;
+  isCompactHeight: boolean;
+}) {
+  const category = card?.category?.trim() || '문화';
+  const destination = romanizeRegion(card?.areaLabel ?? userRegion);
+  const serial = card ? getTicketSerial(getCardKey(card)) : null;
+  const rows: Array<{ label: string; value: string }> = [
+    { label: 'TO', value: card?.areaLabel ?? userRegion ?? '내 주변' },
+    { label: 'DATE', value: '오늘 열람' },
+  ];
+  if (card?.distanceLabel) {
+    rows.push({ label: 'WALK', value: card.distanceLabel });
+  } else if (card?.timingLabel) {
+    rows.push({ label: 'NOTE', value: card.timingLabel });
+  }
+  rows.push({ label: 'TICKET', value: serial ? `Nº ${serial.slice(-3)}` : 'Nº ···' });
+
+  return (
+    <>
+      <Text style={styles.eyebrow}>TICKET TO CULTURE</Text>
+      <CondensedDisplay
+        color={TAG_TOKENS.navy}
+        size={isCompactHeight ? 46 : 54}
+        style={styles.bigCentered}
+      >
+        {destination}
+      </CondensedDisplay>
+      <Text style={styles.bigSub}>오늘의 {category} 한 장이 봉인돼 있어요</Text>
+      <View style={styles.ruleBlock}>
+        {rows.map((row, index) => (
+          <RuleRow
+            key={row.label}
+            label={row.label}
+            value={row.value}
+            tone="manila"
+            last={index === rows.length - 1}
+          />
+        ))}
+      </View>
+      <BoxStamp text="TODAY ONLY" style={styles.todayOnlyStamp} />
+      <View style={styles.pushBottom}>
+        <FinePrint>
+          {'VALID TODAY ONLY · 열면 컬렉션에 영구 보관돼요\n광고 1회 시청 = 티켓 1장 적립'}
+        </FinePrint>
+        <Text style={styles.serialLine}>{formatSerialLine(userRegion)}</Text>
+      </View>
+    </>
+  );
+}
+
+/** 미스터리(네이비) 히어로 태그 내용 — 시안 ② */
+function MysteryHero({
+  userRegion,
+  isCompactHeight,
+}: {
+  userRegion: string | null;
+  isCompactHeight: boolean;
+}) {
+  return (
+    <>
+      <Text style={[styles.eyebrow, styles.eyebrowNavy]}>DESTINATION UNKNOWN</Text>
+      <Text
+        allowFontScaling={false}
+        style={[styles.mysteryMark, isCompactHeight ? styles.mysteryMarkCompact : null]}
+      >
+        ?
+      </Text>
+      <Text style={[styles.bigSub, styles.bigSubNavy]}>행선지 미정 — 어디로든 갈 수 있어요</Text>
+      <View style={styles.ruleBlock}>
+        <RuleRow label="TO" value="? ? ?" tone="navy" />
+        <RuleRow label="CATEGORY" value="? ? ?" tone="navy" />
+        <RuleRow label="BONUS" value="컬렉션 조각 확률 ↑" tone="navy" last strongValue />
+      </View>
+      <View style={styles.pushBottom}>
+        <Text style={styles.fineprintNavy}>
+          {'이 카드에선 진행 중인 테마 컬렉션 조각이\n더 자주 나와요 · 가끔 히든 카드가 실려 있어요'}
+        </Text>
+        <Text style={[styles.serialLine, styles.serialLineNavy]}>{formatSerialLine(userRegion)}</Text>
+      </View>
+    </>
+  );
 }
 
 export function CultureCardStack({
@@ -50,146 +202,116 @@ export function CultureCardStack({
   onSelectCard,
   onOpen,
   userRegion,
+  nextCardNumber,
 }: CultureCardStackProps) {
   const { width, height } = useWindowDimensions();
-  const card = cards.find((candidate) => (
-    (candidate.visualSeed ?? candidate.cardToken) === selectedCardKey
-  )) ?? cards[0] ?? null;
   const isCompactHeight = height <= 700;
-  const ticketWidth = Math.min(width - 44, 430);
-  const visualKey = card ? (card.visualSeed ?? card.cardToken) : '';
-  const clues = card
-    ? [card.category, card.distanceLabel ?? card.areaLabel, card.timingLabel]
-      .filter((value): value is string => Boolean(value))
-      .slice(0, 3)
-    : [];
-  const clueCopy = clues.length > 0 ? clues.join(' · ') : '오늘의 추천';
+  const heroWidth = Math.min(width - 44, 380);
+
+  const tabCards = sortLockedCardsForTabs(cards);
+  const card = tabCards.find((candidate) => getCardKey(candidate) === selectedCardKey)
+    ?? tabCards[0]
+    ?? null;
+  const activeKey = card ? getCardKey(card) : null;
+  const isMystery = card ? getSlotType(card) === 'mystery' : false;
 
   return (
-    <View style={[styles.section, isCompactHeight ? styles.sectionCompact : null]}>
-      <View style={styles.heading}>
-        <Text style={styles.eyebrow}>TODAY&apos;S CULTURE CARD</Text>
-        <Text style={[styles.title, isCompactHeight ? styles.titleCompact : null]}>
-          어떤 문화를 열어볼까요?
-        </Text>
-        <Text style={[styles.subtitle, isCompactHeight ? styles.subtitleCompact : null]} numberOfLines={2}>
-          {userRegion
-            ? `${userRegion} 근처에서 고른 카드예요. 힌트를 보고 한 장을 선택해 보세요.`
-            : '힌트를 보고 오늘 열어볼 컬처카드 한 장을 선택해 보세요.'}
-        </Text>
-      </View>
-
-      {cards.length > 1 ? (
-        <View style={styles.choiceSection}>
-          <View style={styles.choiceHeader}>
-            <Text style={styles.choiceEyebrow}>열어볼 카드 선택</Text>
-            <Text style={styles.choiceHint}>선택해도 광고는 바로 시작되지 않아요</Text>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.choiceList}
-          >
-            {cards.map((candidate, index) => {
-              const candidateKey = candidate.visualSeed ?? candidate.cardToken;
-              const selected = candidateKey === (card ? (card.visualSeed ?? card.cardToken) : selectedCardKey);
-              const choice = getLockedCardChoice(candidate, index);
-              return (
-                <Pressable
-                  key={candidateKey}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${choice.label}, ${choice.description}`}
-                  accessibilityHint="선택하면 메인 컬처카드의 힌트가 바뀌어요"
-                  accessibilityState={{ selected, disabled }}
-                  disabled={disabled}
-                  onPress={() => onSelectCard(candidateKey)}
-                  style={({ pressed }) => [
-                    styles.choiceCard,
-                    selected ? styles.choiceCardSelected : null,
-                    pressed && !disabled ? styles.choiceCardPressed : null,
-                    disabled ? styles.choiceCardDisabled : null,
+    <View style={styles.section}>
+      {tabCards.length > 1 ? (
+        <View style={styles.tabRow}>
+          {tabCards.map((candidate, index) => {
+            const candidateKey = getCardKey(candidate);
+            const selected = candidateKey === activeKey;
+            const tab = getSlotTabContent(candidate);
+            const choice = getLockedCardChoice(candidate, index);
+            return (
+              <Pressable
+                key={candidateKey}
+                accessibilityRole="button"
+                accessibilityLabel={`${choice.label}, ${choice.description}`}
+                accessibilityHint="선택하면 봉인된 태그가 바뀌어요"
+                accessibilityState={{ selected, disabled }}
+                disabled={disabled}
+                onPress={() => onSelectCard(candidateKey)}
+                style={[styles.tabOutline, selected ? styles.tabOutlineSelected : null]}
+              >
+                <View
+                  style={[
+                    styles.tab,
+                    tab.mystery ? styles.tabMystery : null,
+                    selected ? null : styles.tabDim,
                   ]}
                 >
-                  <View style={styles.choiceTop}>
-                    <Text style={[styles.choiceIndex, selected ? styles.choiceTextSelected : null]}>
-                      {String(index + 1).padStart(2, '0')}
-                    </Text>
-                    <View style={[styles.choiceDot, selected ? styles.choiceDotSelected : null]} />
-                  </View>
-                  <Text style={[styles.choiceLabel, selected ? styles.choiceTextSelected : null]} numberOfLines={1}>
-                    {choice.label}
+                  {/* 좌상단 태그 컷(시안 clip-path 근사: 앱 배경색 삼각형) */}
+                  <View style={styles.tabCut} pointerEvents="none" />
+                  <View
+                    style={[styles.tabGrommet, tab.mystery ? styles.tabGrommetMystery : null]}
+                    pointerEvents="none"
+                  />
+                  <Text
+                    allowFontScaling={false}
+                    numberOfLines={1}
+                    style={[styles.tabTitle, tab.mystery ? styles.tabTitleMystery : null]}
+                  >
+                    {tab.title}
                   </Text>
-                  <Text style={styles.choiceDescription} numberOfLines={2}>{choice.description}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.tabSub, tab.mystery ? styles.tabSubMystery : null]}
+                  >
+                    {tab.subtitle}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
         </View>
       ) : null}
 
-      {card ? (
+      <TagBody
+        tone={isMystery ? 'navy' : 'manila'}
+        style={StyleSheet.flatten([
+          styles.hero,
+          { width: heroWidth },
+          isCompactHeight ? styles.heroCompact : null,
+        ])}
+      >
         <View
           accessibilityLiveRegion="polite"
-          style={[styles.ticketDeck, { width: ticketWidth }]}
+          style={[styles.heroInner, isCompactHeight ? styles.heroInnerCompact : null]}
         >
-          <View style={[styles.ticket, isCompactHeight ? styles.ticketCompact : null]}>
-            <View style={styles.ticketMain}>
-              <View style={styles.ticketHeader}>
-                <Text style={styles.ticketBrand}>CULTURE CARD</Text>
-                <Text style={styles.ticketSerial}>NO. {getTicketSerial(visualKey)}</Text>
-              </View>
-
-              <ImageBackground
-                source={getTicketSkin(visualKey)}
-                style={styles.ticketBody}
-                imageStyle={styles.ticketArtImage}
-                resizeMode="cover"
-              >
-                <View style={styles.ticketArtWash} pointerEvents="none" />
-                <View style={styles.ticketCopyPanel}>
-                  <Text style={styles.clueLine}>{card.teaserEyebrow || clueCopy}</Text>
-                  <Text style={[styles.ticketHeadline, isCompactHeight ? styles.ticketHeadlineCompact : null]}>
-                    {card.teaserHeadline || mysteryHeadline(card)}
-                  </Text>
-                  <Text style={styles.ticketMeta} numberOfLines={1}>{clueCopy}</Text>
-                  <Text style={styles.lockedCopy} numberOfLines={1}>
-                    행사명과 정확한 장소는 광고를 본 뒤 공개돼요
-                  </Text>
-                </View>
-              </ImageBackground>
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="광고를 보고 선택한 컬처카드 공개하기"
-                accessibilityHint="광고를 끝까지 보면 행사명과 장소가 공개되고 티켓 1장부터 3장이 적립돼요"
-                accessibilityState={{ disabled, busy: loading }}
-                onPress={onOpen}
-                disabled={disabled}
-                style={({ pressed }) => [
-                  styles.cardCta,
-                  disabled ? styles.cardCtaDisabled : null,
-                  pressed && !disabled ? styles.cardCtaPressed : null,
-                ]}
-              >
-                <Text style={[styles.cardCtaText, disabled ? styles.cardCtaTextDisabled : null]}>
-                  {loading ? '광고 준비 중' : actionLabel}
-                </Text>
-                <Text style={[styles.cardCtaArrow, disabled ? styles.cardCtaTextDisabled : null]}>→</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.rewardStub}>
-              <View style={styles.perforation} />
-              <View style={styles.rewardCopy}>
-                <Text style={styles.rewardAmount}>1</Text>
-                <Text style={styles.rewardUnit}>티켓</Text>
-              </View>
-              <Text style={styles.stubSerial}>{getTicketSerial(visualKey).slice(-3)}</Text>
-            </View>
-            <View pointerEvents="none" style={[styles.notch, styles.notchTop]} />
-            <View pointerEvents="none" style={[styles.notch, styles.notchBottom]} />
-          </View>
+          {isMystery ? (
+            <MysteryHero userRegion={userRegion} isCompactHeight={isCompactHeight} />
+          ) : (
+            <CategoryHero card={card} userRegion={userRegion} isCompactHeight={isCompactHeight} />
+          )}
         </View>
+      </TagBody>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="광고를 보고 선택한 컬처카드 공개하기"
+        accessibilityHint="광고를 끝까지 보면 카드가 공개되고 티켓 1장이 적립돼요"
+        accessibilityState={{ disabled, busy: loading }}
+        onPress={onOpen}
+        disabled={disabled}
+        style={({ pressed }) => [
+          styles.cta,
+          { width: heroWidth },
+          disabled ? styles.ctaDisabled : null,
+          pressed && !disabled ? styles.ctaPressed : null,
+        ]}
+      >
+        <Text style={[styles.ctaText, disabled ? styles.ctaTextDisabled : null]}>
+          {loading ? '광고 준비 중' : actionLabel}
+        </Text>
+      </Pressable>
+      {nextCardNumber != null ? (
+        <Text style={styles.ctaCaption}>
+          오늘 <Text style={styles.ctaCaptionStrong}>{nextCardNumber}번째</Text> 카드
+          {' · '}
+          <Text style={styles.ctaCaptionStrong}>+1 티켓</Text>
+        </Text>
       ) : null}
     </View>
   );
@@ -197,333 +319,248 @@ export function CultureCardStack({
 
 const styles = StyleSheet.create({
   section: {
-    paddingTop: 14,
-  },
-  sectionCompact: {
-    paddingTop: 7,
-  },
-  heading: {
-    paddingHorizontal: 22,
-  },
-  eyebrow: {
-    color: RED,
-    fontSize: 10.5,
-    lineHeight: 18,
-    fontWeight: '900',
-    letterSpacing: 1.3,
-  },
-  title: {
-    marginTop: 9,
-    color: INK,
-    fontSize: 27,
-    lineHeight: 35,
-    fontWeight: '900',
-    letterSpacing: -1.25,
-    fontFamily: 'Noto Serif KR',
-  },
-  titleCompact: {
-    marginTop: 6,
-    fontSize: 23,
-    lineHeight: 30,
-  },
-  subtitle: {
-    marginTop: 5,
-    color: MUTED,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: '600',
-  },
-  subtitleCompact: {
-    marginTop: 3,
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  choiceSection: {
-    marginTop: 15,
-  },
-  choiceHeader: {
-    paddingHorizontal: 22,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  choiceEyebrow: {
-    color: INK,
-    fontSize: 11,
-    lineHeight: 16,
-    fontWeight: '900',
-  },
-  choiceHint: {
-    flex: 1,
-    color: MUTED,
-    fontSize: 9,
-    lineHeight: 13,
-    fontWeight: '600',
-    textAlign: 'right',
-  },
-  choiceList: {
-    paddingHorizontal: 22,
     paddingTop: 8,
+    paddingBottom: 4,
+  },
+  // ── 슬롯 탭 ──────────────────────────────────────────────
+  tabRow: {
+    flexDirection: 'row',
     gap: 8,
+    paddingHorizontal: 22,
+    marginBottom: 14,
   },
-  choiceCard: {
-    width: 132,
-    minHeight: 78,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#D7D0C4',
-    backgroundColor: '#FFFCF5',
-    paddingHorizontal: 11,
-    paddingVertical: 9,
+  tabOutline: {
+    flex: 1,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    borderRadius: 9,
+    padding: 2,
   },
-  choiceCardSelected: {
-    borderColor: RED,
-    backgroundColor: '#F4E8E2',
+  tabOutlineSelected: {
+    borderColor: TAB_OUTLINE,
   },
-  choiceCardPressed: {
-    opacity: 0.78,
+  tab: {
+    borderRadius: 6,
+    backgroundColor: CTA_BG,
+    paddingTop: 9,
+    paddingBottom: 8,
+    paddingHorizontal: 8,
+    overflow: 'hidden',
   },
-  choiceCardDisabled: {
+  tabDim: {
     opacity: 0.55,
   },
-  choiceTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  tabMystery: {
+    backgroundColor: TAG_TOKENS.navy,
   },
-  choiceIndex: {
-    color: MUTED,
-    fontSize: 8,
-    lineHeight: 11,
-    fontWeight: '900',
-    letterSpacing: 0.8,
+  tabCut: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 0,
+    height: 0,
+    borderTopWidth: 6,
+    borderRightWidth: 10,
+    borderTopColor: TAG_TOKENS.bg,
+    borderRightColor: 'transparent',
   },
-  choiceDot: {
+  tabGrommet: {
+    position: 'absolute',
+    top: 5,
+    right: 6,
     width: 7,
     height: 7,
     borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#A9A297',
+    backgroundColor: TAG_TOKENS.bg,
+    borderWidth: 1.5,
+    borderColor: '#B9A87E',
   },
-  choiceDotSelected: {
-    borderColor: RED,
-    backgroundColor: RED,
+  tabGrommetMystery: {
+    borderColor: TAG_TOKENS.navyGrommet,
   },
-  choiceLabel: {
-    marginTop: 7,
-    color: INK,
-    fontSize: 12,
-    lineHeight: 16,
+  tabTitle: {
+    color: TAG_TOKENS.navy,
+    fontSize: 15,
+    lineHeight: 19,
     fontWeight: '900',
+    letterSpacing: 0.3,
   },
-  choiceTextSelected: {
-    color: RED,
+  tabTitleMystery: {
+    color: TAG_TOKENS.navyCream,
   },
-  choiceDescription: {
+  tabSub: {
     marginTop: 2,
-    color: MUTED,
-    fontSize: 9.5,
-    lineHeight: 13,
-    fontWeight: '600',
-  },
-  ticketDeck: {
-    alignSelf: 'center',
-    marginTop: 13,
-    paddingBottom: 5,
-  },
-  ticket: {
-    minHeight: 250,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: '#D7D0C4',
-    backgroundColor: TICKET_PAPER,
-    overflow: 'hidden',
-    flexDirection: 'row',
-    shadowColor: '#171717',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.13,
-    shadowRadius: 14,
-    elevation: 4,
-  },
-  ticketCompact: {
-    minHeight: 230,
-  },
-  ticketMain: {
-    flex: 1,
-  },
-  ticketHeader: {
-    minHeight: 36,
-    paddingHorizontal: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5DFD4',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  ticketBrand: {
-    color: INK,
-    fontSize: 9.5,
-    lineHeight: 13,
-    fontWeight: '900',
-    letterSpacing: 1.15,
-  },
-  ticketSerial: {
-    color: MUTED,
-    fontSize: 8,
-    lineHeight: 12,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  ticketBody: {
-    flex: 1,
-    height: 166,
-    backgroundColor: '#EEE8DA',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
-  ticketArtImage: {
-    width: '100%',
-    height: '100%',
-  },
-  ticketArtWash: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(35, 30, 22, 0.05)',
-  },
-  ticketCopyPanel: {
-    width: '89%',
-    marginBottom: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    borderRadius: 17,
-    backgroundColor: 'rgba(255, 253, 247, 0.9)',
-    justifyContent: 'center',
-    shadowColor: '#171717',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 2,
-  },
-  clueLine: {
-    color: RED,
+    color: MANILA_SERIAL,
     fontSize: 9,
     lineHeight: 12,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  tabSubMystery: {
+    color: '#9AA5C6',
+  },
+  // ── 히어로 태그 ───────────────────────────────────────────
+  hero: {
+    alignSelf: 'center',
+  },
+  heroCompact: {},
+  heroInner: {
+    minHeight: 396,
+  },
+  heroInnerCompact: {
+    minHeight: 340,
+  },
+  eyebrow: {
+    fontFamily: MONO_FAMILY,
+    fontSize: 10,
+    letterSpacing: 2,
+    color: MANILA_EYEBROW,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  eyebrowNavy: {
+    color: TAG_TOKENS.navySub,
+  },
+  bigCentered: {
+    textAlign: 'center',
+    marginTop: 10,
+    letterSpacing: -1,
+    transform: [{ scaleX: 0.88 }],
+  },
+  bigSub: {
+    textAlign: 'center',
+    fontSize: 13.5,
+    lineHeight: 19,
+    color: MANILA_SUB,
+    fontWeight: '600',
+    marginTop: 4,
+    marginBottom: 14,
+  },
+  bigSubNavy: {
+    color: '#C4CBE2',
+  },
+  mysteryMark: {
+    textAlign: 'center',
+    color: TAG_TOKENS.navyCream,
+    fontSize: 88,
+    lineHeight: 96,
     fontWeight: '900',
+    marginTop: 12,
   },
-  ticketHeadline: {
-    marginTop: 5,
-    color: INK,
-    fontSize: 18,
-    lineHeight: 24,
-    fontWeight: '900',
-    letterSpacing: -0.55,
-    fontFamily: 'Noto Serif KR',
+  mysteryMarkCompact: {
+    fontSize: 68,
+    lineHeight: 74,
+    marginTop: 8,
   },
-  ticketHeadlineCompact: {
-    marginTop: 7,
-    fontSize: 16,
-    lineHeight: 21,
+  ruleBlock: {},
+  ruleRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: MANILA_RULE,
+    paddingTop: 7,
+    paddingBottom: 6,
+    paddingHorizontal: 2,
   },
-  ticketMeta: {
-    marginTop: 5,
-    color: INK,
-    fontSize: 8.5,
-    lineHeight: 12,
+  ruleRowNavy: {
+    borderTopColor: TAG_TOKENS.navyLine,
+  },
+  ruleRowLast: {
+    borderBottomWidth: 1,
+    borderBottomColor: MANILA_RULE,
+  },
+  ruleRowLastNavy: {
+    borderBottomWidth: 1,
+    borderBottomColor: TAG_TOKENS.navyLine,
+  },
+  ruleKey: {
+    fontFamily: MONO_FAMILY,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: MANILA_KEY,
+  },
+  ruleKeyNavy: {
+    color: '#7C88B2',
+  },
+  ruleValue: {
+    flexShrink: 1,
+    marginLeft: 12,
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: MANILA_VALUE,
+    textAlign: 'right',
+  },
+  ruleValueNavy: {
+    color: TAG_TOKENS.navyValue,
+  },
+  ruleValueStrong: {
+    color: TAG_TOKENS.navyCream,
     fontWeight: '800',
   },
-  lockedCopy: {
-    marginTop: 3,
-    color: MUTED,
+  todayOnlyStamp: {
+    position: 'absolute',
+    right: 6,
+    bottom: 84,
+  },
+  pushBottom: {
+    marginTop: 'auto',
+  },
+  fineprintNavy: {
+    fontFamily: MONO_FAMILY,
     fontSize: 8.5,
-    lineHeight: 12,
-    fontWeight: '600',
+    lineHeight: 13,
+    letterSpacing: 0.6,
+    color: TAG_TOKENS.navyFine,
+    textAlign: 'center',
+    marginTop: 10,
   },
-  cardCta: {
-    minHeight: 47,
-    paddingHorizontal: 16,
-    backgroundColor: RED,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  serialLine: {
+    fontFamily: MONO_FAMILY,
+    fontSize: 10,
+    letterSpacing: 2,
+    color: MANILA_SERIAL,
+    textAlign: 'center',
+    marginTop: 5,
   },
-  cardCtaDisabled: {
-    backgroundColor: '#CAC5BB',
+  serialLineNavy: {
+    color: TAG_TOKENS.navySub,
   },
-  cardCtaPressed: {
-    opacity: 0.88,
-  },
-  cardCtaText: {
-    color: '#FFFFFF',
-    fontSize: 13.5,
-    lineHeight: 18,
-    fontWeight: '900',
-  },
-  cardCtaArrow: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    lineHeight: 22,
-    fontWeight: '500',
-  },
-  cardCtaTextDisabled: {
-    color: '#817C74',
-  },
-  rewardStub: {
-    width: 60,
-    position: 'relative',
-    backgroundColor: '#F3EEE3',
+  // ── CTA ─────────────────────────────────────────────────
+  cta: {
+    alignSelf: 'center',
+    marginTop: 14,
+    borderRadius: 10,
+    paddingVertical: 16,
+    backgroundColor: CTA_BG,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 30,
-    paddingVertical: 13,
-    paddingHorizontal: 5,
   },
-  perforation: {
-    position: 'absolute',
-    left: 0,
-    top: 9,
-    bottom: 9,
-    borderLeftWidth: 1,
-    borderStyle: 'dashed',
-    borderLeftColor: '#9E978B',
+  ctaDisabled: {
+    backgroundColor: TAG_TOKENS.ctaDisabledBg,
   },
-  rewardCopy: {
-    alignItems: 'center',
+  ctaPressed: {
+    opacity: 0.86,
   },
-  rewardAmount: {
-    color: RED,
-    fontSize: 17,
+  ctaText: {
+    color: CTA_TEXT,
+    fontSize: 16,
     lineHeight: 21,
-    fontWeight: '900',
-    letterSpacing: -0.8,
-  },
-  rewardUnit: {
-    marginTop: 1,
-    color: RED,
-    fontSize: 10,
-    lineHeight: 14,
-    fontWeight: '900',
-  },
-  stubSerial: {
-    color: MUTED,
-    fontSize: 8,
-    lineHeight: 11,
     fontWeight: '800',
-    letterSpacing: 1.2,
   },
-  notch: {
-    position: 'absolute',
-    right: 52,
-    width: 15,
-    height: 15,
-    borderRadius: 8,
-    backgroundColor: PAPER,
-    borderWidth: 1,
-    borderColor: '#C8C1B5',
+  ctaTextDisabled: {
+    color: TAG_TOKENS.ctaDisabledText,
   },
-  notchTop: {
-    top: -8,
+  ctaCaption: {
+    marginTop: 9,
+    textAlign: 'center',
+    color: CAP_SUB,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '600',
   },
-  notchBottom: {
-    bottom: -8,
+  ctaCaptionStrong: {
+    color: CAP_STRONG,
+    fontWeight: '800',
   },
 });
