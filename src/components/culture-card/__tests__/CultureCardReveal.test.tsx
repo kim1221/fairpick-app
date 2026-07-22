@@ -95,4 +95,53 @@ describe('CultureCardReveal', () => {
     expect(screen.getByText('+1 티켓')).toBeTruthy();
     expect(screen.getByText('현재 8장')).toBeTruthy();
   });
+
+  test('shows a collection fill banner per progressed set', () => {
+    const screen = renderReveal({
+      openedCard: openedCard({
+        collectionProgress: [
+          {
+            setId: 'set-1',
+            slug: 'neighborhood-jongno-2026w30',
+            title: '종로구 컬렉션',
+            filledSlotIndex: 1,
+            filledCount: 2,
+            totalSlots: 4,
+            completed: false,
+          },
+        ],
+      }),
+    });
+
+    expect(screen.getByText('『종로구 컬렉션』 2/4 채움')).toBeTruthy();
+  });
+
+  test('celebrates a completed set with the badge banner', () => {
+    const screen = renderReveal({
+      openedCard: openedCard({
+        collectionProgress: [
+          {
+            setId: 'set-2',
+            slug: 'season-summer-2026w30',
+            title: '여름 전시 4곳',
+            filledSlotIndex: 3,
+            filledCount: 4,
+            totalSlots: 4,
+            completed: true,
+            badgeKey: 'set:season-summer-2026w30',
+          },
+        ],
+      }),
+    });
+
+    expect(screen.getByText('『여름 전시 4곳』 세트 완성 — 배지를 받았어요')).toBeTruthy();
+  });
+
+  test('renders no collection banner when the open filled nothing', () => {
+    const absent = renderReveal();
+    expect(absent.queryByText(/채움$/)).toBeNull();
+
+    const emptyList = renderReveal({ openedCard: openedCard({ collectionProgress: [] }) });
+    expect(emptyList.queryByText(/채움$/)).toBeNull();
+  });
 });

@@ -7,6 +7,7 @@ import { Route as _MypageLikesRoute } from '../pages/mypage/likes';
 import { Route as _MypageRecentRoute } from '../pages/mypage/recent';
 import { Route as _MypageTicketsRoute } from '../pages/mypage/tickets';
 import { Route as _MypageRoute } from '../pages/mypage';
+import { Route as _PassportCollectionsSetIdRoute } from '../pages/passport/collections/[setId]';
 import { Route as _PassportOpenedRoute } from '../pages/passport/opened';
 import { Route as _PassportVisitsRoute } from '../pages/passport/visits';
 import { Route as _PassportRoute } from '../pages/passport';
@@ -22,6 +23,7 @@ declare module '@granite-js/react-native' {
     '/mypage/recent': (typeof _MypageRecentRoute)['_inputType'];
     '/mypage/tickets': (typeof _MypageTicketsRoute)['_inputType'];
     '/mypage': (typeof _MypageRoute)['_inputType'];
+    '/passport/collections/:setId': (typeof _PassportCollectionsSetIdRoute)['_inputType'];
     '/passport/opened': (typeof _PassportOpenedRoute)['_inputType'];
     '/passport/visits': (typeof _PassportVisitsRoute)['_inputType'];
     '/passport': (typeof _PassportRoute)['_inputType'];
@@ -37,6 +39,7 @@ declare module '@granite-js/react-native' {
     '/mypage/recent': (typeof _MypageRecentRoute)['_outputType'];
     '/mypage/tickets': (typeof _MypageTicketsRoute)['_outputType'];
     '/mypage': (typeof _MypageRoute)['_outputType'];
+    '/passport/collections/:setId': (typeof _PassportCollectionsSetIdRoute)['_outputType'];
     '/passport/opened': (typeof _PassportOpenedRoute)['_outputType'];
     '/passport/visits': (typeof _PassportVisitsRoute)['_outputType'];
     '/passport': (typeof _PassportRoute)['_outputType'];

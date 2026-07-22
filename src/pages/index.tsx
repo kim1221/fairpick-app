@@ -665,6 +665,7 @@ function HomePageInner() {
               dailyEarned: result.dailyEarned,
               dailyLimit: result.dailyLimit,
               reveal: result.reveal,
+              collectionProgress: result.collectionProgress,
             });
             setStatus('revealed');
             resetAdAfterAttempt();

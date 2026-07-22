@@ -107,6 +107,18 @@ export type CardsTodayV2Response = {
   personalization: PersonalizationProfile;
 };
 
+/** 이번 오픈으로 실제 채워진 테마 컬렉션 세트(안 채워진 세트는 응답에 없다). */
+export type CollectionProgressEntry = {
+  setId: string;
+  slug: string;
+  title: string;
+  filledSlotIndex: number;
+  filledCount: number;
+  totalSlots: number;
+  completed: boolean;
+  badgeKey?: string;
+};
+
 export type OpenCultureCardResponse = {
   card: Card;
   earned: number;
@@ -122,6 +134,8 @@ export type OpenCultureCardResponse = {
     slotType: CardSlotType;
     hidden: boolean;
   };
+  // S4 백엔드부터 내려옴 — 구버전 응답에는 없으므로 optional.
+  collectionProgress?: CollectionProgressEntry[];
 };
 
 export type CardLocation = {

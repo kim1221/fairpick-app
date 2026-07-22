@@ -23,6 +23,8 @@ export interface RevealedCultureCard {
   dailyEarned: number;
   dailyLimit: number;
   reveal?: OpenCultureCardResponse['reveal'];
+  /** 이 오픈으로 채워진 테마 컬렉션 세트(S4). 빈 배열/부재면 연출 없음. */
+  collectionProgress?: OpenCultureCardResponse['collectionProgress'];
 }
 
 interface CultureCardRevealProps {
@@ -109,6 +111,26 @@ export function CultureCardReveal({
           </View>
           <Text style={styles.rewardValue}>+{earned}</Text>
         </View>
+
+        {/* 이 카드가 채운 테마 컬렉션 세트 — 완성 시에도 절제된 배지 표기만(글로우·콘페티 금지) */}
+        {(openedCard.collectionProgress ?? []).map((entry) => (
+          <View
+            key={entry.setId}
+            style={[styles.collectionBanner, entry.completed ? styles.collectionBannerCompleted : null]}
+          >
+            <Text style={[styles.collectionGlyph, entry.completed ? styles.collectionGlyphCompleted : null]}>
+              {entry.completed ? '✦' : '▣'}
+            </Text>
+            <Text
+              style={[styles.collectionBannerText, entry.completed ? styles.collectionBannerTextCompleted : null]}
+              numberOfLines={2}
+            >
+              {entry.completed
+                ? `『${entry.title}』 세트 완성 — 배지를 받았어요`
+                : `『${entry.title}』 ${entry.filledCount}/${entry.totalSlots} 채움`}
+            </Text>
+          </View>
+        ))}
 
         {/* ? 슬롯 히든 카드: 절제된 러버스탬프 1개만(글로우·콘페티 금지) */}
         {isHidden ? <BoxStamp text="HIDDEN" style={styles.hiddenStamp} /> : null}
@@ -298,6 +320,42 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 14,
     right: 14,
+  },
+  collectionBanner: {
+    marginHorizontal: 14,
+    marginTop: -6,
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#F1E8CF',
+    borderWidth: 1,
+    borderColor: '#DECFA6',
+  },
+  collectionBannerCompleted: {
+    backgroundColor: '#2A386A',
+    borderColor: '#3D4C82',
+  },
+  collectionGlyph: {
+    color: '#A52822',
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '900',
+  },
+  collectionGlyphCompleted: {
+    color: '#C9A35B',
+  },
+  collectionBannerText: {
+    flex: 1,
+    color: '#2C2A22',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+  },
+  collectionBannerTextCompleted: {
+    color: '#E9DBB8',
   },
   drawNext: {
     marginTop: 14,

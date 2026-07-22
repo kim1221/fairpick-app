@@ -45,6 +45,13 @@ import {
   type PassportStamp,
 } from '../services/passportService';
 import { loadCollectionSavedEventIds } from '../services/collectionService';
+import {
+  getCollectionBadges,
+  getThemeCollections,
+  type CollectionBadge,
+  type ThemeCollectionSet,
+} from '../services/themeCollectionService';
+import { ThemeCollectionSection } from '../components/passport/ThemeCollectionSection';
 import userEventService from '../services/userEventService';
 import { markVisited, subscribeVisitChange, unmarkVisited } from '../services/visitService';
 import { openNaverMap } from '../utils/mapLinks';
@@ -111,6 +118,8 @@ export function PassportPage() {
   const [referenceDate, setReferenceDate] = useState(() => new Date());
   const [toastMessage, setToastMessage] = useState<SavedVisitToastMessage | null>(null);
   const [dataOwnerKey, setDataOwnerKey] = useState<string | null>(initialCache ? initialCacheKey : null);
+  const [themeSets, setThemeSets] = useState<ThemeCollectionSet[]>([]);
+  const [themeBadges, setThemeBadges] = useState<CollectionBadge[]>([]);
   const openedCardsRef = useRef(openedCards);
   const pageInfoRef = useRef(pageInfo);
   openedCardsRef.current = openedCards;
@@ -205,11 +214,31 @@ export function PassportPage() {
     [isLoggedIn, user?.id]
   );
 
+  // 테마 컬렉션(주간 세트·배지)은 기존 컬렉션 캐시와 독립 — 실패해도 섹션만 숨는다.
+  const loadThemeCollections = useCallback(async () => {
+    const requestKey = getCollectionSessionKey(isLoggedIn, user?.id);
+    const [setsResult, badgesResult] = await Promise.allSettled([
+      getThemeCollections(),
+      getCollectionBadges(),
+    ]);
+    if (activeCacheKeyRef.current !== requestKey) return;
+    if (setsResult.status === 'fulfilled') setThemeSets(setsResult.value.sets);
+    if (badgesResult.status === 'fulfilled') setThemeBadges(badgesResult.value);
+    if (__DEV__ && setsResult.status === 'rejected') {
+      console.error('[PassportPage][loadThemeCollections]', setsResult.reason);
+    }
+  }, [isLoggedIn, user?.id]);
+
   useEffect(() => {
     if (authLoading) return;
     const nextKey = getCollectionSessionKey(isLoggedIn, user?.id);
     const cached = getCollectionSession(nextKey);
     activeCacheKeyRef.current = nextKey;
+
+    // 계정 전환 시 이전 사용자 세트가 잠깐이라도 보이지 않게 비우고 다시 받는다.
+    setThemeSets([]);
+    setThemeBadges([]);
+    loadThemeCollections().catch(() => {});
 
     if (cached) {
       hydrateCollectionCache(nextKey, cached);
@@ -232,7 +261,7 @@ export function PassportPage() {
     setError(false);
     setLoading(true);
     loadCollection().catch(() => {});
-  }, [authLoading, hydrateCollectionCache, isLoggedIn, loadCollection, user?.id]);
+  }, [authLoading, hydrateCollectionCache, isLoggedIn, loadCollection, loadThemeCollections, user?.id]);
 
   useEffect(() => {
     if (authLoading || !passport) return;
@@ -305,8 +334,10 @@ export function PassportPage() {
       if (cached && cached.fetchedAt > lastFetchedAtRef.current) hydrateCollectionCache(key, cached);
       // 상세 화면에서 저장/방문 상태를 바꿨을 수 있다. 캐시 화면은 유지한 채 뒤에서만 갱신한다.
       loadCollection({ preservePages: true }).catch(() => {});
+      // 홈에서 카드를 열고 돌아오면 세트 진행이 변해 있을 수 있다.
+      loadThemeCollections().catch(() => {});
     });
-  }, [authLoading, hydrateCollectionCache, isLoggedIn, loadCollection, navigation, user?.id]);
+  }, [authLoading, hydrateCollectionCache, isLoggedIn, loadCollection, loadThemeCollections, navigation, user?.id]);
 
   useEffect(() => {
     let midnightTimer: ReturnType<typeof setTimeout> | null = null;
@@ -353,11 +384,11 @@ export function PassportPage() {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await loadCollection();
+      await Promise.all([loadCollection(), loadThemeCollections()]);
     } finally {
       setRefreshing(false);
     }
-  }, [loadCollection]);
+  }, [loadCollection, loadThemeCollections]);
 
   const syncLocalLikeState = useCallback(async (card: CollectionOverviewCard, shouldSave: boolean) => {
     const likes = await getLikesV2();
@@ -508,6 +539,17 @@ export function PassportPage() {
             <Text style={styles.summaryMetricLabel}>저장</Text>
           </View>
         </View>
+
+        <ThemeCollectionSection
+          sets={themeSets}
+          badges={themeBadges}
+          onPressSet={(setId) =>
+            (navigation.navigate as (route: string, params?: Record<string, string>) => void)(
+              '/passport/collections/:setId',
+              { setId },
+            )
+          }
+        />
 
         {!ownsCurrentData || (loading && openedCards.length === 0) ? (
           <View style={styles.stateCard}>
