@@ -32,7 +32,7 @@ function getHistoryMeta(item: TicketHistoryItem): HistoryMeta {
     return { label: '출석 체크', iconName: 'icon-calendar-mono', iconColor: BRONZE };
   }
   if (item.type === 'exchange') {
-    return { label: '토스포인트 교환', iconName: 'icon-star-mono', iconColor: BLUE };
+    return { label: '포인트 뽑기', iconName: 'icon-star-mono', iconColor: BLUE };
   }
   return { label: item.label, iconName: 'icon-star-mono', iconColor: item.amount >= 0 ? BRONZE : BLUE };
 }
@@ -85,7 +85,11 @@ export function TicketHistoryList({ items, loading, error = false }: TicketHisto
                   <Text style={styles.rowLabel} numberOfLines={1}>
                     {meta.label}
                   </Text>
-                  <Text style={styles.rowDate}>{formatHistoryDate(item.occurredAt)}</Text>
+                  <Text style={styles.rowDate}>
+                    {item.type === 'exchange' && item.paidAmount != null
+                      ? `${formatHistoryDate(item.occurredAt)} · ${item.paidAmount}원 지급`
+                      : formatHistoryDate(item.occurredAt)}
+                  </Text>
                 </View>
                 <Text style={[styles.amount, isPositive ? styles.amountPlus : styles.amountMinus]}>
                   {formatAmount(item.amount)}

@@ -16,6 +16,7 @@ import {
   DAILY_OPEN_LIMIT,
   DAILY_TICKET_LIMIT,
   drawExchangeAmount,
+  EXCHANGE_AMOUNT_TABLE,
 } from '../services/ticketGrant';
 
 const router = express.Router();
@@ -32,6 +33,14 @@ const DAILY_LIMIT = DAILY_TICKET_LIMIT;
 // cooldown 없음: 리워드 광고 자체가 자연 속도 제한이며 daily_limit으로 총량 방어
 // 이상 징후 발생 시 COOLDOWN_SECONDS = 5~10으로 재도입 가능
 const EXCHANGE_EXPIRES_HOURS = 24; // pending 만료 시간
+
+// 클라 정직 표기용 금액 분포 요약(스펙 §2.4·§7 — 평균·범위 중심, 과장 금지). 단일 소스는 추첨 테이블.
+const EXCHANGE_AMOUNT_STATS = (() => {
+  const amounts = EXCHANGE_AMOUNT_TABLE.map((entry) => entry.amount);
+  const totalWeight = EXCHANGE_AMOUNT_TABLE.reduce((sum, entry) => sum + entry.weight, 0);
+  const average = EXCHANGE_AMOUNT_TABLE.reduce((sum, entry) => sum + entry.amount * entry.weight, 0) / totalWeight;
+  return { min: Math.min(...amounts), max: Math.max(...amounts), average };
+})();
 
 const AD_EVENT_TYPES = new Set([
   'requested',
@@ -60,6 +69,7 @@ type TicketHistoryRow = {
   label: string;
   amount: number;
   occurred_at: Date;
+  paid_amount?: number | null;
 };
 
 // KST 오늘 날짜 (DATE 형식)
@@ -141,6 +151,7 @@ router.get('/config', requireAuth, (_req: Request, res: Response) => {
     ticketsPerExchange: TICKETS_PER_EXCHANGE,
     dailyLimit: DAILY_LIMIT,
     dailyOpenLimit: DAILY_OPEN_LIMIT,
+    exchangeAmount: EXCHANGE_AMOUNT_STATS,
   });
 });
 
@@ -433,11 +444,16 @@ router.post('/exchange/confirm', requireAuth, async (req: Request, res: Response
     if (ex.status === 'completed') {
       await client.query('ROLLBACK');
       const { rows: tc } = await client.query(
-        `SELECT ticket_count FROM user_tickets WHERE user_id = $1`,
+        `SELECT ticket_count, total_exchanged FROM user_tickets WHERE user_id = $1`,
         [userId]
       );
       console.log(`[Tickets] ✅ exchange already completed (idempotent): user=${userId} exchangeId=${exchangeId}`);
-      return res.json({ success: true, ticketCount: tc[0]?.ticket_count ?? 0, amount: ex.amount });
+      return res.json({
+        success: true,
+        ticketCount: tc[0]?.ticket_count ?? 0,
+        amount: ex.amount,
+        totalExchanged: tc[0]?.total_exchanged ?? 0,
+      });
     }
 
     // 만료 체크
@@ -476,16 +492,21 @@ router.post('/exchange/confirm', requireAuth, async (req: Request, res: Response
       [grantResultKey ?? null, exchangeId]
     );
 
-    // 최종 티켓 수 조회
+    // 최종 티켓 수 조회 (total_exchanged = 이번이 몇 번째 뽑기인지 — 영수증 DRAW Nº)
     const { rows: finalTicket } = await client.query(
-      `SELECT ticket_count FROM user_tickets WHERE user_id = $1`,
+      `SELECT ticket_count, total_exchanged FROM user_tickets WHERE user_id = $1`,
       [userId]
     );
 
     await client.query('COMMIT');
 
     console.log(`[Tickets] 💰 exchange confirmed: user=${userId} exchangeId=${exchangeId} amount=${ex.amount}`);
-    return res.json({ success: true, ticketCount: finalTicket[0]?.ticket_count ?? 0, amount: ex.amount });
+    return res.json({
+      success: true,
+      ticketCount: finalTicket[0]?.ticket_count ?? 0,
+      amount: ex.amount,
+      totalExchanged: finalTicket[0]?.total_exchanged ?? 0,
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[Tickets] exchange confirm error:', err);
@@ -536,7 +557,8 @@ router.get('/history', requireAuth, async (req: Request, res: Response) => {
     ),
     queryHistorySource(
       'exchange',
-      `SELECT 'exchange' AS type, '포인트 교환' AS label, $2::integer AS amount, confirmed_at AS occurred_at
+      `SELECT 'exchange' AS type, '포인트 뽑기' AS label, $2::integer AS amount, confirmed_at AS occurred_at,
+              amount AS paid_amount
        FROM user_ticket_exchanges
        WHERE user_id = $1 AND status = 'completed' AND confirmed_at >= NOW() - INTERVAL '3 months'`,
       [userId, -TICKETS_PER_EXCHANGE]
@@ -552,6 +574,8 @@ router.get('/history', requireAuth, async (req: Request, res: Response) => {
       label: row.label,
       amount: row.amount,
       occurredAt: row.occurred_at,
+      // 교환 행에만 존재 — 실지급 원화(연출·통계용, 비권위 표기)
+      ...(row.paid_amount != null ? { paidAmount: Number(row.paid_amount) } : {}),
     })),
   });
 });

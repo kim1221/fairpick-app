@@ -1,12 +1,16 @@
 /**
- * 포인트(돈) 화면 상단 잔액 카드 + 토스포인트 교환 CTA.
- * 시안(culturecard-flow-v1 ③): 네이비 잔액 카드("내가 모은 문화 티켓 N") +
- * "10티켓 = 토스포인트 교환 · 지금 M번 바꿀 수 있어요" + 토스블루 CTA + 안내 문구.
+ * 포인트(돈) 화면 상단 잔액 카드 + "포인트 뽑기" CTA (스펙 §2.4·§6 리브랜딩).
+ * 시안(culturecard-flow-v1 ③ 레이아웃 + collection-sets-v1 ③ 뽑기 프레이밍).
+ * 금액 표기는 평균·범위 중심 — "최대 OOO원!" 과장 금지(스펙 §7 다크패턴 체크).
  *
  * 교환 로직(exchangeTickets 2-step)은 상위(points.tsx)가 소유하고, 여기선 표시/트리거만.
  */
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  EXCHANGE_AMOUNT_RANGE_FALLBACK,
+  type ExchangeAmountRange,
+} from '../../services/exchangeAmountRange';
 
 const BLUE = '#3182F6';
 const ON_BG_MUTED = '#716D66';
@@ -16,6 +20,7 @@ export interface TicketBalanceVoucherProps {
   ticketsPerExchange: number;
   exchanging: boolean;
   onExchange: () => void;
+  amountRange?: ExchangeAmountRange;
 }
 
 export function TicketBalanceVoucher({
@@ -23,6 +28,7 @@ export function TicketBalanceVoucher({
   ticketsPerExchange,
   exchanging,
   onExchange,
+  amountRange = EXCHANGE_AMOUNT_RANGE_FALLBACK,
 }: TicketBalanceVoucherProps) {
   const per = ticketsPerExchange > 0 ? ticketsPerExchange : 10;
   const exchangeableTimes = Math.floor(ticketCount / per);
@@ -31,13 +37,13 @@ export function TicketBalanceVoucher({
   const cycleTickets = ticketCount % per || (canExchange ? per : 0);
 
   const helpLine = canExchange
-    ? `${per}티켓 = 토스포인트 교환 · 지금 ${exchangeableTimes}번 바꿀 수 있어요`
-    : `${per}티켓 = 토스포인트 교환 · ${remainingTickets}장만 더 모으면 돼요`;
+    ? `${per}티켓 = 포인트 뽑기 1번 · 지금 ${exchangeableTimes}번 뽑을 수 있어요`
+    : `${per}티켓 = 포인트 뽑기 1번 · ${remainingTickets}장만 더 모으면 돼요`;
 
   const buttonLabel = exchanging
-    ? '바꾸고 있어요'
+    ? '뽑는 중이에요'
     : canExchange
-      ? '토스포인트로 바꾸기'
+      ? '포인트 뽑기'
       : `${remainingTickets}장 더 모으기`;
 
   return (
@@ -53,7 +59,7 @@ export function TicketBalanceVoucher({
         <View style={styles.balanceHeader}>
           <Text style={styles.balanceLabel}>내 문화 티켓</Text>
           <View style={styles.exchangeBadge}>
-            <Text style={styles.exchangeBadgeText}>{exchangeableTimes}회 교환 가능</Text>
+            <Text style={styles.exchangeBadgeText}>{exchangeableTimes}번 뽑기 가능</Text>
           </View>
         </View>
         <View style={styles.balanceRow}>
@@ -61,7 +67,7 @@ export function TicketBalanceVoucher({
           <Text style={styles.balanceUnit}>티켓</Text>
         </View>
         <View style={styles.nextRewardRow}>
-          <Text style={styles.nextRewardText}>{canExchange ? '지금 바로 교환할 수 있어요' : `다음 포인트까지 ${remainingTickets}티켓`}</Text>
+          <Text style={styles.nextRewardText}>{canExchange ? '지금 바로 뽑을 수 있어요' : `다음 뽑기까지 ${remainingTickets}티켓`}</Text>
           <Text style={styles.nextRewardCount}>{Math.min(cycleTickets, per)} / {per}</Text>
         </View>
         <View style={styles.ticketDots}>
@@ -88,7 +94,10 @@ export function TicketBalanceVoucher({
       </Pressable>
 
       <Text style={styles.exchangeInfo}>
-        티켓 {per}장이 <Text style={styles.exchangeStrong}>토스포인트</Text>로 지급돼요 · 실제 돈처럼 써요
+        광고 {per}번 = 티켓 {per}장 = <Text style={styles.exchangeStrong}>포인트 뽑기</Text> 1번
+      </Text>
+      <Text style={styles.exchangeInfoSub}>
+        매번 {amountRange.min}원~{amountRange.max}원 사이에서 뽑혀요 · 평균 {amountRange.average}원 · 토스포인트로 지급돼요
       </Text>
     </View>
   );
@@ -269,6 +278,14 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     textAlign: 'center',
     fontWeight: '700',
+  },
+  exchangeInfoSub: {
+    marginTop: 4,
+    color: ON_BG_MUTED,
+    fontSize: 11.5,
+    lineHeight: 17,
+    textAlign: 'center',
+    fontWeight: '600',
   },
   exchangeStrong: {
     color: BLUE,

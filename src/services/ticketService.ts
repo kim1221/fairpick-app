@@ -7,6 +7,9 @@
 
 import http from '../lib/http';
 import { grantPromotionReward } from '@apps-in-toss/framework';
+import type { ExchangeAmountRange } from './exchangeAmountRange';
+
+export { EXCHANGE_AMOUNT_RANGE_FALLBACK, type ExchangeAmountRange } from './exchangeAmountRange';
 
 export const TICKETS_PER_EXCHANGE = 10;
 
@@ -22,6 +25,8 @@ export type TicketHistoryItem = {
   label: string;
   amount: number;
   occurredAt: string;
+  /** 교환(포인트 뽑기) 행에만 — 실지급 원화. 구버전 백엔드 응답엔 없다. */
+  paidAmount?: number;
 };
 
 export type TicketHistoryResponse = {
@@ -35,6 +40,8 @@ export interface TicketConfig {
   ticketsPerExchange: number;
   dailyLimit: number;
   dailyOpenLimit?: number;
+  /** 포인트 뽑기 금액 분포 요약(정직 표기용) — 구버전 백엔드엔 없다. */
+  exchangeAmount?: ExchangeAmountRange;
 }
 
 export type RewardAdEventType =
@@ -139,7 +146,13 @@ export async function earnTickets(eventId: string, adAttemptId?: string): Promis
  *
  * grantPromotionReward() 실패 시 confirm 미호출 → 티켓 미차감 보장
  */
-export async function exchangeTickets(): Promise<{ success: boolean; ticketCount: number; amount: number }> {
+export async function exchangeTickets(): Promise<{
+  success: boolean;
+  ticketCount: number;
+  amount: number;
+  /** 누적 뽑기 횟수(영수증 DRAW Nº) — 구버전 백엔드 응답엔 없다. */
+  totalExchanged?: number;
+}> {
   // 교환 직전 서버에서 promotionCode 수신 (하드코딩 없음)
   const { promotionCode } = await getTicketConfig();
 
@@ -170,7 +183,12 @@ export async function exchangeTickets(): Promise<{ success: boolean; ticketCount
     : undefined;
 
   // 3. 지급 성공 확인 후 confirm (티켓 차감 확정)
-  const { data } = await http.post<{ success: boolean; ticketCount: number; amount?: number }>('/api/tickets/exchange/confirm', {
+  const { data } = await http.post<{
+    success: boolean;
+    ticketCount: number;
+    amount?: number;
+    totalExchanged?: number;
+  }>('/api/tickets/exchange/confirm', {
     exchangeId,
     grantResultKey,
   });

@@ -2171,6 +2171,148 @@ test('GET /api/tickets/history keeps balance and available history when legacy s
   ]);
 });
 
+// ── 포인트 뽑기 영수증 연출 계약 (스펙 §2.4·§6 — 실지급액·DRAW Nº·정직 표기 범위) ──
+
+test('GET /api/tickets/history reports the paid won amount for point draw rows', async () => {
+  pool.query = async (sql, params) => {
+    const text = String(sql);
+    if (text.includes('INSERT INTO user_tickets')) {
+      return { rows: [{ ticket_count: 3, total_earned: 23, total_exchanged: 2 }], rowCount: 1 };
+    }
+    if (text.includes('FROM user_ticket_exchanges')) {
+      assert.match(text, /'포인트 뽑기' AS label/);
+      assert.match(text, /amount AS paid_amount/);
+      assert.equal(params[1], -10);
+      return {
+        rows: [
+          {
+            type: 'exchange',
+            label: '포인트 뽑기',
+            amount: -10,
+            occurred_at: new Date('2026-07-21T05:00:00.000Z'),
+            paid_amount: 50,
+          },
+        ],
+        rowCount: 1,
+      };
+    }
+    if (
+      text.includes('FROM user_ticket_earn_log') ||
+      text.includes('FROM user_attendance_log') ||
+      text.includes('FROM user_weekly_bonus_log') ||
+      text.includes('FROM user_visit_log')
+    ) {
+      return { rows: [], rowCount: 0 };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  };
+
+  const { status, body } = await request(makeApp(ticketsRouter), 'GET', '/history');
+
+  assert.equal(status, 200);
+  assert.deepEqual(body.history, [
+    {
+      type: 'exchange',
+      label: '포인트 뽑기',
+      amount: -10,
+      occurredAt: new Date('2026-07-21T05:00:00.000Z'),
+      paidAmount: 50,
+    },
+  ]);
+});
+
+test('GET /api/tickets/config exposes the honest exchange amount range from the draw table', async () => {
+  const previousPromotionCode = process.env.PROMOTION_CODE;
+  process.env.PROMOTION_CODE = 'PROMO_UNIT_TEST';
+  try {
+    const { status, body } = await request(makeApp(ticketsRouter), 'GET', '/config');
+    assert.equal(status, 200);
+    assert.deepEqual(body.exchangeAmount, { min: 10, max: 500, average: 20 });
+  } finally {
+    if (previousPromotionCode === undefined) delete process.env.PROMOTION_CODE;
+    else process.env.PROMOTION_CODE = previousPromotionCode;
+  }
+});
+
+test('POST /api/tickets/exchange/confirm deducts before completing and returns amount + draw number', async () => {
+  const events = [];
+  const client = {
+    async query(sql) {
+      const text = String(sql);
+      if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') {
+        events.push(text);
+        return { rows: [], rowCount: 0 };
+      }
+      if (text.includes('FROM user_ticket_exchanges') && text.includes('FOR UPDATE')) {
+        events.push('lock');
+        return {
+          rows: [{
+            id: 'ex-1',
+            user_id: userId,
+            status: 'pending',
+            expires_at: new Date(Date.now() + 3_600_000),
+            amount: 50,
+          }],
+          rowCount: 1,
+        };
+      }
+      if (text.includes('UPDATE user_ticket_exchanges')) {
+        events.push('complete');
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.includes('UPDATE user_tickets')) {
+        events.push('deduct');
+        assert.match(text, /total_exchanged\s+= total_exchanged \+ 1/);
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.includes('SELECT ticket_count, total_exchanged')) {
+        events.push('final');
+        return { rows: [{ ticket_count: 2, total_exchanged: 3 }], rowCount: 1 };
+      }
+      throw new Error(`Unexpected confirm query: ${text}`);
+    },
+    release() {},
+  };
+  pool.connect = async () => client;
+
+  const { status, body } = await request(makeApp(ticketsRouter), 'POST', '/exchange/confirm', {
+    exchangeId: 'ex-1',
+  });
+
+  assert.equal(status, 200);
+  assert.deepEqual(body, { success: true, ticketCount: 2, amount: 50, totalExchanged: 3 });
+  // fail-closed 순서: 차감 성공 확인 후에만 completed 전환
+  assert.deepEqual(events, ['BEGIN', 'lock', 'deduct', 'complete', 'final', 'COMMIT']);
+});
+
+test('POST /api/tickets/exchange/confirm stays idempotent and echoes the drawn amount', async () => {
+  const client = {
+    async query(sql) {
+      const text = String(sql);
+      if (text === 'BEGIN' || text === 'ROLLBACK') return { rows: [], rowCount: 0 };
+      if (text.includes('FOR UPDATE')) {
+        return {
+          rows: [{ id: 'ex-2', user_id: userId, status: 'completed', expires_at: new Date(), amount: 100 }],
+          rowCount: 1,
+        };
+      }
+      if (text.includes('SELECT ticket_count, total_exchanged')) {
+        return { rows: [{ ticket_count: 7, total_exchanged: 4 }], rowCount: 1 };
+      }
+      throw new Error(`Unexpected idempotent confirm query: ${text}`);
+    },
+    release() {},
+  };
+  pool.connect = async () => client;
+
+  const { status, body } = await request(makeApp(ticketsRouter), 'POST', '/exchange/confirm', {
+    exchangeId: 'ex-2',
+  });
+
+  assert.equal(status, 200);
+  assert.deepEqual(body, { success: true, ticketCount: 7, amount: 100, totalExchanged: 4 });
+});
+
 // ── 경제 상수·교환 금액 추첨 (스펙 2026-07-19 §2.3·§2.4) ──────────────────────
 
 const {

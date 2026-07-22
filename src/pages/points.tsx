@@ -3,15 +3,19 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Loader, useDialog } from '@toss/tds-react-native';
 import { BottomTabBar } from '../components/BottomTabBar';
+import { PointDrawReceipt } from '../components/passport/PointDrawReceipt';
 import { TicketBalanceVoucher } from '../components/passport/TicketBalanceVoucher';
 import { TicketHistoryList } from '../components/passport/TicketHistoryList';
 import { useAuth } from '../hooks/useAuth';
 import {
+  EXCHANGE_AMOUNT_RANGE_FALLBACK,
   exchangeTickets,
+  getTicketConfig,
   getTicketHistory,
   getTickets,
   subscribeTicketCount,
   TICKETS_PER_EXCHANGE,
+  type ExchangeAmountRange,
   type TicketHistoryResponse,
   type TicketInfo,
 } from '../services/ticketService';
@@ -153,6 +157,25 @@ function PointsPage() {
   const [lastKnownTicketCount, setLastKnownTicketCount] = useState<number | null>(
     () => cachedDashboard?.lastKnownTicketCount ?? null
   );
+  // 뽑기 결과 영수증(시안 collection-sets-v1 ③). 금액·회차는 서버 응답값 그대로(비권위 표시 전용).
+  const [drawResult, setDrawResult] = useState<{
+    amount: number;
+    drawNo: number | null;
+    drawnAt: Date;
+  } | null>(null);
+  const [amountRange, setAmountRange] = useState<ExchangeAmountRange>(EXCHANGE_AMOUNT_RANGE_FALLBACK);
+
+  useEffect(() => {
+    let mounted = true;
+    getTicketConfig()
+      .then((config) => {
+        if (mounted && config.exchangeAmount) setAmountRange(config.exchangeAmount);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const commitDashboard = useCallback((
     cacheKey: string,
@@ -282,9 +305,10 @@ function PointsPage() {
         }));
       }
 
-      await dialog.openAlert({
-        title: '토스포인트로 바꿨어요',
-        description: '티켓 10장을 확인하고 교환을 완료했어요.',
+      setDrawResult({
+        amount: result.amount,
+        drawNo: result.totalExchanged ?? null,
+        drawnAt: new Date(),
       });
     } catch {
       await dialog.openAlert({
@@ -321,7 +345,7 @@ function PointsPage() {
 
         <Text style={styles.navEyebrow}>CULTURE CARD REWARDS</Text>
         <Text style={styles.navTitle}>문화 리워드</Text>
-        <Text style={styles.navSubtitle}>카드를 열어 모은 티켓을 토스포인트로 바꿔요.</Text>
+        <Text style={styles.navSubtitle}>카드를 열어 모은 티켓 {ticketsPerExchange}장으로 포인트를 뽑아요.</Text>
 
         {showInitialLoading ? (
           <View style={styles.loadingBox}>
@@ -342,12 +366,25 @@ function PointsPage() {
               ticketsPerExchange={ticketsPerExchange}
               exchanging={exchanging}
               onExchange={handleExchange}
+              amountRange={amountRange}
             />
             <TicketHistoryList items={historyItems} loading={loading} error={historyLoadError} />
           </>
         )}
       </ScrollView>
       <BottomTabBar currentTab="points" />
+      {drawResult ? (
+        <PointDrawReceipt
+          amount={drawResult.amount}
+          drawNo={drawResult.drawNo}
+          usedTickets={ticketsPerExchange}
+          ticketCount={ticketCount}
+          ticketsPerExchange={ticketsPerExchange}
+          drawnAt={drawResult.drawnAt}
+          amountRange={amountRange}
+          onClose={() => setDrawResult(null)}
+        />
+      ) : null}
     </View>
   );
 }
