@@ -32,7 +32,6 @@ import { useLike } from '../../src/hooks/useLike';
 import { LikesProvider } from '../../src/contexts/LikesContext';
 import { useAuth } from '../../src/hooks/useAuth';
 import http from '../../src/lib/http';
-import { getVisitedIds, markVisited, unmarkVisited } from '../../src/services/visitService';
 
 type EventDetailParams = {
   id?: string;
@@ -243,13 +242,8 @@ function EventDetailPage() {
   const [adRendered, setAdRendered] = useState(false);
   const [adFailed, setAdFailed] = useState(false);
 
-  // 티켓 적립은 홈(오늘의 카드 열기)으로 일원화됐다 — 상세페이지 리워드 광고 경로는 제거(2026-07-23).
-  const [loginPending, setLoginPending] = useState(false);
+  // 티켓 적립은 홈으로, 방문 표시는 컬렉션 탭으로 일원화 — 상세는 저장(useLike)만 다룬다(2026-07-23).
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
-  // 다녀왔어요(자기신고) — 위치 인증·보상 없음
-  const [visited, setVisited] = useState(false);
-  const [visitPending, setVisitPending] = useState(false);
-  const [visitNoticeShown, setVisitNoticeShown] = useState(false);
   // event 로드 후 snapshot 추출 → useLike에 전달 (찜 시 로컬 snapshot 저장)
   const eventSnapshot = React.useMemo(() => event ? {
     title: event.title,
@@ -262,7 +256,7 @@ function EventDetailPage() {
     endAt: event.endAt,
   } : undefined, [event]);
   const { isLiked, toggle: toggleLikeWithSync } = useLike({ eventId: params?.id, snapshot: eventSnapshot });
-  const { isLoggedIn, login } = useAuth();
+  const { isLoggedIn } = useAuth();
   const dialog = useDialog();
 
   useEffect(() => {
@@ -362,57 +356,6 @@ function EventDetailPage() {
       mounted = false;
     };
   }, [params?.id]);
-
-  // 다녀왔어요 초기 상태(도장 여부)
-  useEffect(() => {
-    if (!isLoggedIn || !event?.id) return;
-    const eventId = event.id;
-    let mounted = true;
-    getVisitedIds()
-      .then((ids) => {
-        if (mounted) setVisited(ids.has(eventId));
-      })
-      .catch(() => {});
-    return () => {
-      mounted = false;
-    };
-  }, [isLoggedIn, event?.id]);
-
-  // 다녀왔어요 토글(낙관적, 위치 없음, 보상 없음)
-  const handleToggleVisited = React.useCallback(async () => {
-    if (!event?.id || visitPending) return;
-
-    if (!isLoggedIn) {
-      if (loginPending) return;
-      setLoginPending(true);
-      login().catch(() => {}).finally(() => setLoginPending(false));
-      return;
-    }
-
-    const eventId = event.id;
-    const wasVisited = visited;
-    setVisitPending(true);
-    setVisited(!wasVisited); // 낙관적 토글
-
-    try {
-      if (wasVisited) {
-        await unmarkVisited(eventId);
-      } else {
-        await markVisited(eventId);
-        if (!visitNoticeShown) {
-          setVisitNoticeShown(true);
-        }
-      }
-    } catch {
-      setVisited(wasVisited); // 롤백
-      await dialog.openAlert({
-        title: wasVisited ? '도장을 취소하지 못했어요' : '도장을 남기지 못했어요',
-        description: '잠시 후 다시 시도해 주세요.',
-      });
-    } finally {
-      setVisitPending(false);
-    }
-  }, [event?.id, visited, visitPending, isLoggedIn, loginPending, login, visitNoticeShown, dialog]);
 
   // dwell 시간 측정: 이벤트 데이터가 로드된 시점부터 페이지 이탈까지
   // 5초 미만은 노이즈로 간주하여 기록하지 않음
@@ -773,29 +716,21 @@ function EventDetailPage() {
             );
           })()}
 
-          {/* 다녀왔어요 자기신고 (위치 인증·보상 없음) */}
-          <View style={styles.visitSection}>
+          {/* 저장하기 — 히어로 하트와 동기화(useLike). 여권/다녀왔어요 대형 버튼은 제거(2026-07-23,
+               방문 표시는 컬렉션 탭 카드별 '방문' 버튼으로 일원화 — 큐레이션 재료라 개념 자체는 유지). */}
+          <View style={styles.saveSection}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={visited ? '다녀옴 취소' : '다녀왔어요'}
-              onPress={handleToggleVisited}
-              disabled={visitPending || loginPending}
-              style={[
-                styles.visitBtn,
-                visited ? styles.visitBtnDone : styles.visitBtnIdle,
-                (visitPending || loginPending) && { opacity: 0.5 },
-              ]}
+              accessibilityLabel={isLiked ? '저장 해제하기' : '저장하기'}
+              onPress={handleToggleLike}
+              style={[styles.saveBtn, isLiked ? styles.saveBtnDone : styles.saveBtnIdle]}
             >
-              <Text style={[styles.visitBtnText, visited ? styles.visitBtnDoneText : styles.visitBtnIdleText]}>
-                {!isLoggedIn
-                  ? '로그인하고 다녀왔어요'
-                  : visited
-                    ? '다녀옴 ✓'
-                    : '◉ 다녀왔어요'}
+              <Text style={[styles.saveBtnText, isLiked ? styles.saveBtnDoneText : styles.saveBtnIdleText]}>
+                {isLiked ? '저장됨 ✓' : '☆ 저장하기'}
               </Text>
             </Pressable>
-            <Text style={styles.visitNote}>
-              ‘다녀왔어요’를 누르면 문화 여권에 도장이 찍혀요. 위치 인증 없이, 추억으로 남겨두는 거예요. (보상 아님)
+            <Text style={styles.saveNote}>
+              저장한 카드는 컬렉션 탭의 ‘저장해 둔 카드’에서 다시 볼 수 있어요
             </Text>
           </View>
 
@@ -1494,37 +1429,37 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     elevation: 10,
     gap: 8,
   },
-  visitSection: {
+  saveSection: {
     marginHorizontal: 20,
     marginTop: 20,
     gap: 12,
   },
-  visitBtn: {
+  saveBtn: {
     minHeight: 50,
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
   },
-  visitBtnIdle: {
+  saveBtnIdle: {
     backgroundColor: '#CBA15E',
     borderColor: '#CBA15E',
   },
-  visitBtnDone: {
+  saveBtnDone: {
     backgroundColor: 'rgba(168,50,74,0.08)',
     borderColor: 'rgba(168,50,74,0.30)',
   },
-  visitBtnText: {
+  saveBtnText: {
     fontSize: 15,
     fontWeight: '900',
   },
-  visitBtnIdleText: {
+  saveBtnIdleText: {
     color: '#1E1608',
   },
-  visitBtnDoneText: {
+  saveBtnDoneText: {
     color: '#A8324A',
   },
-  visitNote: {
+  saveNote: {
     fontSize: 12,
     lineHeight: 18,
     fontWeight: '600',
