@@ -16,7 +16,8 @@ import {
 } from 'react-native';
 import { Txt, Badge, Post, BottomSheet, Loader, Button, Icon, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
-import { InlineAd } from '@apps-in-toss/framework';
+import { InlineAdSlot } from '../../src/components/ads/InlineAdSlot';
+import { AD_PLACEMENTS } from '../../src/config/adPlacements';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
 type EventStyles = ReturnType<typeof createStyles>;
@@ -240,8 +241,6 @@ function EventDetailPage() {
   const [event, setEvent] = useState<EventCardData | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [activeSheet, setActiveSheet] = useState<'price' | 'hours' | 'overview' | null>(null);
-  const [adRendered, setAdRendered] = useState(false);
-  const [adFailed, setAdFailed] = useState(false);
 
   // 티켓 적립은 홈 일원화. 상세는 저장(useLike) + 방문 표시(컴팩트 토글)만 다룬다(2026-07-23).
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
@@ -822,33 +821,8 @@ function EventDetailPage() {
 
       </ScrollView>
 
-      {/* 배너 광고 — 하단 고정(2026-07-23, 스크롤 중간 배치에서 이동). 예매 CTA가 있으면 그 위.
-           Android: height=0이면 native ad SDK가 초기화 안 됨 → 항상 96 고정.
-           iOS: 렌더 전 height=0(공간 차지 없음), 실패 시 컨테이너 제거. */}
-      {!adFailed && (
-        <View
-          collapsable={false}
-          style={[
-            styles.adBannerContainer,
-            Platform.OS === 'android'
-              ? {
-                  height: 96,
-                  // opacity 사용 금지: Android SurfaceView/WebView 기반
-                  // native ad SDK는 부모 opacity < 1 시 렌더링 실패
-                  overflow: 'visible',
-                }
-              : { height: adRendered ? 96 : 0 },
-          ]}
-        >
-          <InlineAd
-            adGroupId="ait.v2.live.6526c6e693454a28"
-            impressFallbackOnMount={true}
-            onAdRendered={() => setAdRendered(true)}
-            onAdFailedToRender={() => setAdFailed(true)}
-            onNoFill={() => setAdFailed(true)}
-          />
-        </View>
-      )}
+      {/* 배너 광고 — 하단 고정(예매 CTA가 있으면 그 위). iOS·Android 공통 노출은 슬롯이 보장. */}
+      <InlineAdSlot adGroupId={AD_PLACEMENTS.eventDetailBottom} />
 
       {/* 하단 CTA — 예매 버튼만 (ScrollView 아래 일반 View로 배치) */}
       {primaryCTALink && (
@@ -1390,9 +1364,6 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     zIndex: 10,
     elevation: 10,
     backgroundColor: a.background,
-  },
-  adBannerContainer: {
-    width: '100%',
   },
   ctaHint: {
     fontSize: 11,
