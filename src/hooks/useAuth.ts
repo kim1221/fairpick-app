@@ -27,7 +27,8 @@ import { getLikesV2, getRecentV2 } from '../utils/storage';
 import { toServerLikeItem, toServerRecentItem } from '../types/serverSync';
 
 interface AuthState {
-  isLoggedIn: boolean;
+  isLoggedIn: boolean;  // 세션 있음(익명 또는 linked). 카드 구경·열기·티켓 적립 가능.
+  isLinked: boolean;    // 토스 연결됨. 환전 가능(익명이면 false).
   user: StoredUser | null;
   isLoading: boolean;
 }
@@ -35,6 +36,7 @@ interface AuthState {
 const AUTH_REVALIDATE_MS = 5 * 60 * 1000;
 const INITIAL_AUTH_STATE: AuthState = {
   isLoggedIn: false,
+  isLinked: false,
   user: null,
   isLoading: true,
 };
@@ -51,20 +53,33 @@ function publishAuthState(next: AuthState): AuthState {
   return next;
 }
 
+// 익명 세션 부트스트랩 — 로그인 없이 서버 상태(카드·티켓)에 접근할 수 있게 익명 JWT를 받는다.
+async function bootstrapAnonymousSession(): Promise<AuthState> {
+  try {
+    const anonymousId = await getOrCreateAnonymousId();
+    const { data } = await http.post<{ token: string; user: StoredUser }>('/auth/anonymous', { anonymousId });
+    await Promise.all([setToken(data.token), setStoredUser(data.user)]);
+    return { isLoggedIn: true, isLinked: false, user: data.user, isLoading: false };
+  } catch {
+    // 부트스트랩 실패(오프라인 등) → 세션 없음. 다음 마운트에서 재시도한다.
+    return { isLoggedIn: false, isLinked: false, user: null, isLoading: false };
+  }
+}
+
 async function restoreAuthState(): Promise<AuthState> {
   const [token, user] = await Promise.all([getToken(), getStoredUser()]);
-  if (!token || !user) {
-    return { isLoggedIn: false, user: null, isLoading: false };
+  if (token && user) {
+    try {
+      // /auth/session은 익명·linked 공통(토스 토큰 요구 안 함).
+      const { data } = await http.get<{ id: string; userKey: number | null; anonymous: boolean }>('/auth/session');
+      const freshUser: StoredUser = { ...user, id: data.id, userKey: data.userKey ?? null };
+      await setStoredUser(freshUser);
+      return { isLoggedIn: true, isLinked: !data.anonymous, user: freshUser, isLoading: false };
+    } catch {
+      // 토큰 무효(만료 등) → http 인터셉터가 세션을 이미 지웠다. 익명으로 새로 부트스트랩.
+    }
   }
-
-  try {
-    const { data } = await http.get<{ id: string; userKey: number; name?: string | null }>('/auth/me');
-    const freshUser: StoredUser = { ...user, name: data.name ?? null };
-    await setStoredUser(freshUser);
-    return { isLoggedIn: true, user: freshUser, isLoading: false };
-  } catch {
-    return { isLoggedIn: false, user: null, isLoading: false };
-  }
+  return bootstrapAnonymousSession();
 }
 
 function ensureAuthState(force = false): Promise<AuthState> {
@@ -105,29 +120,28 @@ export function useAuth() {
     };
   }, []);
 
-  // 토스 로그인
+  // 토스 로그인 (첫 환전 게이트에서 호출) — 익명 데이터는 서버 reconcileLogin이 계정으로 화해.
   const login = useCallback(async () => {
     try {
       // 1. appLogin() → authorizationCode 획득 (클라이언트 → 토스)
       const { authorizationCode, referrer } = await appLogin();
 
-      // 2. 백엔드에서 토큰 교환 → 우리 JWT 발급
+      // 2. 익명 세션 데이터를 계정으로 이전하도록 anonymousId 함께 전달(서버가 promote/merge).
+      const anonymousId = await getOrCreateAnonymousId().catch(() => undefined);
+
+      // 3. 백엔드에서 토큰 교환 + 화해 → 우리 JWT 발급
       const { data } = await http.post<{ token: string; user: StoredUser }>('/auth/login', {
         authorizationCode,
         referrer,
+        anonymousId,
       });
 
-      // 3. 토큰 + 유저 정보 저장
+      // 4. 토큰 + 유저 정보 저장
       await Promise.all([setToken(data.token), setStoredUser(data.user)]);
 
       authRevision += 1;
       lastAuthValidationAt = Date.now();
-      publishAuthState({ isLoggedIn: true, user: data.user, isLoading: false });
-
-      // 4. 익명 행동 이력 → 로그인 계정으로 이전 (백그라운드)
-      linkAnonymousToLogin(data.user.userKey).catch((e) => {
-        if (__DEV__) console.warn('[useAuth][link-anonymous] 실패 (무시):', e?.message);
-      });
+      publishAuthState({ isLoggedIn: true, isLinked: true, user: data.user, isLoading: false });
 
       // 5. 로컬 데이터 서버 마이그레이션 (백그라운드, 실패해도 무시)
       migrateLocalDataToServer().catch((e) => {
@@ -135,11 +149,11 @@ export function useAuth() {
       });
     } catch (err) {
       if (__DEV__) console.error('[useAuth][login]', err);
-      throw err; // 호출부에서 에러 처리
+      throw err; // 호출부에서 에러 처리(토스트)
     }
   }, []);
 
-  // 로그아웃
+  // 로그아웃 — 토스 연결 해제 후 익명 세션으로 되돌린다(계속 구경 가능).
   const logout = useCallback(async () => {
     authRevision += 1;
     try {
@@ -151,28 +165,20 @@ export function useAuth() {
       }
     } finally {
       await Promise.all([clearToken(), clearStoredUser()]);
+      const anon = await bootstrapAnonymousSession();
       lastAuthValidationAt = Date.now();
-      publishAuthState({ isLoggedIn: false, user: null, isLoading: false });
+      publishAuthState(anon);
     }
   }, []);
 
   return {
     isLoggedIn: state.isLoggedIn,
+    isLinked: state.isLinked,
     user: state.user,
     isLoading: state.isLoading,
     login,
     logout,
   };
-}
-
-// ─── 익명 → 로그인 계정 이력 이전 ────────────────────────────────────────────
-// 로그인 직후 익명 ID로 쌓인 행동 이력(user_events, 취향 점수)을
-// 로그인 계정(toss_user_key)으로 이전해요.
-
-async function linkAnonymousToLogin(tossUserKey: number): Promise<void> {
-  const anonymousId = await getOrCreateAnonymousId();
-  await http.post('/api/user-events/link-anonymous', { anonymousId, tossUserKey });
-  if (__DEV__) console.log('[useAuth][link-anonymous] 완료:', { anonymousId, tossUserKey });
 }
 
 // ─── 로컬 → 서버 마이그레이션 ──────────────────────────────────────────────

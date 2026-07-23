@@ -3,8 +3,9 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config';
 
 export interface AuthPayload {
-  userId: string;   // users.id (UUID)
-  userKey: number;  // users.toss_user_key (bigint)
+  userId: string;          // users.id (UUID)
+  userKey: number | null;  // users.toss_user_key (bigint). null = 익명 세션(토스 미연결)
+  anon?: boolean;          // true = 익명 세션. 환전 등 linked 필수 경로에서 게이트.
 }
 
 // Express Request에 user 타입 추가
@@ -30,7 +31,8 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   const token = header.slice(7);
   try {
     const payload = jwt.verify(token, config.jwtSecret) as AuthPayload;
-    req.user = { userId: payload.userId, userKey: payload.userKey };
+    // 구버전 linked 토큰은 anon 필드가 없다(userKey가 숫자면 linked). 익명 토큰만 userKey=null.
+    req.user = { userId: payload.userId, userKey: payload.userKey ?? null, anon: payload.anon };
     next();
   } catch (err) {
     const expired = err instanceof jwt.TokenExpiredError;

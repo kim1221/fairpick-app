@@ -24,13 +24,19 @@ function makeApp(router) {
   return router;
 }
 
-async function request(router, method, path, body) {
+function anonAuthHeaders() {
+  const token = jwt.sign({ userId, userKey: null, anon: true }, config.jwtSecret);
+  return { authorization: `Bearer ${token}` };
+}
+
+async function request(router, method, path, body, headersOverride) {
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(path, 'http://unit.test');
     const req = {
       headers: {
         ...authHeaders(),
         ...(body ? { 'content-type': 'application/json' } : {}),
+        ...(headersOverride ?? {}),
       },
       method,
       url: `${parsedUrl.pathname}${parsedUrl.search}`,
@@ -2365,6 +2371,132 @@ test('POST /api/tickets/exchange/confirm stays idempotent and echoes the drawn a
 
   assert.equal(status, 200);
   assert.deepEqual(body, { success: true, ticketCount: 7, amount: 100, totalExchanged: 4 });
+});
+
+// ── 첫 환전 로그인 게이트 (익명 세션, 2026-07-23) ────────────────────────────
+
+test('POST /api/tickets/exchange rejects an anonymous session with TOSS_LOGIN_REQUIRED', async () => {
+  let touchedDb = false;
+  pool.query = async () => {
+    touchedDb = true;
+    return { rows: [], rowCount: 0 };
+  };
+
+  const previousPromotionCode = process.env.PROMOTION_CODE;
+  process.env.PROMOTION_CODE = 'PROMO_UNIT_TEST';
+  try {
+    const { status, body } = await request(
+      makeApp(ticketsRouter),
+      'POST',
+      '/exchange',
+      undefined,
+      anonAuthHeaders(),
+    );
+    assert.equal(status, 403);
+    assert.equal(body.error, 'TOSS_LOGIN_REQUIRED');
+    // 게이트가 먼저 걸려 티켓 조회·pending 생성 같은 DB 접근은 일어나지 않는다.
+    assert.equal(touchedDb, false);
+  } finally {
+    if (previousPromotionCode === undefined) delete process.env.PROMOTION_CODE;
+    else process.env.PROMOTION_CODE = previousPromotionCode;
+  }
+});
+
+test('POST /api/tickets/exchange/confirm also gates anonymous sessions', async () => {
+  const { status, body } = await request(
+    makeApp(ticketsRouter),
+    'POST',
+    '/exchange/confirm',
+    { exchangeId: 'ex-anon' },
+    anonAuthHeaders(),
+  );
+  assert.equal(status, 403);
+  assert.equal(body.error, 'TOSS_LOGIN_REQUIRED');
+});
+
+// ── 익명→로그인 화해 (authReconcile, 2026-07-23) ─────────────────────────────
+
+const { reconcileLogin, migrateAnonymousData } = require('../../../src/services/authReconcile');
+
+function recordingClient(handlers) {
+  const calls = [];
+  return {
+    calls,
+    async query(sql, params = []) {
+      const text = String(sql).replace(/\s+/g, ' ').trim();
+      calls.push({ text, params });
+      for (const [pattern, result] of handlers) {
+        if (pattern.test(text)) return typeof result === 'function' ? result(params) : result;
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  };
+}
+
+const LOGIN_ARGS = {
+  tossUserKey: 987654,
+  name: '테스터',
+  accessToken: 'acc',
+  refreshToken: 'ref',
+  expiresAt: new Date('2026-07-24T00:00:00.000Z'),
+};
+
+test('reconcileLogin PROMOTE: attaches toss_user_key to the anon row without migrating data', async () => {
+  const client = recordingClient([
+    [/SELECT id FROM users WHERE anonymous_id = \$1 AND toss_user_key IS NULL/, { rows: [{ id: 'anon-1' }], rowCount: 1 }],
+    [/SELECT id FROM users WHERE toss_user_key = \$1/, { rows: [], rowCount: 0 }],
+    [/UPDATE users SET toss_user_key = \$2/, { rows: [], rowCount: 1 }],
+  ]);
+
+  const userId = await reconcileLogin(client, { ...LOGIN_ARGS, anonymousId: 'anon-hash' });
+
+  assert.equal(userId, 'anon-1');
+  // 데이터 이전 쿼리는 없어야 한다(promote는 같은 행 재사용).
+  assert.equal(client.calls.some((c) => /user_tickets|user_likes|DELETE FROM users/.test(c.text)), false);
+  const promote = client.calls.find((c) => /UPDATE users SET toss_user_key = \$2/.test(c.text));
+  assert.deepEqual(promote.params, ['anon-1', 987654, '테스터', 'acc', 'ref', LOGIN_ARGS.expiresAt]);
+});
+
+test('reconcileLogin MERGE: migrates anon data into the existing toss row then deletes the anon row', async () => {
+  const client = recordingClient([
+    [/SELECT id FROM users WHERE anonymous_id = \$1 AND toss_user_key IS NULL/, { rows: [{ id: 'anon-1' }], rowCount: 1 }],
+    [/SELECT id FROM users WHERE toss_user_key = \$1/, { rows: [{ id: 'toss-1' }], rowCount: 1 }],
+  ]);
+
+  const userId = await reconcileLogin(client, { ...LOGIN_ARGS, anonymousId: 'anon-hash' });
+
+  assert.equal(userId, 'toss-1');
+  // 티켓 합산 → 삭제 순서, 그리고 삭제는 데이터 이전 뒤에 온다.
+  const ticketMerge = client.calls.findIndex((c) => /INSERT INTO user_tickets .* ON CONFLICT \(user_id\) DO UPDATE/.test(c.text));
+  const del = client.calls.findIndex((c) => /DELETE FROM users WHERE id = \$1/.test(c.text));
+  assert.ok(ticketMerge >= 0, '티켓 합산 쿼리가 있어야 한다');
+  assert.ok(del > ticketMerge, '익명 행 삭제는 데이터 이전 뒤여야 한다');
+  const delCall = client.calls[del];
+  assert.deepEqual(delCall.params, ['anon-1']);
+});
+
+test('reconcileLogin FRESH: inserts a new row when there is no anon or toss row', async () => {
+  const client = recordingClient([
+    [/SELECT id FROM users WHERE toss_user_key = \$1/, { rows: [], rowCount: 0 }],
+    [/INSERT INTO users \(toss_user_key/, { rows: [{ id: 'new-1' }], rowCount: 1 }],
+  ]);
+
+  const userId = await reconcileLogin(client, { ...LOGIN_ARGS, anonymousId: null });
+  assert.equal(userId, 'new-1');
+});
+
+test('migrateAnonymousData sums ticket balances and unions gameplay rows (target wins on conflict)', async () => {
+  const client = recordingClient([]);
+  await migrateAnonymousData(client, 'anon-1', 'toss-1');
+
+  const ticketSum = client.calls.find((c) => /INSERT INTO user_tickets/.test(c.text));
+  assert.match(ticketSum.text, /ticket_count = user_tickets\.ticket_count \+ EXCLUDED\.ticket_count/);
+  assert.deepEqual(ticketSum.params, ['anon-1', 'toss-1']);
+
+  // 컬렉션 진행은 두 unique(set+slot, set+event)를 모두 회피해야 한다.
+  const progress = client.calls.find((c) => /UPDATE user_collection_progress/.test(c.text));
+  assert.match(progress.text, /a\.set_id = p\.set_id AND a\.slot_index = p\.slot_index/);
+  assert.match(progress.text, /b\.set_id = p\.set_id AND b\.event_id = p\.event_id/);
 });
 
 // ── 경제 상수·교환 금액 추첨 (스펙 2026-07-19 §2.3·§2.4) ──────────────────────

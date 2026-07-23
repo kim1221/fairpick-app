@@ -16,18 +16,65 @@ import {
   getTossUser,
   revokeTossToken,
 } from '../lib/tossAuth';
+import { reconcileLogin } from '../services/authReconcile';
 
 const router = Router();
 
 // ─── 헬퍼 ──────────────────────────────────────────────────────────────────
 
-function signJwt(userId: string, userKey: number): string {
+// userKey=null·anon=true → 익명 세션 토큰. 환전 등 linked 필수 경로에서 게이트된다.
+function signJwt(userId: string, userKey: number | null, anon: boolean): string {
   return jwt.sign(
-    { userId, userKey },
+    { userId, userKey, anon },
     config.jwtSecret,
     { expiresIn: config.jwtExpiresIn } as jwt.SignOptions
   );
 }
+
+// ─── POST /auth/anonymous ─────────────────────────────────────────────────────
+
+/**
+ * 익명 세션 시작 — 로그인 없이 카드 구경·열기·티켓 적립을 할 수 있게 익명 users 행 + JWT 발급.
+ * 같은 anonymous_id는 항상 같은 행(취향 로깅과 신원 공유). 첫 환전에서 토스 로그인 시 화해된다.
+ */
+router.post('/anonymous', async (req, res) => {
+  const anonymousId = typeof req.body?.anonymousId === 'string' ? req.body.anonymousId.trim() : '';
+  if (!anonymousId) {
+    res.status(400).json({ error: 'BadRequest', message: 'anonymousId가 필요해요.' });
+    return;
+  }
+  try {
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO users (anonymous_id)
+       VALUES ($1)
+       ON CONFLICT (anonymous_id) DO UPDATE SET anonymous_id = EXCLUDED.anonymous_id
+       RETURNING id`,
+      [anonymousId]
+    );
+    const userId = rows[0].id;
+    // 항상 익명 토큰(userKey=null). 이 행이 이전에 promote돼 toss_user_key가 있더라도 익명으로 다뤄
+    // 환전 시 재로그인을 강제한다(bearer 보안 모델 유지).
+    const token = signJwt(userId, null, true);
+    res.json({ token, user: { id: userId, userKey: null, name: null, anonymous: true } });
+  } catch (err) {
+    console.error('[auth/anonymous]', err);
+    res.status(500).json({ error: 'AnonymousFailed', message: '세션을 시작하지 못했어요.' });
+  }
+});
+
+// ─── GET /auth/session ────────────────────────────────────────────────────────
+
+/**
+ * 현재 세션 유효성 + 유형 확인(익명·linked 공통). /auth/me와 달리 toss_access_token을 요구하지 않아
+ * 익명 세션 복원에도 쓸 수 있다.
+ */
+router.get('/session', requireAuth, (req, res) => {
+  res.json({
+    id: req.user!.userId,
+    userKey: req.user!.userKey ?? null,
+    anonymous: req.user!.userKey == null,
+  });
+});
 
 
 // ─── POST /auth/login ───────────────────────────────────────────────────────
@@ -39,9 +86,10 @@ function signJwt(userId: string, userKey: number): string {
  * response: { token: string, user: { id, userKey } }
  */
 router.post('/login', async (req, res) => {
-  const { authorizationCode, referrer } = req.body as {
+  const { authorizationCode, referrer, anonymousId } = req.body as {
     authorizationCode?: string;
     referrer?: string;
+    anonymousId?: string;
   };
 
   if (!authorizationCode || !referrer) {
@@ -57,23 +105,29 @@ router.post('/login', async (req, res) => {
     const tossUser = await getTossUser(tokens.accessToken);
     const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000);
 
-    // 3. users 테이블 upsert (신규 or 재로그인)
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO users (toss_user_key, name, toss_access_token, toss_refresh_token, token_expires_at)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (toss_user_key) DO UPDATE SET
-         name               = COALESCE(EXCLUDED.name, users.name),
-         toss_access_token  = EXCLUDED.toss_access_token,
-         toss_refresh_token = EXCLUDED.toss_refresh_token,
-         token_expires_at   = EXCLUDED.token_expires_at
-       RETURNING id`,
-      [tossUser.userKey, tossUser.name ?? null, tokens.accessToken, tokens.refreshToken, expiresAt]
-    );
-
-    const userId = rows[0].id;
+    // 3. 익명 세션 화해(promote/merge)를 단일 트랜잭션에서 처리 → 최종 users.id 결정
+    const client = await pool.connect();
+    let userId: string;
+    try {
+      await client.query('BEGIN');
+      userId = await reconcileLogin(client, {
+        tossUserKey: tossUser.userKey,
+        name: tossUser.name ?? null,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresAt,
+        anonymousId: typeof anonymousId === 'string' && anonymousId.trim() ? anonymousId.trim() : null,
+      });
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
 
     // 4. 우리 앱 JWT 발급 (Toss 토큰은 절대 클라이언트에 내려보내지 않음)
-    const token = signJwt(userId, tossUser.userKey);
+    const token = signJwt(userId, tossUser.userKey, false);
 
     res.json({
       token,

@@ -343,6 +343,11 @@ router.post('/earn', requireAuth, (_req: Request, res: Response) => {
  */
 router.post('/exchange', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
+  // 첫 환전 로그인 게이트 — 익명 세션(userKey=null)은 환전 불가. 프론트가 이 코드를 받으면
+  // 곧장 토스 로그인(appLogin)으로 직행한다(toss-login §UX규약).
+  if (req.user!.userKey == null) {
+    return res.status(403).json({ error: 'TOSS_LOGIN_REQUIRED' });
+  }
   const promotionCode = process.env.PROMOTION_CODE;
   if (!promotionCode) {
     return res.status(503).json({ error: 'PROMOTION_NOT_CONFIGURED' });
@@ -408,6 +413,10 @@ router.post('/exchange', requireAuth, async (req: Request, res: Response) => {
  */
 router.post('/exchange/confirm', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
+  // 방어: 익명 세션은 confirm도 불가(정상 흐름에선 /exchange가 이미 막지만 이중 방어).
+  if (req.user!.userKey == null) {
+    return res.status(403).json({ error: 'TOSS_LOGIN_REQUIRED' });
+  }
   const { exchangeId, grantResultKey } = req.body as { exchangeId: string; grantResultKey?: string };
 
   if (!exchangeId) {

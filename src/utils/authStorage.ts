@@ -11,8 +11,9 @@ const KEY_USER = 'auth:user';
 
 export interface StoredUser {
   id: string;
-  userKey: number;
+  userKey: number | null;  // null = 익명 세션(토스 미연결)
   name?: string | null;
+  anonymous?: boolean;
 }
 
 export async function getToken(): Promise<string | null> {

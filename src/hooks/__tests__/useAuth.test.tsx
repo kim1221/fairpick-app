@@ -8,9 +8,9 @@ const mockGetStoredUser = jest.fn(() =>
 );
 const mockSetStoredUser = jest.fn<(user: unknown) => Promise<void>>(() => Promise.resolve());
 const mockHttpGet = jest.fn<(url: string) => Promise<{
-  data: { id: string; userKey: number; name: string };
+  data: { id: string; userKey: number | null; anonymous: boolean };
 }>>(() =>
-  Promise.resolve({ data: { id: 'user-1', userKey: 101, name: '최신 이름' } })
+  Promise.resolve({ data: { id: 'user-1', userKey: 101, anonymous: false } })
 );
 
 jest.mock('@apps-in-toss/framework', () => ({
@@ -57,20 +57,23 @@ describe('useAuth shared hydration', () => {
     await waitFor(() => {
       expect(firstMount.result.current.first).toMatchObject({
         isLoggedIn: true,
+        isLinked: true,
         isLoading: false,
-        user: { id: 'user-1', userKey: 101, name: '최신 이름' },
+        // /auth/session은 name을 안 주므로 저장된 이름을 유지한다.
+        user: { id: 'user-1', userKey: 101, name: '저장된 이름' },
       });
       expect(firstMount.result.current.second).toMatchObject({
         isLoggedIn: true,
+        isLinked: true,
         isLoading: false,
-        user: { id: 'user-1', userKey: 101, name: '최신 이름' },
+        user: { id: 'user-1', userKey: 101, name: '저장된 이름' },
       });
     });
 
     expect(mockGetToken).toHaveBeenCalledTimes(1);
     expect(mockGetStoredUser).toHaveBeenCalledTimes(1);
     expect(mockHttpGet).toHaveBeenCalledTimes(1);
-    expect(mockHttpGet).toHaveBeenCalledWith('/auth/me');
+    expect(mockHttpGet).toHaveBeenCalledWith('/auth/session');
     expect(mockSetStoredUser).toHaveBeenCalledTimes(1);
 
     firstMount.unmount();
@@ -79,8 +82,9 @@ describe('useAuth shared hydration', () => {
 
     expect(laterMount.result.current).toMatchObject({
       isLoggedIn: true,
+      isLinked: true,
       isLoading: false,
-      user: { id: 'user-1', userKey: 101, name: '최신 이름' },
+      user: { id: 'user-1', userKey: 101, name: '저장된 이름' },
     });
     expect(mockGetToken).toHaveBeenCalledTimes(1);
     expect(mockGetStoredUser).toHaveBeenCalledTimes(1);

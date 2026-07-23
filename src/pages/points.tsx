@@ -1,6 +1,7 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { requestReview } from '@apps-in-toss/framework';
 import { Loader, useDialog } from '@toss/tds-react-native';
 import { InlineAdSlot } from '../components/ads/InlineAdSlot';
 import { BottomTabBar } from '../components/BottomTabBar';
@@ -128,7 +129,7 @@ function createStyles() {
 function PointsPage() {
   const styles = useMemo(createStyles, []);
   const dialog = useDialog();
-  const { isLoggedIn, user, isLoading: authLoading } = useAuth();
+  const { isLoggedIn, isLinked, user, isLoading: authLoading, login } = useAuth();
   const dashboardCacheKey = authLoading
     ? null
     : getDashboardCacheKey(isLoggedIn, user?.id);
@@ -260,6 +261,20 @@ function PointsPage() {
 
     if (exchanging || currentTicketCount < ticketsPerExchange) return;
 
+    // 첫 환전 로그인 게이트(toss-login §UX규약): 익명이면 곧장 네이티브 토스 로그인 시트로 직행.
+    // 실패/취소는 토스트 한 줄만 안내하고, 뽑기 버튼 재클릭으로 재시도할 수 있게 둔다.
+    if (!isLinked) {
+      try {
+        await login();
+      } catch {
+        await dialog.openAlert({
+          title: '로그인하지 못했어요',
+          description: '다시 시도해 주세요.',
+        });
+        return;
+      }
+    }
+
     setExchanging(true);
     try {
       const result = await exchangeTickets();
@@ -297,15 +312,29 @@ function PointsPage() {
         drawNo: result.totalExchanged ?? null,
         drawnAt: new Date(),
       });
-    } catch {
-      await dialog.openAlert({
-        title: '교환을 완료하지 못했어요',
-        description: '토스포인트 지급이 확인되지 않아 티켓을 차감하지 않았어요. 잠시 후 다시 시도해 주세요.',
-      });
+
+      // 리뷰 요청은 두 번째 뽑기 성공 직후 한 번만(보상 체감 시점). 노출은 토스가 결정하고,
+      // 실패해도 흐름에 영향 없음(fire-and-forget). requestReview 가이드 준수.
+      if (result.totalExchanged === 2) {
+        requestReview().catch(() => {});
+      }
+    } catch (err: any) {
+      // 익명 세션이 만료돼 서버가 게이트한 경우(방어) — 로그인 유도로 매핑.
+      if (err?.response?.data?.error === 'TOSS_LOGIN_REQUIRED') {
+        await dialog.openAlert({
+          title: '로그인이 필요해요',
+          description: '토스로 로그인하면 포인트를 뽑을 수 있어요.',
+        });
+      } else {
+        await dialog.openAlert({
+          title: '교환을 완료하지 못했어요',
+          description: '토스포인트 지급이 확인되지 않아 티켓을 차감하지 않았어요. 잠시 후 다시 시도해 주세요.',
+        });
+      }
     } finally {
       setExchanging(false);
     }
-  }, [applyDashboard, commitDashboard, dashboardCacheKey, dialog, exchanging, lastKnownTicketCount, ticketHistory, tickets]);
+  }, [applyDashboard, commitDashboard, dashboardCacheKey, dialog, exchanging, isLinked, lastKnownTicketCount, login, ticketHistory, tickets]);
 
   const ticketCount = resolveTicketCount(tickets, ticketHistory, lastKnownTicketCount);
   const ticketsPerExchange = tickets?.ticketsPerExchange ?? TICKETS_PER_EXCHANGE;
