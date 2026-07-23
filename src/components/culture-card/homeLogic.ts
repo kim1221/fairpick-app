@@ -152,10 +152,11 @@ export function getTicketGaugeState(ticketCount: number, dailyOpenCount: number)
     total: TICKET_EXCHANGE_UNIT,
     ready,
     // "10/10"이 하루 제한으로 오독되던 문제(2026-07-23 피드백) — 티켓 재화임을 라벨에 박는다.
+    // 문구는 짧게(장황한 설명 금지 — 같은 날 후속 피드백).
     countLabel: `티켓 ${filled}/${TICKET_EXCHANGE_UNIT}`,
     subtitle: ready
-      ? `${TICKET_EXCHANGE_UNIT}장 모임 — 포인트 뽑기 1번 가능 · ${openedLine}`
-      : `${TICKET_EXCHANGE_UNIT - filled}장 더 모으면 포인트 뽑기 1번 · ${openedLine}`,
+      ? `포인트 뽑기 가능 · ${openedLine}`
+      : `${TICKET_EXCHANGE_UNIT - filled}장 더 모으면 포인트 뽑기 · ${openedLine}`,
   };
 }
 

@@ -33,21 +33,23 @@ export async function markHowItWorksSeen(): Promise<void> {
   }
 }
 
+// 짧게, 구조만(2026-07-23 피드백 — 금액·확률 같은 세부는 여기서 설명하지 않는다.
+// 돈 얘기는 돈이 오가는 화면(리워드 탭·영수증)이 담당).
 const STEPS: Array<{ no: string; title: string; description: string }> = [
   {
     no: '1',
-    title: '광고 보고 오늘의 카드를 열어요',
-    description: '카드 1장 = 티켓 1장. 전시·공연·팝업 슬롯은 매일 바뀌고, "?" 카드는 열기 전까지 행선지를 숨겨요.',
+    title: '광고 보고 카드를 열어요',
+    description: '카드 1장 = 티켓 1장',
   },
   {
     no: '2',
-    title: '티켓 10장 = 포인트 뽑기 1번',
-    description: '리워드 탭에서 뽑으면 매번 10원~500원 사이 토스포인트가 지급돼요 · 평균 20원.',
+    title: '티켓 10장 = 포인트 뽑기',
+    description: '리워드 탭에서 토스포인트로 바꿔요',
   },
   {
     no: '3',
-    title: '연 카드가 컬렉션을 자동으로 채워요',
-    description: '조건이 맞는 세트의 빈 칸이 저절로 채워지고, "?" 카드는 진행 중인 세트를 우선 도와줘요. 세트를 완성하면 배지와 보너스 티켓을 받아요.',
+    title: '연 카드가 컬렉션을 채워요',
+    description: '세트를 완성하면 배지와 보너스 티켓을 받아요',
   },
 ];
 
@@ -70,9 +72,6 @@ export function HowItWorksSheet({ onClose }: { onClose: () => void }) {
               </View>
             </View>
           ))}
-          <Text style={styles.finePrint}>
-            하루에 열 수 있는 카드 수는 우리 동네의 새 카드 수에 따라 정해져요. 다 열면 내일 새 카드가 와요.
-          </Text>
         </ScrollView>
 
         <Pressable accessibilityRole="button" style={styles.confirmButton} onPress={onClose}>
@@ -158,14 +157,6 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     lineHeight: 19,
     fontWeight: '600',
-  },
-  finePrint: {
-    marginTop: 10,
-    color: INK_MUTED,
-    fontSize: 11,
-    lineHeight: 17,
-    fontWeight: '600',
-    textAlign: 'center',
   },
   confirmButton: {
     marginTop: 16,
