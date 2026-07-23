@@ -237,11 +237,11 @@ export function CollectionSetDetailPage() {
           <Text style={styles.finePrint}>
             빈 슬롯은 조건이 맞는 카드를 열면 자동으로 채워져요{'\n'}발행 후에 연 카드만 인정돼요
           </Text>
+
+          {/* 배너 광고 — 스크롤 내부 끝(네이티브 배너는 커서 하단 고정하면 어색). */}
+          <InlineAdSlot adGroupId={AD_PLACEMENTS.setDetailBottom} style={{ marginTop: 24 }} />
         </ScrollView>
       )}
-
-      {/* 하단 고정 배너(이벤트 상세와 같은 패턴) */}
-      <InlineAdSlot adGroupId={AD_PLACEMENTS.setDetailBottom} />
     </View>
   );
 }

@@ -1,11 +1,13 @@
 /**
  * 배너 광고 공용 슬롯 — adGroupId가 비어 있으면 아무것도 렌더하지 않는다.
  *
- * iOS·Android 모두에서 노출되도록 **처음부터 고정 높이**를 잡는다(2026-07-23 요구).
- * - Android native ad SDK는 height=0이면 초기화되지 않는다.
- * - iOS도 렌더 전 height=0으로 두면 광고 뷰가 레이아웃되지 않아 노출이 안 뜰 수 있다.
- * → 두 플랫폼 다 실제 높이를 먼저 확보하고, 광고가 실패/노필일 때만 컨테이너를 접는다.
- * - 부모 opacity < 1이면 Android SurfaceView/WebView 렌더가 실패하므로 opacity 금지.
+ * 레이아웃(공식 RN-BannerAd "인라인" 패턴): 너비 100%, **높이 미지정(콘텐츠 높이 자동)**.
+ * 이미지·문구 강조(피드형) 배너는 96px보다 크게 렌더되므로 고정 높이를 주면 안 된다 —
+ * 광고가 아래 콘텐츠를 덮어(SSP "광고 겹침 금지" 위반) 레이아웃이 깨진다.
+ * 높이를 자동으로 두면 컨테이너가 광고 크기에 맞춰 늘어나고 뒤 콘텐츠가 자연히 밀린다.
+ *
+ * 노출 측정: 최상위가 IOScrollView가 아니므로 impressFallbackOnMount로 fallback.
+ * 실패/노필이면 컨테이너를 접어(null) 빈 공간을 남기지 않는다.
  */
 import React, { useState } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
@@ -13,11 +15,9 @@ import { InlineAd } from '@apps-in-toss/framework';
 
 export function InlineAdSlot({
   adGroupId,
-  height = 96,
   style,
 }: {
   adGroupId: string;
-  height?: number;
   style?: StyleProp<ViewStyle>;
 }) {
   const [failed, setFailed] = useState(false);
@@ -25,10 +25,7 @@ export function InlineAdSlot({
   if (!adGroupId || failed) return null;
 
   return (
-    <View
-      collapsable={false}
-      style={[{ width: '100%', height, overflow: 'visible' }, style]}
-    >
+    <View collapsable={false} style={[{ width: '100%' }, style]}>
       <InlineAd
         adGroupId={adGroupId}
         impressFallbackOnMount={true}
