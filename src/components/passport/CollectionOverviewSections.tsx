@@ -55,6 +55,8 @@ export interface CollectionVisitRecord {
 export interface CollectionOverviewSectionsProps {
   openedCards: readonly CollectionOverviewCard[];
   visitRecords: readonly CollectionVisitRecord[];
+  /** 큐레이션 섹션과 "내가 연 카드" 사이에 끼우는 슬롯(배너 광고 등). */
+  midSlot?: React.ReactNode;
   filter?: CollectionCardFilter;
   defaultFilter?: CollectionCardFilter;
   onFilterChange?: (filter: CollectionCardFilter) => void;
@@ -497,6 +499,7 @@ export const COLLECTION_CARD_FILTERS: ReadonlyArray<{ key: CollectionCardFilter;
 export function CollectionOverviewSections({
   openedCards,
   visitRecords,
+  midSlot,
   filter,
   defaultFilter = 'all',
   onFilterChange,
@@ -631,6 +634,8 @@ export function CollectionOverviewSections({
           </View>
         </View>
       ) : null}
+
+      {midSlot}
 
       <View style={styles.section}>
         <SectionHeader

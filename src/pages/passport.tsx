@@ -52,6 +52,8 @@ import {
   type ThemeCollectionSet,
 } from '../services/themeCollectionService';
 import { ThemeCollectionSection } from '../components/passport/ThemeCollectionSection';
+import { InlineAdSlot } from '../components/ads/InlineAdSlot';
+import { AD_PLACEMENTS } from '../config/adPlacements';
 import userEventService from '../services/userEventService';
 import { markVisited, subscribeVisitChange, unmarkVisited } from '../services/visitService';
 import { openNaverMap } from '../utils/mapLinks';
@@ -551,6 +553,8 @@ export function PassportPage() {
           }
         />
 
+        <InlineAdSlot adGroupId={AD_PLACEMENTS.collectionTop} style={{ marginTop: 20 }} />
+
         {!ownsCurrentData || (loading && openedCards.length === 0) ? (
           <View style={styles.stateCard}>
             <ActivityIndicator color={RED} />
@@ -568,6 +572,7 @@ export function PassportPage() {
           <CollectionOverviewSections
             openedCards={overviewCards}
             visitRecords={visitRecords}
+            midSlot={<InlineAdSlot adGroupId={AD_PLACEMENTS.collectionMid} style={{ marginBottom: 24 }} />}
             filter={activeFilter}
             onFilterChange={setActiveFilter}
             openedPreviewLimit={OPENED_PREVIEW_LIMIT}

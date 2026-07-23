@@ -17,6 +17,8 @@ export interface TicketBalanceVoucherProps {
   ticketsPerExchange: number;
   exchanging: boolean;
   onExchange: () => void;
+  /** 잔액 카드와 뽑기 버튼 사이 슬롯(배너 광고). 오클릭 방지 여백은 슬롯 쪽에서 준다. */
+  middleSlot?: React.ReactNode;
 }
 
 export function TicketBalanceVoucher({
@@ -24,6 +26,7 @@ export function TicketBalanceVoucher({
   ticketsPerExchange,
   exchanging,
   onExchange,
+  middleSlot,
 }: TicketBalanceVoucherProps) {
   const per = ticketsPerExchange > 0 ? ticketsPerExchange : 10;
   const exchangeableTimes = Math.floor(ticketCount / per);
@@ -76,6 +79,8 @@ export function TicketBalanceVoucher({
         </View>
         <Text style={styles.balanceHelp}>{helpLine}</Text>
       </View>
+
+      {middleSlot}
 
       {/* 토스포인트로 바꾸기 */}
       <Pressable

@@ -23,6 +23,8 @@ import {
   type ThemeCollectionSlot,
 } from '../../../services/themeCollectionService';
 import { ddayLabel, formatStampDate, setEyebrow } from '../../../components/passport/themeCollectionData';
+import { InlineAdSlot } from '../../../components/ads/InlineAdSlot';
+import { AD_PLACEMENTS } from '../../../config/adPlacements';
 
 type SetDetailParams = {
   setId?: string;
@@ -237,6 +239,9 @@ export function CollectionSetDetailPage() {
           </Text>
         </ScrollView>
       )}
+
+      {/* 하단 고정 배너(이벤트 상세와 같은 패턴) */}
+      <InlineAdSlot adGroupId={AD_PLACEMENTS.setDetailBottom} />
     </View>
   );
 }

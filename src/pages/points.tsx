@@ -2,6 +2,7 @@ import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-nat
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Loader, useDialog } from '@toss/tds-react-native';
+import { InlineAdSlot } from '../components/ads/InlineAdSlot';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { PointDrawReceipt } from '../components/passport/PointDrawReceipt';
 import { TicketBalanceVoucher } from '../components/passport/TicketBalanceVoucher';
@@ -17,6 +18,7 @@ import {
   type TicketInfo,
 } from '../services/ticketService';
 import { loadPointDashboard, resolveTicketCount, type PointDashboardLoadResult } from './pointsLogic';
+import { AD_PLACEMENTS } from '../config/adPlacements';
 
 export const Route = createRoute('/points', {
   component: PointsPage,
@@ -351,6 +353,9 @@ function PointsPage() {
               ticketsPerExchange={ticketsPerExchange}
               exchanging={exchanging}
               onExchange={handleExchange}
+              middleSlot={
+                <InlineAdSlot adGroupId={AD_PLACEMENTS.rewardsTab} style={{ marginTop: 16 }} />
+              }
             />
             <TicketHistoryList items={historyItems} loading={loading} error={historyLoadError} />
           </>

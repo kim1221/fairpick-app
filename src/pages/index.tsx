@@ -13,6 +13,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { InlineAdSlot } from '../components/ads/InlineAdSlot';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { AllIssuedTag } from '../components/culture-card/AllIssuedTag';
 import { CultureCardReveal, type RevealedCultureCard } from '../components/culture-card/CultureCardReveal';
@@ -53,6 +54,7 @@ import {
 } from '../services/ticketService';
 import userEventService from '../services/userEventService';
 import { getStartupCoords } from '../utils/currentLocation';
+import { AD_PLACEMENTS } from '../config/adPlacements';
 import { getLikesV2, toggleLike } from '../utils/storage';
 
 export const Route = createRoute('/', {
@@ -934,6 +936,14 @@ function HomePageInner() {
                 onOpen={handleOpenCard}
                 userRegion={cardsData?.userRegion ?? null}
                 nextCardNumber={isLoggedIn && cardsData ? cardsData.dailyOpenCount + 1 : null}
+              />
+            ) : null}
+
+            {/* CTA와 넉넉히 띄운 배너(오클릭 방지 여백 — 애드몹 정책) */}
+            {status === 'ready' ? (
+              <InlineAdSlot
+                adGroupId={AD_PLACEMENTS.homeBelowCta}
+                style={{ marginTop: 28, paddingHorizontal: 20 }}
               />
             ) : null}
 
