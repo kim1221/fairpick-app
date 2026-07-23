@@ -7,7 +7,8 @@ const LINE = '#E5E1D9';
 const ON_INK = '#171717';
 const ON_INK_MUTED = '#716D66';
 const BRONZE = '#B8924A';
-const BLUE = '#3182F6';
+// 토스블루 대신 앱 네이비 — 리워드탭 색 통일(2026-07-23).
+const NAVY = '#2A386A';
 
 export interface TicketHistoryListProps {
   items: TicketHistoryItem[];
@@ -32,9 +33,9 @@ function getHistoryMeta(item: TicketHistoryItem): HistoryMeta {
     return { label: '출석 체크', iconName: 'icon-calendar-mono', iconColor: BRONZE };
   }
   if (item.type === 'exchange') {
-    return { label: '포인트 뽑기', iconName: 'icon-star-mono', iconColor: BLUE };
+    return { label: '포인트 뽑기', iconName: 'icon-star-mono', iconColor: NAVY };
   }
-  return { label: item.label, iconName: 'icon-star-mono', iconColor: item.amount >= 0 ? BRONZE : BLUE };
+  return { label: item.label, iconName: 'icon-star-mono', iconColor: item.amount >= 0 ? BRONZE : NAVY };
 }
 
 function formatHistoryDate(value: string): string {
@@ -168,7 +169,7 @@ const styles = StyleSheet.create({
     color: '#A52822',
   },
   amountMinus: {
-    color: BLUE,
+    color: NAVY,
   },
   emptyText: {
     paddingVertical: 28,

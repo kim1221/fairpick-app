@@ -12,7 +12,8 @@ import {
   type ExchangeAmountRange,
 } from '../../services/exchangeAmountRange';
 
-const BLUE = '#3182F6';
+// 앱 시그니처 팔레트(네이비·레드·마닐라)로 통일 — 토스블루는 리워드탭에서만 튀어서 제거(2026-07-23).
+const NAVY = '#2A386A';
 const ON_BG_MUTED = '#716D66';
 
 export interface TicketBalanceVoucherProps {
@@ -288,7 +289,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   exchangeStrong: {
-    color: BLUE,
+    color: NAVY,
     fontWeight: '900',
   },
 });

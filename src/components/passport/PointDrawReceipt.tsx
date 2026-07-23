@@ -7,7 +7,6 @@
  */
 import React, { useEffect, useRef } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import type { ExchangeAmountRange } from '../../services/exchangeAmountRange';
 
 const SCRIM = 'rgba(12,9,6,0.94)';
 const CREAM = '#F3EDDD';
@@ -25,7 +24,6 @@ export interface PointDrawReceiptProps {
   ticketCount: number;
   ticketsPerExchange: number;
   drawnAt: Date;
-  amountRange: ExchangeAmountRange;
   onClose: () => void;
 }
 
@@ -79,7 +77,6 @@ export function PointDrawReceipt({
   ticketCount,
   ticketsPerExchange,
   drawnAt,
-  amountRange,
   onClose,
 }: PointDrawReceiptProps) {
   const stampScale = useRef(new Animated.Value(1.7)).current;
@@ -137,9 +134,8 @@ export function PointDrawReceipt({
           </Animated.View>
 
           <Text style={styles.paidTitle}>토스포인트로 지급됐어요</Text>
-          <Text style={styles.finePrint}>
-            매번 {amountRange.min}원~{amountRange.max}원 사이에서 뽑혀요 · 평균 {amountRange.average}원
-          </Text>
+          {/* 금액 범위·평균 고지는 뽑기 "전" 화면(리워드탭 바우처)이 담당 — 결과 영수증은
+              실지급액이라는 사실만 담백하게(2026-07-23 피드백: 결과에까지 반복 설명 금지). */}
           <Text style={styles.finePrint}>지급 내역은 토스포인트에서 확인할 수 있어요</Text>
         </View>
         <ZigzagEdge />

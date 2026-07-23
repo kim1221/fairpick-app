@@ -68,8 +68,9 @@ function createStyles() {
     },
     navTitle: {
       color: ON_BG,
-      fontSize: 29,
-      lineHeight: 36,
+      // 컬렉션 탭 navTitle(34/41)과 통일 — 탭 간 위계가 달라 보이던 문제(2026-07-23).
+      fontSize: 34,
+      lineHeight: 41,
       fontWeight: '900',
       letterSpacing: -1,
       fontFamily: 'Noto Serif KR',
@@ -381,7 +382,6 @@ function PointsPage() {
           ticketCount={ticketCount}
           ticketsPerExchange={ticketsPerExchange}
           drawnAt={drawResult.drawnAt}
-          amountRange={amountRange}
           onClose={() => setDrawResult(null)}
         />
       ) : null}

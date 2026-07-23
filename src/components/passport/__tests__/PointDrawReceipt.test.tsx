@@ -8,8 +8,6 @@ import {
   PointDrawReceipt,
 } from '../PointDrawReceipt';
 
-const RANGE = { min: 10, max: 500, average: 20 };
-
 describe('PointDrawReceipt helpers', () => {
   test('formatReceiptDate renders YYYY.MM.DD HH:mm', () => {
     expect(formatReceiptDate(new Date(2026, 6, 20, 14, 2))).toBe('2026.07.20 14:02');
@@ -44,7 +42,6 @@ describe('PointDrawReceipt', () => {
         ticketCount={2}
         ticketsPerExchange={10}
         drawnAt={new Date(2026, 6, 20, 14, 2)}
-        amountRange={RANGE}
         onClose={onClose}
         {...overrides}
       />
@@ -61,10 +58,11 @@ describe('PointDrawReceipt', () => {
     expect(getByText('0003')).toBeTruthy();
   });
 
-  test('states the honest amount range instead of a max-amount pitch', () => {
+  test('keeps the result factual — no range/average repetition, no max-amount pitch', () => {
+    // 범위·평균 고지는 뽑기 전 화면(리워드탭 바우처)의 몫이다(2026-07-23 결정).
     const { getByText, queryByText } = renderReceipt();
-    expect(getByText('매번 10원~500원 사이에서 뽑혀요 · 평균 20원')).toBeTruthy();
     expect(getByText('지급 내역은 토스포인트에서 확인할 수 있어요')).toBeTruthy();
+    expect(queryByText(/평균|사이에서/)).toBeNull();
     expect(queryByText(/최대/)).toBeNull();
   });
 
