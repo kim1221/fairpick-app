@@ -62,10 +62,13 @@ export type ThemeCollectionsResponse = {
     filled: number;
     total: number;
   } | null;
+  /** 세트 완성 보너스 티켓 수(서버 단일 소스) — 구버전 백엔드 응답엔 없다. */
+  completionBonusTickets?: number;
 };
 
 export type ThemeCollectionSetDetail = ThemeCollectionSet & {
   badge: { badgeKey: string; awardedAt: string | null } | null;
+  completionBonusTickets?: number;
 };
 
 export type CollectionBadge = {

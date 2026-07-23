@@ -223,9 +223,10 @@ export function CollectionSetDetailPage() {
                 <Text style={styles.rewardCoinGlyph}>✦</Text>
               </View>
               <View style={styles.rewardCopy}>
-                <Text style={styles.rewardTitle}>완성 보상 — 컬렉션 배지</Text>
+                <Text style={styles.rewardTitle}>완성 보상 — 배지 + 보너스 티켓</Text>
                 <Text style={styles.rewardDescription}>
-                  {detail.totalSlots}곳을 모두 발견하면 컬렉션 표지에 금박 스탬프가 찍혀요.
+                  {detail.totalSlots}곳을 모두 발견하면 금박 스탬프가 찍히고 보너스 티켓{' '}
+                  {detail.completionBonusTickets ?? 5}장을 받아요.
                 </Text>
               </View>
             </View>

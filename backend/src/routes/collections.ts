@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import { pool } from '../db';
 import { requireAuth } from '../middleware/requireAuth';
+import { COLLECTION_COMPLETION_BONUS_TICKETS } from '../services/collections';
 
 /**
  * 테마 컬렉션 조회 API(스펙 §5.2). 읽기 전용 — 진행 쓰기 경로는 `/v2/open`에만 있다.
@@ -189,7 +190,12 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       ...allSetRows.filter((row) => row.region_scope == null).sort(byProgressThenRecent).slice(0, MAX_NATIONAL_SETS),
     ];
     if (setRows.length === 0) {
-      return res.json({ sets: [], activeSetCount: 0, nearCompletion: null });
+      return res.json({
+        sets: [],
+        activeSetCount: 0,
+        nearCompletion: null,
+        completionBonusTickets: COLLECTION_COMPLETION_BONUS_TICKETS,
+      });
     }
 
     const setIds = setRows.map((row) => String(row.set_id));
@@ -212,6 +218,8 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
           total: nearCompletion.totalSlots,
         }
         : null,
+      // 완성 보상 표기용(프론트 하드코딩 방지 — 서버가 단일 소스).
+      completionBonusTickets: COLLECTION_COMPLETION_BONUS_TICKETS,
     });
   } catch (err) {
     console.error('[Collections] list error:', err);
@@ -284,6 +292,7 @@ router.get('/:setId', requireAuth, async (req: Request, res: Response) => {
       badge: badge
         ? { badgeKey: badge.badge_key, awardedAt: toIso(badge.awarded_at) }
         : null,
+      completionBonusTickets: COLLECTION_COMPLETION_BONUS_TICKETS,
     });
   } catch (err) {
     console.error('[Collections] detail error:', err);

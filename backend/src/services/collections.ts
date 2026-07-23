@@ -11,6 +11,14 @@ import { normalizedCategorySql } from './cardCategory';
 
 export type CollectionFillSource = 'open' | 'mystery';
 
+/**
+ * 세트 완성 보너스 티켓(2026-07-23 사용자 결정 — 배지만으론 허전).
+ * 토스포인트 직접 지급이 아니라 티켓인 이유: 지급은 클라 SDK 경로라 서버가 완성 시점에
+ * 돈을 쏠 수 없고, 티켓은 어차피 포인트 뽑기로 환전되는 재화라 경제 왜곡 없이 서버 권위로
+ * 지급할 수 있다. 멱등 앵커 = 세트 배지 PK(user_id, badge_key) 신규 INSERT 성공.
+ */
+export const COLLECTION_COMPLETION_BONUS_TICKETS = 5;
+
 /** 이 오픈으로 실제 채워진 세트만 담는다(안 채운 세트는 응답에 넣지 않는다). */
 export type CollectionProgressEntry = {
   setId: string;
@@ -21,6 +29,8 @@ export type CollectionProgressEntry = {
   totalSlots: number;
   completed: boolean;
   badgeKey?: string;
+  /** 이 완성으로 새로 지급된 보너스 티켓(배지 재수여 시엔 없음). */
+  bonusTickets?: number;
 };
 
 export type CollectionBadge = {
@@ -206,7 +216,7 @@ async function fillMatchingSlots(
   // 3) 완성 세트 배지 + 누적 마일스톤 배지(둘 다 멱등).
   for (const set of completedSets) {
     const badgeKey = `set:${set.slug}`;
-    await client.query(
+    const { rowCount: badgeInserted } = await client.query(
       `INSERT INTO user_collection_badges (user_id, badge_key, set_id, tier, title)
        VALUES ($1, $2, $3::uuid, $4, $5)
        ON CONFLICT (user_id, badge_key) DO NOTHING`,
@@ -214,6 +224,21 @@ async function fillMatchingSlots(
     );
     const entry = entries.find((item) => item.setId === set.setId);
     if (entry) entry.badgeKey = badgeKey;
+
+    // 완성 보너스 티켓 — 배지가 "새로" 들어갔을 때만(재시도·중복 완성엔 0회).
+    // user_tickets 행은 같은 트랜잭션의 grantTicketsForEvent가 보장한다.
+    // 여기서 실패하면 바깥 SAVEPOINT가 컬렉션 진행째로 되감으므로 본 지급은 안전하다.
+    if (badgeInserted === 1) {
+      await client.query(
+        `UPDATE user_tickets
+         SET ticket_count = ticket_count + $2,
+             total_earned = total_earned + $2,
+             updated_at   = NOW()
+         WHERE user_id = $1`,
+        [userId, COLLECTION_COMPLETION_BONUS_TICKETS],
+      );
+      if (entry) entry.bonusTickets = COLLECTION_COMPLETION_BONUS_TICKETS;
+    }
   }
 
   if (completedSets.length > 0) {

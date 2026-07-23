@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -17,6 +18,7 @@ import { AllIssuedTag } from '../components/culture-card/AllIssuedTag';
 import { CultureCardReveal, type RevealedCultureCard } from '../components/culture-card/CultureCardReveal';
 import { CultureCardStack } from '../components/culture-card/CultureCardStack';
 import { CultureCardStatePanel } from '../components/culture-card/CultureCardStatePanel';
+import { HowItWorksSheet, markHowItWorksSeen, shouldShowHowItWorks } from '../components/culture-card/HowItWorksSheet';
 import { TicketGauge } from '../components/culture-card/TicketGauge';
 import {
   AD_LOAD_FAILED_COPY,
@@ -182,6 +184,11 @@ function createStyles(a: Adaptive) {
       fontWeight: '700',
       letterSpacing: 1.2,
     },
+    navSide: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
     locChip: {
       marginTop: 2,
       borderWidth: 1,
@@ -192,6 +199,22 @@ function createStyles(a: Adaptive) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
+    },
+    helpChip: {
+      marginTop: 2,
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      borderWidth: 1,
+      borderColor: CHIP_LINE,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    helpChipText: {
+      color: CHIP_STRONG,
+      fontSize: 12,
+      lineHeight: 16,
+      fontWeight: '800',
     },
     locChipMark: {
       color: CHIP_TEXT,
@@ -281,6 +304,7 @@ function HomePageInner() {
   const [adLoadStatus, setAdLoadStatus] = useState<AdLoadStatus>('idle');
   const [statusCopy, setStatusCopy] = useState<HomeCopy | null>(initialCache?.statusCopy ?? null);
   const [loginPending, setLoginPending] = useState(false);
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
 
   const loadUnregisterRef = useRef<(() => void) | null>(null);
   const showUnregisterRef = useRef<(() => void) | null>(null);
@@ -419,6 +443,17 @@ function HomePageInner() {
       showUnregisterRef.current?.();
     };
   }, [clearLoadTimeout, clearShowWatchdog]);
+
+  // 첫 진입 1회 이용 방법 안내(이후엔 헤더 "?" 칩으로만). 광고/공개 흐름과 무관한 표시 전용.
+  useEffect(() => {
+    let cancelled = false;
+    shouldShowHowItWorks().then((show) => {
+      if (!cancelled && show) setShowHowItWorks(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -853,9 +888,19 @@ function HomePageInner() {
               <Text style={styles.name}>CULTURE CARD</Text>
               <Text style={styles.issue}>{issueLine}</Text>
             </View>
-            <View style={styles.locChip} accessibilityLabel={`현재 지역 ${regionLabel}`}>
-              <Text style={styles.locChipMark}>◉</Text>
-              <Text style={styles.locChipText}>{regionLabel}</Text>
+            <View style={styles.navSide}>
+              <View style={styles.locChip} accessibilityLabel={`현재 지역 ${regionLabel}`}>
+                <Text style={styles.locChipMark}>◉</Text>
+                <Text style={styles.locChipText}>{regionLabel}</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="이용 방법 보기"
+                style={styles.helpChip}
+                onPress={() => setShowHowItWorks(true)}
+              >
+                <Text style={styles.helpChipText}>?</Text>
+              </Pressable>
             </View>
           </View>
         </View>
@@ -991,6 +1036,14 @@ function HomePageInner() {
       </ScrollView>
 
       <BottomTabBar currentTab="home" />
+      {showHowItWorks ? (
+        <HowItWorksSheet
+          onClose={() => {
+            setShowHowItWorks(false);
+            markHowItWorksSeen().catch(() => {});
+          }}
+        />
+      ) : null}
     </View>
   );
 }

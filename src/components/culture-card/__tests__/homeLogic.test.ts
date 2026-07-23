@@ -317,15 +317,16 @@ describe('culture-card home logic', () => {
 
   test('tracks the 10-cell ticket gauge toward a point draw', () => {
     const partial = getTicketGaugeState(7, 12);
-    expect(partial).toMatchObject({ filled: 7, total: 10, ready: false, countLabel: '7/10' });
-    expect(partial.subtitle).toBe('3장 더 모으면 포인트 뽑기 · 오늘 12장 열었어요');
+    // "티켓" 접두어 필수 — 숫자만 쓰면 하루 제한으로 오독된다(2026-07-23 피드백).
+    expect(partial).toMatchObject({ filled: 7, total: 10, ready: false, countLabel: '티켓 7/10' });
+    expect(partial.subtitle).toBe('3장 더 모으면 포인트 뽑기 1번 · 오늘 12장 열었어요');
 
     const ready = getTicketGaugeState(10, 3);
     expect(ready.ready).toBe(true);
-    expect(ready.subtitle).toContain('포인트 뽑기 가능');
+    expect(ready.subtitle).toContain('포인트 뽑기 1번 가능');
 
     // 10장이 넘어도 게이지는 가득 찬 10칸으로만 표기한다.
-    expect(getTicketGaugeState(23, 0)).toMatchObject({ filled: 10, ready: true, countLabel: '10/10' });
+    expect(getTicketGaugeState(23, 0)).toMatchObject({ filled: 10, ready: true, countLabel: '티켓 10/10' });
   });
 
   test('draws the next card only while the effective open cap remains', () => {

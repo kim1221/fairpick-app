@@ -1360,6 +1360,7 @@ test('POST /api/cards/v2/open fills a matching collection slot and awards the se
     totalSlots: 4,
     completed: true,
     badgeKey: 'set:seongsu-2026-w30',
+    bonusTickets: 5,
   }]);
   // "?" 슬롯으로 채운 진행은 source='mystery'로 기록된다(어시스트 효과 측정용).
   assert.deepEqual(progressInsertParams, [userId, event.id, 'mystery']);
@@ -1368,6 +1369,59 @@ test('POST /api/cards/v2/open fills a matching collection slot and awards the se
   assert.equal(badgeInserts[0][2], setId);
   // 티켓 지급은 그대로 유지된다.
   assert.equal(body.earned, 1);
+  // 완성 보너스가 응답 잔액에 반영된다(grant 1 + 보너스 5).
+  assert.equal(body.ticketCount, 6);
+});
+
+test('POST /api/cards/v2/open does not re-grant the completion bonus when the badge already exists', async () => {
+  const setId = '11111111-2222-4333-8444-555555555555';
+  let bonusUpdates = 0;
+  const { event, client } = makeCollectionOpenClient({
+    onCollectionQuery(text) {
+      if (/^(SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT)/.test(text)) return { rows: [], rowCount: 0 };
+      if (text.includes('INSERT INTO user_collection_progress')) {
+        return { rows: [{ set_id: setId, slot_index: 3 }], rowCount: 1 };
+      }
+      if (text.includes('FROM collection_sets cs')) {
+        return {
+          rows: [{ set_id: setId, slug: 'seongsu-2026-w30', title: '성수 컬렉션', tier: 'normal', total_slots: 4, filled_count: 4 }],
+          rowCount: 1,
+        };
+      }
+      if (text.includes('INSERT INTO user_collection_badges')) {
+        // 이미 수여된 배지 → ON CONFLICT DO NOTHING이 0행.
+        return { rows: [], rowCount: 0 };
+      }
+      if (text.includes('FROM user_collection_badges')) return { rows: [{ count: 1 }], rowCount: 1 };
+      // 보너스 지급 쿼리(그랜트와 달리 daily_earned가 없다)를 세어 멱등을 검증한다.
+      if (text.includes('UPDATE user_tickets') && !text.includes('daily_earned')) {
+        bonusUpdates += 1;
+        return { rows: [], rowCount: 1 };
+      }
+      return null;
+    },
+  });
+  pool.connect = async () => client;
+
+  const cardToken = sealLockedCard({
+    userId,
+    eventId: event.id,
+    assignedOn: todayKst(),
+    walkMinutes: null,
+    reasonTags: [],
+    slotType: 'category',
+  });
+  const { status, body } = await request(makeApp(cardsRouter), 'POST', '/v2/open', {
+    cardToken,
+    adAttemptId: 'attempt-collection-dup',
+  });
+
+  assert.equal(status, 200);
+  assert.equal(bonusUpdates, 0);
+  assert.equal(body.collectionProgress[0].completed, true);
+  assert.equal(body.collectionProgress[0].bonusTickets, undefined);
+  // 보너스가 없으니 응답 잔액은 grant 결과 그대로다.
+  assert.equal(body.ticketCount, 1);
 });
 
 test('POST /api/cards/v2/open still grants the ticket when collection progress fails', async () => {
@@ -2538,7 +2592,12 @@ test('GET /api/collections returns an empty payload when no set is active', asyn
   const { status, body } = await request(makeApp(collectionsRouter), 'GET', '/');
 
   assert.equal(status, 200);
-  assert.deepEqual(body, { sets: [], activeSetCount: 0, nearCompletion: null });
+  assert.deepEqual(body, {
+    sets: [],
+    activeSetCount: 0,
+    nearCompletion: null,
+    completionBonusTickets: 5,
+  });
 });
 
 test('GET /api/collections/:setId returns the set with its badge and rejects malformed ids', async () => {
@@ -2701,13 +2760,50 @@ test('buildSetPlans only publishes sets whose pool covers twice the slots, tags 
   assert.ok(taggedAsk, '태그 규칙도 카운트 질의를 거쳐야 한다');
   assert.deepEqual(taggedAsk.params[taggedAsk.params.length - 2], ['실내', '시원한', '여름']);
 
-  // 동네 세트 슬롯: 팝업2+전시1+공연1, 슬롯마다 다른 실루엣.
+  // 동네 세트 슬롯: 공급이 넉넉하면(총 40) max까지 확대 — 팝업3+전시2+공연2 = 7칸.
   const neighborhood = plans.find((plan) => plan.template === 'neighborhood');
-  assert.deepEqual(neighborhood.slots.map((slot) => slot.matchRule.category), ['팝업', '팝업', '전시', '공연']);
-  assert.deepEqual(neighborhood.slots.map((slot) => slot.slotIndex), [0, 1, 2, 3]);
-  assert.equal(new Set(neighborhood.slots.map((slot) => slot.teaserEventId)).size, 4);
+  assert.deepEqual(
+    neighborhood.slots.map((slot) => slot.matchRule.category),
+    ['팝업', '팝업', '팝업', '전시', '전시', '공연', '공연'],
+  );
+  assert.deepEqual(neighborhood.slots.map((slot) => slot.slotIndex), [0, 1, 2, 3, 4, 5, 6]);
+  assert.equal(new Set(neighborhood.slots.map((slot) => slot.teaserEventId)).size, 7);
   assert.equal(neighborhood.regionScope, '서울');
   assert.match(neighborhood.slug, /^neighborhood-서울-마포구-2026-W30$/);
+
+  // 버즈 세트도 공급에 맞춰 max(6)까지 확대되고 제목이 실제 칸 수를 따른다.
+  const buzz = plans.find((plan) => plan.template === 'buzz');
+  assert.equal(buzz.slots.length, 6);
+  assert.equal(buzz.title, '지금 뜨는 팝업 6곳');
+});
+
+test('buildSetPlans shrinks slot counts toward min when the pool is thin', async () => {
+  pool.query = async (sql, params = []) => {
+    const text = String(sql);
+    if (text.includes('GROUP BY 1, 2')) {
+      return { rows: [{ region: '부산', district: '해운대구', event_count: 20 }], rowCount: 1 };
+    }
+    if (text.includes('COUNT(*) OVER () AS total')) {
+      // 카테고리 불문 후보 5장 → count = floor(5/2) = 2 (max에 못 미침).
+      const limit = Number(params[params.length - 1]);
+      const rows = Array.from({ length: Math.min(5, limit) }, (_, index) => ({
+        total: 5,
+        event_id: `thin-${params[1]}-${index}`,
+      }));
+      return { rows, rowCount: rows.length };
+    }
+    throw new Error(`Unexpected thin-pool query: ${text}`);
+  };
+
+  const plans = await buildSetPlans('2026-08-17', '2026-W31', new Date('2026-07-27T12:00:00+09:00'));
+  const neighborhood = plans.find((plan) => plan.template === 'neighborhood');
+  // 스펙별 count = min(max, floor(total/2)) = min(3or2, 2) = 2 → 팝업2+전시2+공연2.
+  // max까지 못 커져도 min만 넘기면 발행된다(못 깨는 미션 방지 규칙은 그대로).
+  assert.ok(neighborhood, '얇은 풀에서도 min을 넘기면 발행된다');
+  assert.deepEqual(
+    neighborhood.slots.map((slot) => slot.matchRule.category),
+    ['팝업', '팝업', '전시', '전시', '공연', '공연'],
+  );
 });
 
 test('buildSetPlans skips 시·도 names that the district fallback picked up', async () => {

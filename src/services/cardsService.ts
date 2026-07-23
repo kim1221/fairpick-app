@@ -117,6 +117,8 @@ export type CollectionProgressEntry = {
   totalSlots: number;
   completed: boolean;
   badgeKey?: string;
+  /** 이 완성으로 새로 지급된 보너스 티켓(배지 재수여·구버전 백엔드엔 없음). */
+  bonusTickets?: number;
 };
 
 export type OpenCultureCardResponse = {

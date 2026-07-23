@@ -1350,9 +1350,17 @@ router.post('/v2/open', requireAuth, async (req: Request, res: Response) => {
     const fullCard = toCard(event, new Set([tokenPayload.eventId]), null, new Map());
     fullCard.walkMinutes = tokenPayload.walkMinutes;
     fullCard.reasonTags = tokenPayload.reasonTags;
+    // 완성 보너스 티켓이 grant 이후에 들어가므로 응답 잔액에 반영한다.
+    const collectionBonusTickets = collectionProgress.reduce(
+      (sum, entry) => sum + (entry.bonusTickets ?? 0),
+      0,
+    );
     return res.json({
       card: fullCard,
       ...reward,
+      ...(collectionBonusTickets > 0
+        ? { ticketCount: reward.ticketCount + collectionBonusTickets }
+        : {}),
       reveal: {
         slotType,
         // 히든 카드: "?" 슬롯에서만, buzz 상위(HIDDEN_BUZZ_MIN)일 때 특수 프레임(스펙 §3.2)

@@ -137,6 +137,28 @@ describe('CultureCardReveal', () => {
     expect(screen.getByText('『여름 전시 4곳』 세트 완성 — 배지를 받았어요')).toBeTruthy();
   });
 
+  test('shows the bonus ticket count when the completion granted one', () => {
+    const screen = renderReveal({
+      openedCard: openedCard({
+        collectionProgress: [
+          {
+            setId: 'set-2',
+            slug: 'season-summer-2026w30',
+            title: '여름 전시 4곳',
+            filledSlotIndex: 3,
+            filledCount: 4,
+            totalSlots: 4,
+            completed: true,
+            badgeKey: 'set:season-summer-2026w30',
+            bonusTickets: 5,
+          },
+        ],
+      }),
+    });
+
+    expect(screen.getByText('『여름 전시 4곳』 세트 완성 — 배지 + 보너스 티켓 5장')).toBeTruthy();
+  });
+
   test('renders no collection banner when the open filled nothing', () => {
     const absent = renderReveal();
     expect(absent.queryByText(/채움$/)).toBeNull();

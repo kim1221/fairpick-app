@@ -28,9 +28,16 @@ export type MatchRule = {
   tags?: string[];
 };
 
+/**
+ * 슬롯 수는 min~max 사이에서 공급에 맞춰 자동 결정된다(2026-07-23 상향 —
+ * "4칸은 너무 쉽다" 피드백). max를 우선 시도하되, 달성가능성 규칙
+ * (조건 만족 이벤트 ≥ 슬롯×POOL_SAFETY_FACTOR)을 지키는 최대치로 줄이고,
+ * min조차 못 채우는 조건이면 세트 자체를 발행하지 않는다.
+ */
 type SlotSpec = {
   rule: MatchRule;
-  count: number;
+  min: number;
+  max: number;
   hint: string;
 };
 
@@ -160,7 +167,8 @@ async function ruleStats(
 
 /**
  * 슬롯 스펙들을 검증하고 SlotPlan으로 편다.
- * 하나라도 (슬롯 수 × 2) 미만이면 null — 못 깨는 미션은 발행하지 않는다.
+ * 스펙마다 공급이 허용하는 최대 슬롯 수(≤max)를 잡고, min 미만이면 null —
+ * 못 깨는 미션은 발행하지 않는다.
  * 티저는 슬롯마다 다른 이벤트를 배정한다(같은 실루엣 4개가 늘어서지 않게).
  */
 async function planSlots(specs: SlotSpec[], expiresOn: string): Promise<SlotPlan[] | null> {
@@ -168,9 +176,10 @@ async function planSlots(specs: SlotSpec[], expiresOn: string): Promise<SlotPlan
   const usedTeasers = new Set<string>();
 
   for (const spec of specs) {
-    const { total, teaserIds } = await ruleStats(spec.rule, expiresOn, spec.count * POOL_SAFETY_FACTOR);
-    if (total < spec.count * POOL_SAFETY_FACTOR) return null;
-    for (let index = 0; index < spec.count; index += 1) {
+    const { total, teaserIds } = await ruleStats(spec.rule, expiresOn, spec.max * POOL_SAFETY_FACTOR);
+    const count = Math.min(spec.max, Math.floor(total / POOL_SAFETY_FACTOR));
+    if (count < spec.min) return null;
+    for (let index = 0; index < count; index += 1) {
       const teaserEventId = teaserIds.find((id) => !usedTeasers.has(id)) ?? teaserIds[0] ?? null;
       if (teaserEventId) usedTeasers.add(teaserEventId);
       slots.push({
@@ -213,14 +222,14 @@ export async function buildSetPlans(
   const plans: SetPlan[] = [];
   const season = seasonProfile(now);
 
-  // ── 동네 세트: 카테고리 횡단(팝업2+전시1+공연1)으로 선택 다변화 유도 ──
+  // ── 동네 세트: 카테고리 횡단(팝업+전시+공연, 공급 따라 4~7칸)으로 선택 다변화 유도 ──
   const districts = await loadTopDistricts(expiresOn);
   for (const { region, district } of districts) {
     if (plans.length >= MAX_NEIGHBORHOOD_SETS) break;
     const slots = await planSlots([
-      { rule: { category: '팝업', region, district }, count: 2, hint: `${district}의 어느 팝업` },
-      { rule: { category: '전시', region, district }, count: 1, hint: `${district}의 어느 전시` },
-      { rule: { category: '공연', region, district }, count: 1, hint: `${district}의 어느 공연` },
+      { rule: { category: '팝업', region, district }, min: 2, max: 3, hint: `${district}의 어느 팝업` },
+      { rule: { category: '전시', region, district }, min: 1, max: 2, hint: `${district}의 어느 전시` },
+      { rule: { category: '공연', region, district }, min: 1, max: 2, hint: `${district}의 어느 공연` },
     ], expiresOn);
     if (!slots) continue;
     plans.push({
@@ -235,18 +244,19 @@ export async function buildSetPlans(
     });
   }
 
-  // ── 시즌 세트(전국): 계절 태그 × 전시 4슬롯. 기간 한정이라 seasonal 등급. ──
+  // ── 시즌 세트(전국): 계절 태그 × 전시 4~6슬롯. 기간 한정이라 seasonal 등급. ──
   const seasonSlots = await planSlots([
     {
       rule: { category: '전시', tags: season.tags },
-      count: 4,
+      min: 4,
+      max: 6,
       hint: `${season.label}에 어울리는 어느 전시`,
     },
   ], expiresOn);
   if (seasonSlots) {
     plans.push({
       slug: `season-${season.key}-${weekKey}`,
-      title: `${season.label} 전시 4곳`,
+      title: `${season.label} 전시 ${seasonSlots.length}곳`,
       subtitle: `${season.label}에 어울리는 전시를 모아요`,
       template: 'season',
       tier: 'seasonal',
@@ -256,20 +266,21 @@ export async function buildSetPlans(
     });
   }
 
-  // ── 딥다이브 세트: 한 지역 × 한 카테고리 5슬롯 ──
+  // ── 딥다이브 세트: 한 지역 × 한 카테고리 5~7슬롯 ──
   const deepdiveRegion = districts[0]?.region ?? null;
   if (deepdiveRegion) {
     const deepdiveSlots = await planSlots([
       {
         rule: { category: '공연', region: deepdiveRegion },
-        count: 5,
+        min: 5,
+        max: 7,
         hint: `${deepdiveRegion}의 어느 공연`,
       },
     ], expiresOn);
     if (deepdiveSlots) {
       plans.push({
         slug: `deepdive-공연-${deepdiveRegion}-${weekKey}`,
-        title: `${deepdiveRegion} 공연 5곳`,
+        title: `${deepdiveRegion} 공연 ${deepdiveSlots.length}곳`,
         subtitle: `${deepdiveRegion}에서 열리는 공연을 모아요`,
         template: 'deepdive',
         tier: 'normal',
@@ -280,14 +291,14 @@ export async function buildSetPlans(
     }
   }
 
-  // ── 버즈 세트(전국): 지금 뜨는 팝업 4곳 ──
+  // ── 버즈 세트(전국): 지금 뜨는 팝업 4~6곳 ──
   const buzzSlots = await planSlots([
-    { rule: { category: '팝업' }, count: 4, hint: '지금 뜨는 어느 팝업' },
+    { rule: { category: '팝업' }, min: 4, max: 6, hint: '지금 뜨는 어느 팝업' },
   ], expiresOn);
   if (buzzSlots) {
     plans.push({
       slug: `buzz-popup-${weekKey}`,
-      title: '지금 뜨는 팝업 4곳',
+      title: `지금 뜨는 팝업 ${buzzSlots.length}곳`,
       subtitle: '요즘 이야기되는 팝업을 모아요',
       template: 'buzz',
       tier: 'normal',

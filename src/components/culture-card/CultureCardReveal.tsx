@@ -126,7 +126,9 @@ export function CultureCardReveal({
               numberOfLines={2}
             >
               {entry.completed
-                ? `『${entry.title}』 세트 완성 — 배지를 받았어요`
+                ? entry.bonusTickets
+                  ? `『${entry.title}』 세트 완성 — 배지 + 보너스 티켓 ${entry.bonusTickets}장`
+                  : `『${entry.title}』 세트 완성 — 배지를 받았어요`
                 : `『${entry.title}』 ${entry.filledCount}/${entry.totalSlots} 채움`}
             </Text>
           </View>
