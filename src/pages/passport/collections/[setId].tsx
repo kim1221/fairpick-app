@@ -47,11 +47,16 @@ const CANVAS_SUB = '#9A8F77';
 const SLOT_LINE = 'rgba(239,227,196,0.32)';
 const GOLD = '#C9A35B';
 
-function FilledSlotCard({ slot }: { slot: ThemeCollectionSlot }) {
+function FilledSlotCard({ slot, onPress }: { slot: ThemeCollectionSlot; onPress?: () => void }) {
   const filled = slot.filled!;
   const stamp = formatStampDate(filled.filledAt);
   return (
-    <View style={styles.slot}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${filled.title} 상세 보기`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.slot, pressed ? styles.slotPressed : null]}
+    >
       {filled.imageUrl ? (
         <Image source={{ uri: filled.imageUrl }} style={styles.slotImage} resizeMode="cover" />
       ) : (
@@ -74,7 +79,7 @@ function FilledSlotCard({ slot }: { slot: ThemeCollectionSlot }) {
           <Text style={styles.mysteryChipText}>? 카드로 발견</Text>
         </View>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
@@ -196,7 +201,11 @@ export function CollectionSetDetailPage() {
           <View style={styles.grid}>
             {detail.slots.map((slot) =>
               slot.state === 'filled' && slot.filled ? (
-                <FilledSlotCard key={slot.slotIndex} slot={slot} />
+                <FilledSlotCard
+                  key={slot.slotIndex}
+                  slot={slot}
+                  onPress={() => navigation.navigate('/events/:id', { id: slot.filled!.eventId })}
+                />
               ) : (
                 <EmptySlotCard key={slot.slotIndex} slot={slot} />
               )
@@ -329,6 +338,9 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     overflow: 'hidden',
     backgroundColor: '#1A150E',
+  },
+  slotPressed: {
+    opacity: 0.8,
   },
   slotImage: { width: '100%', height: '100%' },
   slotImageFallback: {

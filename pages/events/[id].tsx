@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { Txt, Badge, Post, BottomSheet, Loader, Button, Icon, IconButton, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
-import { InlineAd, share, getTossShareLink, loadFullScreenAd, showFullScreenAd } from '@apps-in-toss/framework';
+import { InlineAd, share, getTossShareLink } from '@apps-in-toss/framework';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
 type EventStyles = ReturnType<typeof createStyles>;
@@ -32,13 +32,6 @@ import { useLike } from '../../src/hooks/useLike';
 import { LikesProvider } from '../../src/contexts/LikesContext';
 import { useAuth } from '../../src/hooks/useAuth';
 import http from '../../src/lib/http';
-import {
-  createRewardAdAttemptId,
-  earnTickets,
-  getEarnStatus,
-  logRewardAdEvent,
-} from '../../src/services/ticketService';
-import type { RewardAdEventType } from '../../src/services/ticketService';
 import { getVisitedIds, markVisited, unmarkVisited } from '../../src/services/visitService';
 
 type EventDetailParams = {
@@ -250,16 +243,8 @@ function EventDetailPage() {
   const [adRendered, setAdRendered] = useState(false);
   const [adFailed, setAdFailed] = useState(false);
 
-  // 티켓 조각
-  const REWARDED_AD_ID = 'ait.v2.live.b50cf7d900884c5b';
-  const [rewardedAdLoaded, setRewardedAdLoaded] = useState(false);
-  const [ticketLoading, setTicketLoading] = useState(false);
+  // 티켓 적립은 홈(오늘의 카드 열기)으로 일원화됐다 — 상세페이지 리워드 광고 경로는 제거(2026-07-23).
   const [loginPending, setLoginPending] = useState(false);
-  const [ticketResult, setTicketResult] = useState<{ earned: number } | null>(null);
-  const [earnedToday, setEarnedToday] = useState(false);
-  const loadUnregisterRef = React.useRef<(() => void) | null>(null);
-  const showUnregisterRef = React.useRef<(() => void) | null>(null);
-  const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   // 다녀왔어요(자기신고) — 위치 인증·보상 없음
   const [visited, setVisited] = useState(false);
@@ -377,152 +362,6 @@ function EventDetailPage() {
       mounted = false;
     };
   }, [params?.id]);
-
-  // 광고 프리로드 헬퍼 (unregister ref 관리 포함)
-  const preloadRewardedAd = React.useCallback(() => {
-    if (!loadFullScreenAd.isSupported()) return;
-    loadUnregisterRef.current?.();
-    setRewardedAdLoaded(false);
-    const unregister = loadFullScreenAd({
-      options: { adGroupId: REWARDED_AD_ID },
-      onEvent: (e) => {
-        if (e.type === 'loaded') setRewardedAdLoaded(true);
-      },
-      onError: () => setRewardedAdLoaded(false),
-    });
-    loadUnregisterRef.current = unregister;
-  }, []);
-
-  // 리워드 광고 프리로드
-  useEffect(() => {
-    if (!isLoggedIn) return;
-    preloadRewardedAd();
-    return () => {
-      loadUnregisterRef.current?.();
-      showUnregisterRef.current?.();
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    };
-  }, [isLoggedIn, preloadRewardedAd]);
-
-  // 토스트 표시 헬퍼 (2.5초 후 자동 소멸, 연속 적립 시 타이머 교체)
-  const showTicketToast = React.useCallback((earned: number) => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setTicketResult({ earned });
-    toastTimerRef.current = setTimeout(() => {
-      setTicketResult(null);
-      toastTimerRef.current = null;
-    }, 2500);
-  }, []);
-
-  // 광고 후 상태 초기화 + 다음 광고 프리로드
-  const resetAdState = React.useCallback(() => {
-    setTicketLoading(false);
-    setRewardedAdLoaded(false);
-    preloadRewardedAd();
-  }, [preloadRewardedAd]);
-
-  // 광고 보고 티켓 받기
-  const handleWatchAdForTicket = React.useCallback(() => {
-    if (!isLoggedIn) {
-      if (loginPending) return;
-      setLoginPending(true);
-      login().catch(() => {}).finally(() => setLoginPending(false));
-      return;
-    }
-    if (earnedToday) return; // 오늘 이미 받음 — 버튼 비활성 상태에서 호출 방어
-    if (!showFullScreenAd.isSupported()) {
-      dialog.openAlert({ title: '광고 없음', description: '지금은 광고를 불러올 수 없어요.\n잠시 후 다시 시도해 주세요.' });
-      return;
-    }
-    if (!rewardedAdLoaded) {
-      dialog.openAlert({ title: '광고 준비 중', description: '광고를 불러오는 중이에요.\n잠시 후 다시 눌러 주세요.' });
-      return;
-    }
-    if (!event?.id) return;
-
-    const attemptId = createRewardAdAttemptId();
-    const logAdEvent = (eventType: RewardAdEventType, eventData?: Record<string, unknown>) => {
-      logRewardAdEvent({
-        attemptId,
-        eventType,
-        eventId: event.id,
-        adGroupId: REWARDED_AD_ID,
-        placement: 'event_detail_ticket_cta',
-        eventData,
-        metadata: {
-          eventTitle: event.title,
-          route: '/events/:id',
-          platform: Platform.OS,
-        },
-      }).catch((error) => {
-        if (__DEV__) {
-          console.warn('[RewardAd] log failed:', eventType, error);
-        }
-      });
-    };
-
-    setTicketLoading(true);
-    showUnregisterRef.current?.();
-    const unregister = showFullScreenAd({
-      options: { adGroupId: REWARDED_AD_ID },
-      onEvent: async (ev) => {
-        logAdEvent(ev.type as RewardAdEventType, 'data' in ev ? ev.data : undefined);
-        if (ev.type === 'userEarnedReward') {
-          try {
-            const result = await earnTickets(event.id, attemptId);
-            showTicketToast(result.earned);
-            setEarnedToday(true);
-          } catch (earnErr: any) {
-            const errCode = earnErr?.response?.data?.error;
-            if (errCode === 'EVENT_ALREADY_EARNED_TODAY') {
-              setEarnedToday(true);
-              dialog.openAlert({
-                title: '이미 받았어요',
-                description: '오늘 이 이벤트에서 이미 티켓을 받았어요.\n내일 자정에 다시 받을 수 있어요.',
-              });
-            } else if (errCode === 'DAILY_LIMIT_REACHED') {
-              dialog.openAlert({
-                title: '오늘 티켓 완료!',
-                description: '오늘 받을 수 있는 티켓을 모두 모았어요 🎟\n내일 자정에 다시 받을 수 있어요.',
-              });
-            } else {
-              dialog.openAlert({
-                title: '티켓 지급 실패',
-                description: '광고 시청은 완료됐지만 티켓 지급에 실패했어요.\n잠시 후 다시 확인해 주세요.',
-              });
-            }
-          }
-        }
-        if (ev.type === 'dismissed') {
-          resetAdState();
-        }
-        if (ev.type === 'failedToShow') {
-          resetAdState();
-          dialog.openAlert({
-            title: '광고 없음',
-            description: '지금은 광고를 불러올 수 없어요.\n잠시 후 다시 시도해 주세요.',
-          });
-        }
-      },
-      onError: (error) => {
-        logAdEvent('error', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        resetAdState();
-        dialog.openAlert({
-          title: '광고 없음',
-          description: '지금은 광고를 불러올 수 없어요.\n잠시 후 다시 시도해 주세요.',
-        });
-      },
-    });
-    showUnregisterRef.current = unregister;
-  }, [isLoggedIn, loginPending, earnedToday, rewardedAdLoaded, dialog, showTicketToast, resetAdState, login, event]);
-
-  // 이벤트별 오늘 적립 여부 조회 (로그인 + 이벤트 로드 후)
-  useEffect(() => {
-    if (!isLoggedIn || !event?.id) return;
-    getEarnStatus(event.id).then((s) => setEarnedToday(s.earnedToday)).catch(() => {});
-  }, [isLoggedIn, event?.id]);
 
   // 다녀왔어요 초기 상태(도장 여부)
   useEffect(() => {
@@ -934,37 +773,6 @@ function EventDetailPage() {
             );
           })()}
 
-          {/* 광고 — Key Info Grid 직후, 상세 정보 섹션 전
-               Android: height=0이면 native ad SDK가 초기화 안 됨
-               - loading: height=1, opacity=0 (SDK 초기화 허용, 사용자에게 안 보임)
-               - rendered: height=96, opacity=1
-               - failed: height=0 (공간 제거)
-               iOS: 렌더 전 height=0 (공간 차지 없음) */}
-          {!adFailed && (
-            <View
-              collapsable={false}
-              style={[
-                styles.adBannerContainer,
-                Platform.OS === 'android'
-                  ? {
-                      height: 96,
-                      // opacity 사용 금지: Android SurfaceView/WebView 기반
-                      // native ad SDK는 부모 opacity < 1 시 렌더링 실패
-                      overflow: 'visible',
-                    }
-                  : { height: adRendered ? 96 : 0 },
-              ]}
-            >
-              <InlineAd
-                adGroupId="ait.v2.live.6526c6e693454a28"
-                impressFallbackOnMount={true}
-                onAdRendered={() => setAdRendered(true)}
-                onAdFailedToRender={() => setAdFailed(true)}
-                onNoFill={() => setAdFailed(true)}
-              />
-            </View>
-          )}
-
           {/* 다녀왔어요 자기신고 (위치 인증·보상 없음) */}
           <View style={styles.visitSection}>
             <Pressable
@@ -989,29 +797,6 @@ function EventDetailPage() {
             <Text style={styles.visitNote}>
               ‘다녀왔어요’를 누르면 문화 여권에 도장이 찍혀요. 위치 인증 없이, 추억으로 남겨두는 거예요. (보상 아님)
             </Text>
-          </View>
-
-          {/* 광고 보고 티켓 받기 CTA */}
-          <View style={styles.ticketCtaSection}>
-            <Text style={styles.ticketCtaTitle}>광고 보고 티켓 받기</Text>
-            {ticketResult && (
-              <View style={styles.ticketToast}>
-                <Text style={styles.ticketToastText}>🎟 티켓 조각 +{ticketResult.earned}개!</Text>
-              </View>
-            )}
-            <TouchableOpacity
-              style={[
-                styles.ticketCtaBtn,
-                (ticketLoading || earnedToday || loginPending || (isLoggedIn && !rewardedAdLoaded)) && { opacity: 0.4 },
-              ]}
-              onPress={handleWatchAdForTicket}
-              disabled={ticketLoading || earnedToday || loginPending || (isLoggedIn && !rewardedAdLoaded)}
-            >
-              <Text style={styles.ticketCtaBtnText}>
-                {ticketLoading || loginPending ? '...' : !isLoggedIn ? '로그인하고 티켓 받기' : earnedToday ? '오늘은 이미 받았어요' : !rewardedAdLoaded ? '광고 준비 중...' : '광고 보고 받기'}
-              </Text>
-            </TouchableOpacity>
-            <Text style={styles.ticketCtaHint}>모은 티켓은 포인트로 교환할 수 있어요</Text>
           </View>
 
           {/* 카테고리별 상세 정보 */}
@@ -1103,6 +888,34 @@ function EventDetailPage() {
         </View>
 
       </ScrollView>
+
+      {/* 배너 광고 — 하단 고정(2026-07-23, 스크롤 중간 배치에서 이동). 예매 CTA가 있으면 그 위.
+           Android: height=0이면 native ad SDK가 초기화 안 됨 → 항상 96 고정.
+           iOS: 렌더 전 height=0(공간 차지 없음), 실패 시 컨테이너 제거. */}
+      {!adFailed && (
+        <View
+          collapsable={false}
+          style={[
+            styles.adBannerContainer,
+            Platform.OS === 'android'
+              ? {
+                  height: 96,
+                  // opacity 사용 금지: Android SurfaceView/WebView 기반
+                  // native ad SDK는 부모 opacity < 1 시 렌더링 실패
+                  overflow: 'visible',
+                }
+              : { height: adRendered ? 96 : 0 },
+          ]}
+        >
+          <InlineAd
+            adGroupId="ait.v2.live.6526c6e693454a28"
+            impressFallbackOnMount={true}
+            onAdRendered={() => setAdRendered(true)}
+            onAdFailedToRender={() => setAdFailed(true)}
+            onNoFill={() => setAdFailed(true)}
+          />
+        </View>
+      )}
 
       {/* 하단 CTA — 예매 버튼만 (ScrollView 아래 일반 View로 배치) */}
       {primaryCTALink && (
@@ -1681,18 +1494,6 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     elevation: 10,
     gap: 8,
   },
-  ticketToast: {
-    alignSelf: 'flex-start',
-    backgroundColor: a.blue500,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  ticketToastText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
-  },
   visitSection: {
     marginHorizontal: 20,
     marginTop: 20,
@@ -1728,36 +1529,6 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     lineHeight: 18,
     fontWeight: '600',
     color: a.grey600,
-  },
-  ticketCtaSection: {
-    marginHorizontal: 20,
-    marginTop: 12,
-    backgroundColor: a.grey100,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 10,
-  },
-  ticketCtaTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: a.grey900,
-  },
-  ticketCtaBtn: {
-    backgroundColor: a.blue500,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  ticketCtaBtnText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  ticketCtaHint: {
-    fontSize: 12,
-    color: a.grey500,
-    textAlign: 'center',
   },
   heroActionsContainer: {
     position: 'absolute',

@@ -12,13 +12,12 @@ jest.mock('@toss/tds-react-native', () => ({
 describe('TicketBalanceVoucher (포인트 뽑기 리브랜딩)', () => {
   test('shows the draw CTA and honest range copy when exchangeable', () => {
     const onExchange = jest.fn();
-    const { getByRole, getByText } = render(
+    const { getByRole, getByText, queryByText } = render(
       <TicketBalanceVoucher
         ticketCount={23}
         ticketsPerExchange={10}
         exchanging={false}
         onExchange={onExchange}
-        amountRange={{ min: 10, max: 500, average: 20 }}
       />
     );
 
@@ -26,7 +25,8 @@ describe('TicketBalanceVoucher (포인트 뽑기 리브랜딩)', () => {
     expect(cta).toHaveTextContent(/포인트 뽑기/);
     expect(getByText('2번 뽑기 가능')).toBeTruthy();
     expect(getByText('10티켓 = 포인트 뽑기 1번 · 지금 2번 뽑을 수 있어요')).toBeTruthy();
-    expect(getByText(/매번 10원~500원 사이에서 뽑혀요 · 평균 20원/)).toBeTruthy();
+    // 금액 범위·평균은 표기하지 않는다(2026-07-23 결정 — 리워드탭에서도 제거).
+    expect(queryByText(/평균|사이에서 뽑혀요/)).toBeNull();
 
     fireEvent.press(cta);
     expect(onExchange).toHaveBeenCalledTimes(1);

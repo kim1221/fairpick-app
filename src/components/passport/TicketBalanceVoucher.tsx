@@ -7,10 +7,6 @@
  */
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import {
-  EXCHANGE_AMOUNT_RANGE_FALLBACK,
-  type ExchangeAmountRange,
-} from '../../services/exchangeAmountRange';
 
 // 앱 시그니처 팔레트(네이비·레드·마닐라)로 통일 — 토스블루는 리워드탭에서만 튀어서 제거(2026-07-23).
 const NAVY = '#2A386A';
@@ -21,7 +17,6 @@ export interface TicketBalanceVoucherProps {
   ticketsPerExchange: number;
   exchanging: boolean;
   onExchange: () => void;
-  amountRange?: ExchangeAmountRange;
 }
 
 export function TicketBalanceVoucher({
@@ -29,7 +24,6 @@ export function TicketBalanceVoucher({
   ticketsPerExchange,
   exchanging,
   onExchange,
-  amountRange = EXCHANGE_AMOUNT_RANGE_FALLBACK,
 }: TicketBalanceVoucherProps) {
   const per = ticketsPerExchange > 0 ? ticketsPerExchange : 10;
   const exchangeableTimes = Math.floor(ticketCount / per);
@@ -94,11 +88,10 @@ export function TicketBalanceVoucher({
         <Text style={[styles.buttonArrow, !canExchange || exchanging ? styles.buttonTextDisabled : null]}>→</Text>
       </Pressable>
 
+      {/* 금액 범위·평균은 노출하지 않는다(2026-07-23 사용자 결정 — 검수에서 랜덤 금액 고지를
+          요구하면 이 줄 아래에 되살릴 것). */}
       <Text style={styles.exchangeInfo}>
-        광고 {per}번 = 티켓 {per}장 = <Text style={styles.exchangeStrong}>포인트 뽑기</Text> 1번
-      </Text>
-      <Text style={styles.exchangeInfoSub}>
-        매번 {amountRange.min}원~{amountRange.max}원 사이에서 뽑혀요 · 평균 {amountRange.average}원 · 토스포인트로 지급돼요
+        광고 {per}번 = 티켓 {per}장 = <Text style={styles.exchangeStrong}>포인트 뽑기</Text> 1번 · 토스포인트로 지급돼요
       </Text>
     </View>
   );
@@ -279,14 +272,6 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     textAlign: 'center',
     fontWeight: '700',
-  },
-  exchangeInfoSub: {
-    marginTop: 4,
-    color: ON_BG_MUTED,
-    fontSize: 11.5,
-    lineHeight: 17,
-    textAlign: 'center',
-    fontWeight: '600',
   },
   exchangeStrong: {
     color: NAVY,

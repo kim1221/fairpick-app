@@ -114,14 +114,23 @@ export function ThemeCollectionSection({ sets, badges, onPressSet }: ThemeCollec
           <Text style={styles.sectionEyebrow}>BADGES · 배지장</Text>
           <View style={styles.badgeGrid}>
             {badges.map((badge) => (
-              <View key={badge.badgeKey} style={styles.badgeChip}>
+              // 세트 배지는 탭하면 완성했던 세트를 아카이브로 다시 본다(만료 후에도 상세 조회 가능).
+              // 마일스톤 배지(setId 없음)는 눌러도 갈 곳이 없어 비활성.
+              <Pressable
+                key={badge.badgeKey}
+                accessibilityRole="button"
+                accessibilityLabel={`${badge.title} 배지${badge.setId ? ' — 세트 다시 보기' : ''}`}
+                disabled={!badge.setId}
+                onPress={badge.setId ? () => onPressSet(badge.setId!) : undefined}
+                style={({ pressed }) => [styles.badgeChip, pressed ? styles.badgeChipPressed : null]}
+              >
                 <View style={styles.badgeChipCoin}>
                   <Text style={styles.badgeChipGlyph}>✦</Text>
                 </View>
                 <Text style={styles.badgeChipTitle} numberOfLines={1}>
                   {badge.title}
                 </Text>
-              </View>
+              </Pressable>
             ))}
           </View>
         </View>
@@ -240,6 +249,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E0D6BE',
     maxWidth: '100%',
+  },
+  badgeChipPressed: {
+    opacity: 0.7,
   },
   badgeChipCoin: {
     width: 24,

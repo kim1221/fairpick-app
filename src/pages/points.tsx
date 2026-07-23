@@ -8,14 +8,11 @@ import { TicketBalanceVoucher } from '../components/passport/TicketBalanceVouche
 import { TicketHistoryList } from '../components/passport/TicketHistoryList';
 import { useAuth } from '../hooks/useAuth';
 import {
-  EXCHANGE_AMOUNT_RANGE_FALLBACK,
   exchangeTickets,
-  getTicketConfig,
   getTicketHistory,
   getTickets,
   subscribeTicketCount,
   TICKETS_PER_EXCHANGE,
-  type ExchangeAmountRange,
   type TicketHistoryResponse,
   type TicketInfo,
 } from '../services/ticketService';
@@ -164,19 +161,6 @@ function PointsPage() {
     drawNo: number | null;
     drawnAt: Date;
   } | null>(null);
-  const [amountRange, setAmountRange] = useState<ExchangeAmountRange>(EXCHANGE_AMOUNT_RANGE_FALLBACK);
-
-  useEffect(() => {
-    let mounted = true;
-    getTicketConfig()
-      .then((config) => {
-        if (mounted && config.exchangeAmount) setAmountRange(config.exchangeAmount);
-      })
-      .catch(() => {});
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   const commitDashboard = useCallback((
     cacheKey: string,
@@ -367,7 +351,6 @@ function PointsPage() {
               ticketsPerExchange={ticketsPerExchange}
               exchanging={exchanging}
               onExchange={handleExchange}
-              amountRange={amountRange}
             />
             <TicketHistoryList items={historyItems} loading={loading} error={historyLoadError} />
           </>
