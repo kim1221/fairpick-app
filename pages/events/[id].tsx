@@ -14,9 +14,9 @@ import {
   Image,
   StatusBar,
 } from 'react-native';
-import { Txt, Badge, Post, BottomSheet, Loader, Button, Icon, IconButton, useDialog } from '@toss/tds-react-native';
+import { Txt, Badge, Post, BottomSheet, Loader, Button, Icon, useDialog } from '@toss/tds-react-native';
 import { useAdaptive } from '@toss/tds-react-native/private';
-import { InlineAd, share, getTossShareLink } from '@apps-in-toss/framework';
+import { InlineAd } from '@apps-in-toss/framework';
 
 type Adaptive = ReturnType<typeof useAdaptive>;
 type EventStyles = ReturnType<typeof createStyles>;
@@ -32,6 +32,7 @@ import { useLike } from '../../src/hooks/useLike';
 import { LikesProvider } from '../../src/contexts/LikesContext';
 import { useAuth } from '../../src/hooks/useAuth';
 import http from '../../src/lib/http';
+import { getVisitedIds, markVisited, unmarkVisited } from '../../src/services/visitService';
 
 type EventDetailParams = {
   id?: string;
@@ -242,8 +243,11 @@ function EventDetailPage() {
   const [adRendered, setAdRendered] = useState(false);
   const [adFailed, setAdFailed] = useState(false);
 
-  // 티켓 적립은 홈으로, 방문 표시는 컬렉션 탭으로 일원화 — 상세는 저장(useLike)만 다룬다(2026-07-23).
+  // 티켓 적립은 홈 일원화. 상세는 저장(useLike) + 방문 표시(컴팩트 토글)만 다룬다(2026-07-23).
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [visited, setVisited] = useState(false);
+  const [visitPending, setVisitPending] = useState(false);
+  const [loginPending, setLoginPending] = useState(false);
   // event 로드 후 snapshot 추출 → useLike에 전달 (찜 시 로컬 snapshot 저장)
   const eventSnapshot = React.useMemo(() => event ? {
     title: event.title,
@@ -256,7 +260,7 @@ function EventDetailPage() {
     endAt: event.endAt,
   } : undefined, [event]);
   const { isLiked, toggle: toggleLikeWithSync } = useLike({ eventId: params?.id, snapshot: eventSnapshot });
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, login } = useAuth();
   const dialog = useDialog();
 
   useEffect(() => {
@@ -357,6 +361,43 @@ function EventDetailPage() {
     };
   }, [params?.id]);
 
+  // 방문 여부 초기화 + 토글(낙관적·보상 없음 — 컬렉션 큐레이션 재료)
+  useEffect(() => {
+    if (!isLoggedIn || !event?.id) return;
+    const eventId = event.id;
+    let mounted = true;
+    getVisitedIds()
+      .then((ids) => {
+        if (mounted) setVisited(ids.has(eventId));
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [isLoggedIn, event?.id]);
+
+  const handleToggleVisited = React.useCallback(async () => {
+    if (!event?.id || visitPending) return;
+    if (!isLoggedIn) {
+      if (loginPending) return;
+      setLoginPending(true);
+      login().catch(() => {}).finally(() => setLoginPending(false));
+      return;
+    }
+    const eventId = event.id;
+    const wasVisited = visited;
+    setVisitPending(true);
+    setVisited(!wasVisited);
+    try {
+      if (wasVisited) await unmarkVisited(eventId);
+      else await markVisited(eventId);
+    } catch {
+      setVisited(wasVisited);
+    } finally {
+      setVisitPending(false);
+    }
+  }, [event?.id, visited, visitPending, isLoggedIn, loginPending, login]);
+
   // dwell 시간 측정: 이벤트 데이터가 로드된 시점부터 페이지 이탈까지
   // 5초 미만은 노이즈로 간주하여 기록하지 않음
   useEffect(() => {
@@ -436,26 +477,6 @@ function EventDetailPage() {
     }
   };
 
-  const handleShare = async () => {
-    if (!event) return;
-
-    try {
-      let message: string;
-      try {
-        message = await getTossShareLink(
-          `intoss://fairpick-app/events/${event.id}`,
-          event.thumbnailUrl ?? undefined,
-        );
-      } catch {
-        // 앱 미출시 환경(샌드박스/개발)에서는 단순 메시지로 폴백
-        message = `${event.title}\n${event.venue || event.region}\n${event.periodText || ''}`;
-      }
-      await share({ message });
-    } catch (error) {
-      console.error('[EventDetail] Failed to share:', error);
-    }
-  };
-
   if (status === 'loading') {
     return (
       <View style={[styles.page, styles.centered, { backgroundColor: adaptive.background }]}>
@@ -501,48 +522,8 @@ function EventDetailPage() {
             />
           </TouchableOpacity>
 
-          {/* Hero Overlay Badges */}
-          <View style={styles.heroBadgeContainer}>
-            {event.isFree && (
-              <View style={styles.heroBadge}>
-                <Text style={styles.heroBadgeText}>무료</Text>
-              </View>
-            )}
-            {event.isEndingSoon && (
-              <View style={styles.heroBadge}>
-                <Text style={styles.heroBadgeText}>마감임박</Text>
-              </View>
-            )}
-            {(event.buzzScore ?? 0) >= 70 && (
-              <View style={styles.heroBadge}>
-                <Text style={styles.heroBadgeText}>인기</Text>
-              </View>
-            )}
-          </View>
-
-          {/* Hero Action Buttons (우상단) */}
-          <View style={styles.heroActionsContainer}>
-            <IconButton
-              name="icon-share-dots-mono"
-              variant="fill"
-              bgColor="rgba(0,0,0,0.45)"
-              color="#FFFFFF"
-              iconSize={20}
-              style={styles.heroActionBtn}
-              onPress={handleShare}
-              accessibilityLabel="공유하기"
-            />
-            <IconButton
-              name="icon-heart-mono"
-              variant="fill"
-              bgColor="rgba(0,0,0,0.45)"
-              color={isLiked ? adaptive.red500 : '#FFFFFF'}
-              iconSize={20}
-              style={styles.heroActionBtn}
-              onPress={handleToggleLike}
-              accessibilityLabel={isLiked ? '찜 해제하기' : '찜하기'}
-            />
-          </View>
+          {/* 히어로 오버레이 칩·공유·하트 제거(2026-07-23) — 가격/마감 정보는 본문 그리드가,
+               저장은 본문의 저장하기 버튼이 담당한다. 이미지는 온전히 이미지로. */}
         </View>
 
         <View style={[styles.contentCard, { backgroundColor: adaptive.background }]}>
@@ -716,19 +697,36 @@ function EventDetailPage() {
             );
           })()}
 
-          {/* 저장하기 — 히어로 하트와 동기화(useLike). 여권/다녀왔어요 대형 버튼은 제거(2026-07-23,
-               방문 표시는 컬렉션 탭 카드별 '방문' 버튼으로 일원화 — 큐레이션 재료라 개념 자체는 유지). */}
+          {/* 저장하기(주) + 방문 표시(보조 토글) — 여권 카피 없이 담백하게(2026-07-23). */}
           <View style={styles.saveSection}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={isLiked ? '저장 해제하기' : '저장하기'}
-              onPress={handleToggleLike}
-              style={[styles.saveBtn, isLiked ? styles.saveBtnDone : styles.saveBtnIdle]}
-            >
-              <Text style={[styles.saveBtnText, isLiked ? styles.saveBtnDoneText : styles.saveBtnIdleText]}>
-                {isLiked ? '저장됨 ✓' : '☆ 저장하기'}
-              </Text>
-            </Pressable>
+            <View style={styles.saveRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={isLiked ? '저장 해제하기' : '저장하기'}
+                onPress={handleToggleLike}
+                style={[styles.saveBtn, isLiked ? styles.saveBtnDone : styles.saveBtnIdle]}
+              >
+                <Text style={[styles.saveBtnText, isLiked ? styles.saveBtnDoneText : styles.saveBtnIdleText]}>
+                  {isLiked ? '저장됨 ✓' : '☆ 저장하기'}
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={visited ? '방문 표시 취소' : '방문 표시하기'}
+                onPress={handleToggleVisited}
+                disabled={visitPending || loginPending}
+                style={[
+                  styles.saveBtn,
+                  styles.visitToggleBtn,
+                  visited ? styles.saveBtnDone : null,
+                  (visitPending || loginPending) && { opacity: 0.5 },
+                ]}
+              >
+                <Text style={[styles.saveBtnText, visited ? styles.saveBtnDoneText : styles.visitToggleText]}>
+                  {visited ? '방문함 ✓' : '◉ 방문 표시'}
+                </Text>
+              </Pressable>
+            </View>
             <Text style={styles.saveNote}>
               저장한 카드는 컬렉션 탭의 ‘저장해 둔 카드’에서 다시 볼 수 있어요
             </Text>
@@ -1230,23 +1228,6 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
   heroContainer: {
     position: 'relative',
   },
-  heroBadgeContainer: {
-    position: 'absolute',
-    top: 16,
-    left: 16,
-    gap: 8,
-  },
-  heroBadge: {
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  heroBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '600',
-  },
   contentCard: {
     paddingHorizontal: 20,
     paddingTop: 24,
@@ -1434,12 +1415,24 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     marginTop: 20,
     gap: 12,
   },
+  saveRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
   saveBtn: {
+    flex: 1,
     minHeight: 50,
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
+  },
+  visitToggleBtn: {
+    backgroundColor: 'transparent',
+    borderColor: '#CBA15E',
+  },
+  visitToggleText: {
+    color: '#8A6B33',
   },
   saveBtnIdle: {
     backgroundColor: '#CBA15E',
@@ -1464,18 +1457,6 @@ const createStyles = (a: Adaptive) => StyleSheet.create({
     lineHeight: 18,
     fontWeight: '600',
     color: a.grey600,
-  },
-  heroActionsContainer: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    flexDirection: 'row',
-    gap: 8,
-  },
-  heroActionBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
   },
   secondaryButtonText: {
     color: a.grey700,

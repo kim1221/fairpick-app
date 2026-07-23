@@ -154,18 +154,9 @@ export function CollectionSetDetailPage() {
 
   return (
     <View style={styles.screen}>
+      {/* 뒤로가기는 네이티브 앱바가 제공한다 — 페이지 자체 백버튼은 중복이라 제거(2026-07-23). */}
       <View style={[styles.header, { paddingTop: top + 8 }]}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="컬렉션으로 돌아가기"
-          onPress={() => navigation.goBack()}
-          hitSlop={12}
-          style={styles.backButton}
-        >
-          <Text style={styles.backIcon}>‹</Text>
-        </Pressable>
         <Text style={styles.headerTitle}>테마 컬렉션</Text>
-        <View style={styles.headerSpacer} />
       </View>
 
       {loading ? (
@@ -256,15 +247,11 @@ const NOTCH_H = 18;
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: BG },
   header: {
-    flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
-    paddingBottom: 6,
+    paddingBottom: 10,
   },
-  backButton: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
-  backIcon: { color: CREAM, fontSize: 30, lineHeight: 34, fontWeight: '600', marginTop: -3 },
-  headerTitle: { flex: 1, textAlign: 'center', color: CREAM, fontSize: 15, fontWeight: '800' },
-  headerSpacer: { width: 44 },
+  headerTitle: { textAlign: 'center', color: CREAM, fontSize: 15, fontWeight: '800' },
   scroll: { flex: 1 },
   content: { paddingHorizontal: 20, paddingTop: 8 },
   centerState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
