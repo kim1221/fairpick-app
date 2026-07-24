@@ -106,6 +106,9 @@ export function ThemeCollectionSection({ sets, badges, onPressSet }: ThemeCollec
               <SetFolderCard key={set.setId} set={set} onPress={() => onPressSet(set.setId)} />
             ))}
           </ScrollView>
+          <Text style={styles.sectionNotice}>
+            매주 월요일 새 컬렉션이 열려요 · 완성 배지는 배지장에 계속 남아요
+          </Text>
         </>
       ) : null}
 
@@ -152,6 +155,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Noto Serif KR',
   },
   sectionCaption: { marginTop: 3, color: SUB, fontSize: 11.5, lineHeight: 17, fontWeight: '600' },
+  sectionNotice: { marginTop: 12, color: SUB, fontSize: 11, lineHeight: 16, fontWeight: '600' },
   carousel: { paddingTop: 14, paddingRight: 20, gap: 12 },
   folderCard: {
     width: 252,
