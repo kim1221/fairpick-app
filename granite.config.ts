@@ -12,7 +12,9 @@ export default defineConfig({
   plugins: [
     appsInToss({
       brand: {
-        displayName: '컬처카드',
+        // ⚠️ 콘솔 앱정보의 "한국어 앱 이름"과 글자·띄어쓰기까지 완전히 동일해야 검수 통과(2026-07-24 반려 교훈).
+        // 콘솔 등록명 = "컬처 카드"(띄어쓰기 있음)라 여기도 맞춘다.
+        displayName: '컬처 카드',
         primaryColor: '#3182F6',
         // 앱인토스 brand.icon은 콘솔에 업로드한 이미지 URL이어야 한다.
         // 원본 자산: src/assets/images/branding/culturecard-app-icon.png
