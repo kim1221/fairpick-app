@@ -2785,6 +2785,12 @@ test('GET /api/collections/badges lists awarded badges newest first', async () =
 });
 
 test('GET /api/cards/v2/today steers the "?" slot to a collection assist candidate', async () => {
+  // "?" 슬롯 분기(assist/explore/wild)는 dailySeed(userId, today)에 의존해 날짜마다 달라진다.
+  // 이 테스트는 assist 분기를 검증하므로 assist(<0.6)가 나오는 날짜로 Date.now를 고정한다
+  // (2026-09-01 KST, branch≈0.223). 이벤트 날짜(isoDaysFromNow)도 같은 now를 써야 하므로 최상단에서 고정.
+  const realNow = Date.now;
+  Date.now = () => Date.parse('2026-09-01T03:00:00.000Z');
+  try {
   // 카테고리 슬롯 2개(전시·공연)를 채우고 나면 축제 후보 2장이 "?" 몫으로 남는다.
   // 그중 하나만 진행 중 세트의 빈 슬롯 조건에 맞는다 → 어시스트가 그걸 골라야 한다.
   const freshCandidates = [
@@ -2831,6 +2837,9 @@ test('GET /api/cards/v2/today steers the "?" slot to a collection assist candida
   assert.match(assistSql, /in_progress\.remaining > 0/);
 
   await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    Date.now = realNow;
+  }
 });
 
 // ── 주간 세트 발행 배치 (스펙 §4.3) ────────────────────────────────────────

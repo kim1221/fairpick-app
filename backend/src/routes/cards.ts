@@ -33,7 +33,17 @@ const IMPRESSION_COOLDOWN_DAYS = 7;   // 최근 보여준 카드 소프트 제�
 const FRESHNESS_WINDOW_DAYS = 60;     // created_at 신선도 감쇠 창
 const TASTE_WINDOW_DAYS = 90;         // 취향 신호 집계 창
 const WALK_METERS_PER_MINUTE = 80;
+// 도보 40분(약 3.2km) 초과면 시간 대신 거리로 표기한다("도보 몇 시간"은 비현실적).
+const WALK_LABEL_MAX_MINUTES = 40;
 const NEARBY_RADIUS_STEPS_M = [3000, 10000, 50000] as const;
+
+/** 근거리는 도보 시간, 원거리는 대략 거리(km)로 표기. */
+function distanceLabelFromWalkMinutes(walkMinutes: number | null): string | null {
+  if (walkMinutes == null || walkMinutes <= 0) return null;
+  if (walkMinutes <= WALK_LABEL_MAX_MINUTES) return `도보 ${walkMinutes}분`;
+  const km = Math.round((walkMinutes * WALK_METERS_PER_MINUTE) / 1000);
+  return `약 ${km}km`;
+}
 const PRIMARY_CATEGORIES = ['전시', '공연', '팝업'] as const;
 const CATEGORY_PRIORITY = [...PRIMARY_CATEGORIES, '축제', '기타'] as const;
 const CATEGORY_CANDIDATE_LIMIT = Math.ceil(CANDIDATE_LIMIT / CATEGORY_PRIORITY.length);
@@ -1009,7 +1019,7 @@ function toLockedPreview(
     // 토큰·visualSeed·팔레트·isRevisit만 유지.
     category: isMystery ? null : card.category,
     areaLabel: isMystery ? null : card.region,
-    distanceLabel: isMystery || card.walkMinutes == null ? null : `도보 ${card.walkMinutes}분`,
+    distanceLabel: isMystery ? null : distanceLabelFromWalkMinutes(card.walkMinutes),
     timingLabel: isMystery ? null : lockedTimingLabel(card.dday),
     reasonTags: isMystery ? [] : card.reasonTags,
     teaserEyebrow: isMystery ? null : teaser.eyebrow,

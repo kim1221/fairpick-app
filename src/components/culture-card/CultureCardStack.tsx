@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import type { LockedCardPreview } from '../../services/cardsService';
 import { romanizeRegion } from '../../utils/regionRomanize';
+import { distanceRowLabel } from './distanceLabel';
 import {
   getLockedCardChoice,
   getSlotTabContent,
@@ -121,7 +122,7 @@ function CategoryHero({
     { label: 'DATE', value: '오늘 열람' },
   ];
   if (card?.distanceLabel) {
-    rows.push({ label: 'WALK', value: card.distanceLabel });
+    rows.push({ label: distanceRowLabel(card.distanceLabel), value: card.distanceLabel });
   } else if (card?.timingLabel) {
     rows.push({ label: 'NOTE', value: card.timingLabel });
   }

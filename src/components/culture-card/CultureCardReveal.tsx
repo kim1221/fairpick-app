@@ -2,6 +2,7 @@ import React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Icon } from '@toss/tds-react-native';
 import type { Card, OpenCultureCardResponse } from '../../services/cardsService';
+import { formatWalkOrDistance } from './distanceLabel';
 import { BoxStamp } from './tagKit';
 
 const SURFACE = '#FFFFFF';
@@ -67,7 +68,7 @@ export function CultureCardReveal({
 }: CultureCardRevealProps) {
   const { card, earned } = openedCard;
   const schedule = dateRange(card);
-  const distance = card.walkMinutes ? `도보 ${card.walkMinutes}분` : null;
+  const distance = formatWalkOrDistance(card.walkMinutes);
   const meta = [schedule, distance, ddayLabel(card.dday)].filter(Boolean).join(' · ');
   const isHidden = openedCard.reveal?.hidden === true;
 
