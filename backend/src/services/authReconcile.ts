@@ -106,7 +106,6 @@ export async function migrateAnonymousData(
 
 export type ReconcileLoginInput = {
   tossUserKey: number;
-  name: string | null;
   accessToken: string;
   refreshToken: string;
   expiresAt: Date;
@@ -123,7 +122,9 @@ export async function reconcileLogin(
   client: PoolClient,
   input: ReconcileLoginInput,
 ): Promise<string> {
-  const { tossUserKey, name, accessToken, refreshToken, expiresAt, anonymousId } = input;
+  // 실명(name)은 저장하지 않는다(2026-07-24, 개인정보 최소화 — 인사말 한 곳에만 쓰였고 탈퇴 파기
+  // 부담을 없애기 위해 제거). 재로그인 시 name = NULL로 덮어 기존 저장분도 정리한다.
+  const { tossUserKey, accessToken, refreshToken, expiresAt, anonymousId } = input;
 
   const anonRow = anonymousId
     ? (
@@ -145,10 +146,10 @@ export async function reconcileLogin(
     }
     await client.query(
       `UPDATE users
-         SET name = COALESCE($2, name),
-             toss_access_token = $3, toss_refresh_token = $4, token_expires_at = $5
+         SET name = NULL,
+             toss_access_token = $2, toss_refresh_token = $3, token_expires_at = $4
        WHERE id = $1`,
-      [toId, name, accessToken, refreshToken, expiresAt],
+      [toId, accessToken, refreshToken, expiresAt],
     );
     return toId;
   }
@@ -156,18 +157,18 @@ export async function reconcileLogin(
   if (anonRow) {
     await client.query(
       `UPDATE users
-         SET toss_user_key = $2, name = COALESCE($3, name),
-             toss_access_token = $4, toss_refresh_token = $5, token_expires_at = $6
+         SET toss_user_key = $2, name = NULL,
+             toss_access_token = $3, toss_refresh_token = $4, token_expires_at = $5
        WHERE id = $1`,
-      [anonRow.id, tossUserKey, name, accessToken, refreshToken, expiresAt],
+      [anonRow.id, tossUserKey, accessToken, refreshToken, expiresAt],
     );
     return anonRow.id;
   }
 
   const { rows } = await client.query<{ id: string }>(
-    `INSERT INTO users (toss_user_key, name, toss_access_token, toss_refresh_token, token_expires_at)
-     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [tossUserKey, name, accessToken, refreshToken, expiresAt],
+    `INSERT INTO users (toss_user_key, toss_access_token, toss_refresh_token, token_expires_at)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [tossUserKey, accessToken, refreshToken, expiresAt],
   );
   return rows[0].id;
 }

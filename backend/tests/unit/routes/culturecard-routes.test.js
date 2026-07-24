@@ -2435,7 +2435,6 @@ function recordingClient(handlers) {
 
 const LOGIN_ARGS = {
   tossUserKey: 987654,
-  name: '테스터',
   accessToken: 'acc',
   refreshToken: 'ref',
   expiresAt: new Date('2026-07-24T00:00:00.000Z'),
@@ -2454,7 +2453,9 @@ test('reconcileLogin PROMOTE: attaches toss_user_key to the anon row without mig
   // 데이터 이전 쿼리는 없어야 한다(promote는 같은 행 재사용).
   assert.equal(client.calls.some((c) => /user_tickets|user_likes|DELETE FROM users/.test(c.text)), false);
   const promote = client.calls.find((c) => /UPDATE users SET toss_user_key = \$2/.test(c.text));
-  assert.deepEqual(promote.params, ['anon-1', 987654, '테스터', 'acc', 'ref', LOGIN_ARGS.expiresAt]);
+  // 실명은 저장하지 않는다 — name = NULL로 덮고 파라미터에도 실명이 없다.
+  assert.match(promote.text, /name = NULL/);
+  assert.deepEqual(promote.params, ['anon-1', 987654, 'acc', 'ref', LOGIN_ARGS.expiresAt]);
 });
 
 test('reconcileLogin MERGE: migrates anon data into the existing toss row then deletes the anon row', async () => {

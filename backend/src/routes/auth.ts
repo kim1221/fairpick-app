@@ -123,7 +123,6 @@ router.post('/login', async (req, res) => {
       await client.query('BEGIN');
       userId = await reconcileLogin(client, {
         tossUserKey: tossUser.userKey,
-        name: tossUser.name ?? null,
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         expiresAt,
@@ -140,9 +139,10 @@ router.post('/login', async (req, res) => {
     // 4. 우리 앱 JWT 발급 (Toss 토큰은 절대 클라이언트에 내려보내지 않음)
     const token = signJwt(userId, tossUser.userKey, false);
 
+    // 실명은 저장·반환하지 않는다(개인정보 최소화).
     res.json({
       token,
-      user: { id: userId, userKey: tossUser.userKey, name: tossUser.name ?? null },
+      user: { id: userId, userKey: tossUser.userKey, name: null },
     });
   } catch (err) {
     console.error('[auth/login]', err);
@@ -159,8 +159,8 @@ router.post('/login', async (req, res) => {
  */
 router.get('/me', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query<{ name: string | null; toss_access_token: string | null }>(
-      'SELECT name, toss_access_token FROM users WHERE id = $1',
+    const { rows } = await pool.query<{ toss_access_token: string | null }>(
+      'SELECT toss_access_token FROM users WHERE id = $1',
       [req.user!.userId]
     );
 
@@ -170,10 +170,11 @@ router.get('/me', requireAuth, async (req, res) => {
       return;
     }
 
+    // 실명은 저장·반환하지 않는다(개인정보 최소화).
     res.json({
       id: req.user!.userId,
       userKey: req.user!.userKey,
-      name: rows[0].name ?? null,
+      name: null,
     });
   } catch (err) {
     console.error('[auth/me]', err);
