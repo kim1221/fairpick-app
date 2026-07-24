@@ -121,6 +121,8 @@ export function CollectionSetDetailPage() {
   const [detail, setDetail] = useState<ThemeCollectionSetDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  // 하단 고정 배너의 실제 높이 — 스크롤 콘텐츠가 배너 뒤에 가리지 않게 그만큼 여백을 준다.
+  const [bannerHeight, setBannerHeight] = useState(0);
 
   useEffect(
     () => () => {
@@ -177,7 +179,7 @@ export function CollectionSetDetailPage() {
       ) : (
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.content, { paddingBottom: bottom + 36 }]}
+          contentContainerStyle={[styles.content, { paddingBottom: bottom + 36 + bannerHeight }]}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.headerCard}>
@@ -237,11 +239,16 @@ export function CollectionSetDetailPage() {
           <Text style={styles.finePrint}>
             빈 슬롯은 조건이 맞는 카드를 열면 자동으로 채워져요{'\n'}발행 후에 연 카드만 인정돼요
           </Text>
-
-          {/* 배너 광고 — 스크롤 내부 끝(네이티브 배너는 커서 하단 고정하면 어색). */}
-          <InlineAdSlot adGroupId={AD_PLACEMENTS.setDetailBottom} style={{ marginTop: 24 }} />
         </ScrollView>
       )}
+
+      {/* 배너 광고 — 하단 고정(스크롤과 무관하게 항상 보임). 스크롤 여백은 bannerHeight로 확보. */}
+      <View
+        style={[styles.fixedBanner, { paddingBottom: bottom }]}
+        onLayout={(e) => setBannerHeight(e.nativeEvent.layout.height)}
+      >
+        <InlineAdSlot adGroupId={AD_PLACEMENTS.setDetailBottom} />
+      </View>
     </View>
   );
 }
@@ -251,6 +258,7 @@ const NOTCH_H = 18;
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: BG },
+  fixedBanner: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: BG },
   header: {
     alignItems: 'center',
     paddingHorizontal: 8,

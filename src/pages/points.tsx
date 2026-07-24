@@ -1,6 +1,6 @@
 import { createRoute, ScrollViewInertialBackground } from '@granite-js/react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { requestReview } from '@apps-in-toss/framework';
 import { Loader, useDialog } from '@toss/tds-react-native';
 import { InlineAdSlot } from '../components/ads/InlineAdSlot';
@@ -123,13 +123,37 @@ function createStyles() {
       lineHeight: 18,
       fontWeight: '600',
     },
+    logoutButton: {
+      marginTop: 28,
+      alignItems: 'center',
+      paddingVertical: 12,
+    },
+    logoutText: {
+      color: ON_BG_MUTED,
+      fontSize: 13,
+      fontWeight: '700',
+      textDecorationLine: 'underline',
+    },
   });
 }
 
 function PointsPage() {
   const styles = useMemo(createStyles, []);
   const dialog = useDialog();
-  const { isLoggedIn, isLinked, user, isLoading: authLoading, login } = useAuth();
+  const { isLoggedIn, isLinked, user, isLoading: authLoading, login, logout } = useAuth();
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = useCallback(async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await logout();
+    } catch {
+      // 로그아웃 실패는 조용히 넘긴다(로컬 세션은 어차피 정리됨).
+    } finally {
+      setLoggingOut(false);
+    }
+  }, [logout, loggingOut]);
   const dashboardCacheKey = authLoading
     ? null
     : getDashboardCacheKey(isLoggedIn, user?.id);
@@ -387,6 +411,19 @@ function PointsPage() {
               }
             />
             <TicketHistoryList items={historyItems} loading={loading} error={historyLoadError} />
+
+            {/* 로그아웃 — 토스 연결을 끊고 익명 상태로 돌아간다(티켓은 유지). 다음 뽑기에서
+                다시 로그인 시트가 뜬다(로그인 흐름 재테스트 겸 계정 연결 해제 기능). */}
+            {isLinked ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={handleLogout}
+                style={styles.logoutButton}
+                disabled={loggingOut}
+              >
+                <Text style={styles.logoutText}>{loggingOut ? '로그아웃 중이에요' : '로그아웃'}</Text>
+              </Pressable>
+            ) : null}
           </>
         )}
       </ScrollView>
