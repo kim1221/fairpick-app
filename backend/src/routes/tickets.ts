@@ -348,6 +348,14 @@ router.post('/exchange', requireAuth, async (req: Request, res: Response) => {
   if (req.user!.userKey == null) {
     return res.status(403).json({ error: 'TOSS_LOGIN_REQUIRED' });
   }
+  // 토스 연결 끊기(언링크) 감지 — 콜백이 toss_access_token을 지운다. JWT가 살아 있어도 재로그인 필요.
+  const { rows: linkRows } = await pool.query<{ toss_access_token: string | null }>(
+    'SELECT toss_access_token FROM users WHERE id = $1',
+    [userId]
+  );
+  if (!linkRows[0]?.toss_access_token) {
+    return res.status(403).json({ error: 'TOSS_LOGIN_REQUIRED' });
+  }
   const promotionCode = process.env.PROMOTION_CODE;
   if (!promotionCode) {
     return res.status(503).json({ error: 'PROMOTION_NOT_CONFIGURED' });

@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import { pool } from '../db';
 import { requireAuth } from '../middleware/requireAuth';
-import { COLLECTION_COMPLETION_BONUS_TICKETS } from '../services/collections';
+import { COLLECTION_COMPLETION_BONUS_TICKETS, backfillCompletedSetBadges } from '../services/collections';
 
 /**
  * 테마 컬렉션 조회 API(스펙 §5.2). 읽기 전용 — 진행 쓰기 경로는 `/v2/open`에만 있다.
@@ -231,6 +231,19 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 router.get('/badges', requireAuth, async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   try {
+    // 자가치유: 완성됐는데 배지 유실된 세트를 소급 지급(멱등). 조회 전에 정정해 즉시 반영한다.
+    const healClient = await pool.connect();
+    try {
+      await healClient.query('BEGIN');
+      await backfillCompletedSetBadges(healClient, userId);
+      await healClient.query('COMMIT');
+    } catch (healErr) {
+      await healClient.query('ROLLBACK').catch(() => {});
+      console.warn('[Collections] badge backfill 실패(무시):', healErr);
+    } finally {
+      healClient.release();
+    }
+
     const { rows } = await pool.query<{
       badge_key: string;
       set_id: string | null;

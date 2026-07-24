@@ -285,25 +285,40 @@ function PointsPage() {
 
     if (exchanging || currentTicketCount < ticketsPerExchange) return;
 
-    // 첫 환전 로그인 게이트(toss-login §UX규약): 익명이면 곧장 네이티브 토스 로그인 시트로 직행.
-    // 실패/취소는 토스트 한 줄만 안내하고, 뽑기 버튼 재클릭으로 재시도할 수 있게 둔다.
-    if (!isLinked) {
+    // 로그인 게이트(toss-login §UX규약): 로그인 필요 상태면 곧장 네이티브 토스 로그인 시트로 직행.
+    // 취소/실패는 LOGIN_CANCELLED로 던져 토스트 한 줄만 안내(뽑기 버튼 재클릭으로 재시도).
+    const loginOrThrow = async () => {
       try {
         await login();
       } catch {
-        await dialog.openAlert({
-          title: '로그인하지 못했어요',
-          description: '다시 시도해 주세요.',
-        });
-        return;
+        throw new Error('LOGIN_CANCELLED');
       }
-    }
+    };
+    // 한 번의 뽑기: pending 추첨 → SDK 지급 → confirm. 서버가 재로그인을 요구하면(익명·언링크)
+    // 여기서 TOSS_LOGIN_REQUIRED가 던져진다.
+    const drawOnce = async () => {
+      const result = await exchangeTickets();
+      if (!result.success) throw new Error('EXCHANGE_NOT_CONFIRMED');
+      return result;
+    };
 
     setExchanging(true);
     try {
-      const result = await exchangeTickets();
-      if (!result.success) {
-        throw new Error('EXCHANGE_NOT_CONFIRMED');
+      // 익명/언링크면(클라가 아는 한) 먼저 로그인. isLinked는 앱 복원 시점 값이라
+      // 세션 중 토스에서 연결을 끊었으면 stale일 수 있어 — 그 경우는 아래 403 재시도가 잡는다.
+      if (!isLinked) await loginOrThrow();
+
+      let result;
+      try {
+        result = await drawOnce();
+      } catch (err: any) {
+        // 서버가 재로그인 요구(언링크로 stale linked 등) → 곧장 로그인 시트 → 1회 재시도.
+        if (err?.response?.data?.error === 'TOSS_LOGIN_REQUIRED') {
+          await loginOrThrow();
+          result = await drawOnce();
+        } else {
+          throw err;
+        }
       }
 
       commitDashboard(dashboardCacheKey, (previous) => ({
@@ -343,11 +358,10 @@ function PointsPage() {
         requestReview().catch(() => {});
       }
     } catch (err: any) {
-      // 익명 세션이 만료돼 서버가 게이트한 경우(방어) — 로그인 유도로 매핑.
-      if (err?.response?.data?.error === 'TOSS_LOGIN_REQUIRED') {
+      if (err?.message === 'LOGIN_CANCELLED') {
         await dialog.openAlert({
-          title: '로그인이 필요해요',
-          description: '토스로 로그인하면 포인트를 뽑을 수 있어요.',
+          title: '로그인하지 못했어요',
+          description: '다시 시도해 주세요.',
         });
       } else {
         await dialog.openAlert({

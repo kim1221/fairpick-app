@@ -68,12 +68,23 @@ router.post('/anonymous', async (req, res) => {
  * 현재 세션 유효성 + 유형 확인(익명·linked 공통). /auth/me와 달리 toss_access_token을 요구하지 않아
  * 익명 세션 복원에도 쓸 수 있다.
  */
-router.get('/session', requireAuth, (req, res) => {
-  res.json({
-    id: req.user!.userId,
-    userKey: req.user!.userKey ?? null,
-    anonymous: req.user!.userKey == null,
-  });
+router.get('/session', requireAuth, async (req, res) => {
+  const userKey = req.user!.userKey ?? null;
+  let linked = userKey != null;
+  if (linked) {
+    // 토스 레벨 연결 끊기(언링크) 감지 — 언링크 콜백이 toss_access_token을 NULL로 지운다.
+    // NULL이면 우리 JWT가 아직 살아 있어도 linked가 아니다 → 재로그인 필요.
+    try {
+      const { rows } = await pool.query<{ toss_access_token: string | null }>(
+        'SELECT toss_access_token FROM users WHERE id = $1',
+        [req.user!.userId]
+      );
+      if (!rows[0]?.toss_access_token) linked = false;
+    } catch (err) {
+      console.warn('[auth/session] link check 실패(무시):', err);
+    }
+  }
+  res.json({ id: req.user!.userId, userKey, anonymous: !linked });
 });
 
 

@@ -143,12 +143,21 @@ export function buildCollectionCurationThemes(
 ): CollectionCurationTheme[] {
   const safeLimit = normalizeThemeLimit(limitPerTheme);
   const seenIds = new Set<string>();
+  const seenContent = new Set<string>();
   const uniqueActive = cards
     .map((card, index) => ({ card, index }))
     .filter(({ card }) => {
       if (seenIds.has(card.id)) return false;
       seenIds.add(card.id);
-      return getCollectionCardStatus(card, referenceDate) === 'active';
+      if (getCollectionCardStatus(card, referenceDate) !== 'active') return false;
+      // 제목+장소가 같은 데이터 중복(병합 안 된 다른 event_id)은 한 번만 노출한다.
+      const title = (card.title ?? '').trim().toLowerCase();
+      const contentKey = title ? `${title}|${(card.venue ?? '').trim().toLowerCase()}` : null;
+      if (contentKey) {
+        if (seenContent.has(contentKey)) return false;
+        seenContent.add(contentKey);
+      }
+      return true;
     });
   const recentFirst = [...uniqueActive].sort(
     (a, b) => openedAtValue(b.card) - openedAtValue(a.card) || a.index - b.index

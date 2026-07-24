@@ -310,6 +310,46 @@ export async function findCollectionAssistCandidates(
 }
 
 /** 세트 배지 개수 기준 메타 배지. 세트 배지만 세고 마일스톤끼리는 세지 않는다. */
+/**
+ * 완성(모든 슬롯 채움)됐는데 배지가 없는 세트에 배지+보너스를 소급 지급한다(자가치유, 멱등).
+ * 완성 open의 배지 발급이 순간 장애(배포 중 등)로 유실돼도 다음 컬렉션 조회에서 정정된다.
+ * 배지 PK(user, badge_key)가 멱등 앵커라 중복 지급 불가. 반환: 새로 지급한 배지 수.
+ */
+export async function backfillCompletedSetBadges(client: PoolClient, userId: string): Promise<number> {
+  const { rows: pending } = await client.query<{ set_id: string; slug: string; title: string; tier: string }>(
+    `SELECT cs.id AS set_id, cs.slug, cs.title, cs.tier
+     FROM collection_sets cs
+     WHERE (SELECT COUNT(*) FROM collection_set_slots s WHERE s.set_id = cs.id) > 0
+       AND (SELECT COUNT(*) FROM user_collection_progress p WHERE p.user_id = $1 AND p.set_id = cs.id)
+           >= (SELECT COUNT(*) FROM collection_set_slots s WHERE s.set_id = cs.id)
+       AND NOT EXISTS (
+         SELECT 1 FROM user_collection_badges b
+         WHERE b.user_id = $1 AND b.badge_key = 'set:' || cs.slug
+       )`,
+    [userId],
+  );
+  let granted = 0;
+  for (const set of pending) {
+    const { rowCount } = await client.query(
+      `INSERT INTO user_collection_badges (user_id, badge_key, set_id, tier, title)
+       VALUES ($1, $2, $3::uuid, $4, $5)
+       ON CONFLICT (user_id, badge_key) DO NOTHING`,
+      [userId, `set:${set.slug}`, set.set_id, set.tier, set.title],
+    );
+    if (rowCount === 1) {
+      granted += 1;
+      await client.query(
+        `UPDATE user_tickets
+         SET ticket_count = ticket_count + $2, total_earned = total_earned + $2, updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId, COLLECTION_COMPLETION_BONUS_TICKETS],
+      );
+    }
+  }
+  if (granted > 0) await awardSetCountMilestones(client, userId);
+  return granted;
+}
+
 async function awardSetCountMilestones(client: PoolClient, userId: string): Promise<void> {
   const { rows } = await client.query<{ count: number | string }>(
     `SELECT COUNT(*)::int AS count
