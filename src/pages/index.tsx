@@ -939,14 +939,6 @@ function HomePageInner() {
               />
             ) : null}
 
-            {/* CTA와 넉넉히 띄운 배너(오클릭 방지 여백 — 애드몹 정책) */}
-            {status === 'ready' ? (
-              <InlineAdSlot
-                adGroupId={AD_PLACEMENTS.homeBelowCta}
-                style={{ marginTop: 28, paddingHorizontal: 20 }}
-              />
-            ) : null}
-
             {status === 'ad_loading' ? (
               <View style={styles.loadingBox}>
                 <ActivityIndicator color={GOLD} />
@@ -1041,6 +1033,12 @@ function HomePageInner() {
             </Button>
           </View>
         ) : null}
+
+        {/* 배너 — 카드 공개 여부와 무관하게 항상 하단에 노출(오클릭 방지 여백). */}
+        <InlineAdSlot
+          adGroupId={AD_PLACEMENTS.homeBelowCta}
+          style={{ marginTop: 28, paddingHorizontal: 20 }}
+        />
 
         <View style={styles.footerSpace} />
       </ScrollView>

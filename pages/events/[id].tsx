@@ -816,12 +816,12 @@ function EventDetailPage() {
             </View>
             </>
           )}
-
-          {/* 배너 광고 — 상세 내용 끝(스크롤 내부). 네이티브 배너는 커서 고정하면 예매 CTA와 겹친다. */}
-          <InlineAdSlot adGroupId={AD_PLACEMENTS.eventDetailBottom} style={{ marginTop: 24 }} />
         </View>
 
       </ScrollView>
+
+      {/* 배너 광고 — 하단 고정(스크롤 밖, 예매 CTA 위). page/ScrollView가 flex라 자동으로 바닥에 붙는다. */}
+      <InlineAdSlot adGroupId={AD_PLACEMENTS.eventDetailBottom} />
 
       {/* 하단 CTA — 예매 버튼만 (ScrollView 아래 일반 View로 배치) */}
       {primaryCTALink && (
