@@ -40,6 +40,7 @@ import cardsRouter from './routes/cards';
 import visitsRouter from './routes/visits';
 import passportRouter from './routes/passport';
 import collectionsRouter from './routes/collections';
+import internalStatsRouter from './routes/internalStats';
 import * as recommender from './lib/recommender';
 import { calculateConsensusLight, calculateStructuralScore } from './lib/hotScoreCalculator';
 import { calculateDataCompleteness, DataCompletenessScore } from './lib/dataQuality';
@@ -437,6 +438,9 @@ app.use('/api/cards', cardsRouter);
 app.use('/api/visits', visitsRouter);
 app.use('/api/passport', passportRouter);
 app.use('/api/collections', collectionsRouter);
+
+// 감시 서버(miniapp-watch) 전용 읽기 전용 지표 — STATS_TOKEN Bearer 인증.
+app.use('/internal', internalStatsRouter);
 
 // ============================================================
 // Phase 3: 룰 기반 추천 시스템 API
